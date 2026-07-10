@@ -22,29 +22,41 @@ class RoomScreen extends StatefulWidget {
 }
 
 class _RoomScreenState extends State<RoomScreen> {
-  late final List<Player> _players;
+  late List<Player> _humanPlayers;
   late final List<ChatMessage> _messages;
-  final _categoryController = TextEditingController();
   final _chatController = TextEditingController();
   int _botCount = 1;
   bool _isReady = false;
+  String? _selectedCategory;
 
   @override
   void initState() {
     super.initState();
-    _players = List.of(buildMockPlayers(selfIsHost: widget.isHost));
+    _humanPlayers = List.of(buildMockPlayers(selfIsHost: widget.isHost));
     _messages = List.of(mockRoomChat);
   }
 
   @override
   void dispose() {
-    _categoryController.dispose();
     _chatController.dispose();
     super.dispose();
   }
 
+  List<Player> get _bots => List.generate(
+        _botCount,
+        (index) => Player(id: 'bot${index + 1}', nickname: 'AI 봇 ${index + 1}', isBot: true, isReady: true),
+      );
+
+  List<Player> get _allPlayers => [..._humanPlayers, ..._bots];
+
   void _toggleReady() {
-    setState(() => _isReady = !_isReady);
+    setState(() {
+      _isReady = !_isReady;
+      final index = _humanPlayers.indexWhere((p) => p.id == 'me');
+      if (index != -1) {
+        _humanPlayers[index] = _humanPlayers[index].copyWith(isReady: _isReady);
+      }
+    });
   }
 
   void _changeBotCount(int delta) {
@@ -66,10 +78,46 @@ class _RoomScreenState extends State<RoomScreen> {
     );
   }
 
+  bool get _canStartGame => widget.isHost && _allPlayers.every((p) => p.isReady);
+
+  Future<void> _handleLeaveRoom() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('방 나가기'),
+          content: const Text('정말 이 방에서 나가시겠어요?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('나가기'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('방 코드 ${widget.roomCode}')),
+      appBar: AppBar(
+        title: Text('방 코드 ${widget.roomCode}'),
+        actions: [
+          IconButton(
+            onPressed: _handleLeaveRoom,
+            icon: const Icon(Icons.logout),
+            tooltip: '나가기',
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ResponsiveCenter(
           maxWidth: 640,
@@ -78,19 +126,19 @@ class _RoomScreenState extends State<RoomScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SectionCard(
-                title: '참가자 (${_players.length}명)',
+                title: '참가자 (${_allPlayers.length}명)',
                 child: Column(
-                  children: _players.map((p) => _PlayerTile(player: p)).toList(),
+                  children: _allPlayers.map((p) => _PlayerTile(player: p)).toList(),
                 ),
               ),
               const SizedBox(height: 12),
               SectionCard(
-                title: 'AI 봇 수',
+                title: widget.isHost ? 'AI 봇 수' : 'AI 봇 수 (방장만 설정 가능)',
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     IconButton(
-                      onPressed: () => _changeBotCount(-1),
+                      onPressed: widget.isHost ? () => _changeBotCount(-1) : null,
                       icon: const Icon(Icons.remove_circle_outline),
                     ),
                     SizedBox(
@@ -102,7 +150,7 @@ class _RoomScreenState extends State<RoomScreen> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () => _changeBotCount(1),
+                      onPressed: widget.isHost ? () => _changeBotCount(1) : null,
                       icon: const Icon(Icons.add_circle_outline),
                     ),
                   ],
@@ -110,10 +158,19 @@ class _RoomScreenState extends State<RoomScreen> {
               ),
               const SizedBox(height: 12),
               SectionCard(
-                title: '카테고리',
-                child: AppTextField(
-                  controller: _categoryController,
-                  hintText: '예: 음식, 동물, 영화 ...',
+                title: widget.isHost ? '카테고리' : '카테고리 (방장만 설정 가능)',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: mockCategories.map((category) {
+                    return ChoiceChip(
+                      label: Text(category),
+                      selected: category == _selectedCategory,
+                      onSelected: widget.isHost
+                          ? (_) => setState(() => _selectedCategory = category)
+                          : null,
+                    );
+                  }).toList(),
                 ),
               ),
               const SizedBox(height: 12),
@@ -130,7 +187,7 @@ class _RoomScreenState extends State<RoomScreen> {
                   Expanded(
                     child: AppButton(
                       label: '게임 시작',
-                      onPressed: widget.isHost ? _startGame : null,
+                      onPressed: _canStartGame ? _startGame : null,
                     ),
                   ),
                 ],

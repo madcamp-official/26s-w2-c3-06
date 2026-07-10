@@ -6,6 +6,7 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/section_card.dart';
 import '../lobby/lobby_screen.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -72,8 +73,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleSignUp() {
-    UserSession.signInAsMember(nickname: '새 회원');
-    _enterApp();
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SignUpScreen()),
+    );
   }
 
   void _handleGoogleAuth() {

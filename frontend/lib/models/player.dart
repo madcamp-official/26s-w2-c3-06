@@ -13,4 +13,14 @@ class Player {
     this.isReady = false,
     this.isBot = false,
   });
+
+  Player copyWith({bool? isReady}) {
+    return Player(
+      id: id,
+      nickname: nickname,
+      isHost: isHost,
+      isReady: isReady ?? this.isReady,
+      isBot: isBot,
+    );
+  }
 }

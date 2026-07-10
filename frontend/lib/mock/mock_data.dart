@@ -28,24 +28,25 @@ const mockPublicRooms = <RoomSummary>[
   ),
 ];
 
-/// RoomScreen의 참가자 목록 더미 데이터.
+/// RoomScreen의 참가자(사람) 목록 더미 데이터. AI 봇은 방장이 지정한 수만큼 화면에서 동적으로 추가된다.
 /// [selfIsHost]가 true면 방을 새로 만든 경우(내가 방장), false면 코드로 입장한 경우다.
 List<Player> buildMockPlayers({required bool selfIsHost}) {
   if (selfIsHost) {
     return const [
-      Player(id: 'me', nickname: '나', isHost: true, isReady: true),
+      Player(id: 'me', nickname: '나', isHost: true),
       Player(id: 'p2', nickname: '토끼', isReady: true),
       Player(id: 'p3', nickname: '고양이'),
-      Player(id: 'bot1', nickname: 'AI 봇 1', isBot: true, isReady: true),
     ];
   }
   return const [
     Player(id: 'host1', nickname: '방장곰', isHost: true, isReady: true),
     Player(id: 'p2', nickname: '토끼', isReady: true),
     Player(id: 'me', nickname: '나'),
-    Player(id: 'bot1', nickname: 'AI 봇 1', isBot: true, isReady: true),
   ];
 }
+
+/// RoomScreen에서 고를 수 있는 카테고리 후보 더미 목록.
+const mockCategories = <String>['음식', '동물', '영화', '스포츠', '직업', '나라'];
 
 /// RoomScreen 대기실 채팅 더미 데이터.
 const mockRoomChat = <ChatMessage>[
@@ -76,6 +77,11 @@ const mockGameChat = <ChatMessage>[
     type: ChatMessageType.ai,
   ),
 ];
+
+/// 회원가입 중복 확인용 더미 목록 (이미 가입되어 있다고 가정하는 값들).
+const mockTakenEmails = <String>['test@example.com', 'liar@game.com'];
+const mockTakenNicknames = <String>['방장곰', '토끼', '고양이'];
+const mockTakenUserIds = <String>['admin', 'liarking'];
 
 /// VoteScreen에 표시할 투표 후보(자신 제외) 더미 목록.
 const mockVoteCandidates = <String>['방장곰', '토끼', '고양이', 'AI 봇 1'];

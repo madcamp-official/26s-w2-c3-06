@@ -9,6 +9,7 @@ class AppTextField extends StatelessWidget {
   final int maxLines;
   final TextInputType keyboardType;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
   final bool obscureText;
 
   const AppTextField({
@@ -20,6 +21,7 @@ class AppTextField extends StatelessWidget {
     this.maxLines = 1,
     this.keyboardType = TextInputType.text,
     this.onSubmitted,
+    this.onChanged,
     this.obscureText = false,
   });
 
@@ -31,6 +33,7 @@ class AppTextField extends StatelessWidget {
       maxLines: maxLines,
       keyboardType: keyboardType,
       onSubmitted: onSubmitted,
+      onChanged: onChanged,
       obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
