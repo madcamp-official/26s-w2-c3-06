@@ -20,6 +20,8 @@
 
 `dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
 
+`backend`와 `frontend` 브랜치 간에는 직접 merge하지 않는다. 각각의 작업은 `backend` → `dev` PR, `frontend` → `dev` PR로 `dev`를 거쳐 통합한다.
+
 # Branch Sync
 
 `dev`를 merge하기 전에 항상 `git fetch origin`을 실행하고, 로컬 `dev`가 `origin/dev`보다 뒤처져 있으면 `git pull origin dev`를 실행한다.
