@@ -24,8 +24,10 @@
 
 # Branch Sync
 
-`dev`를 merge하기 전에 항상 `git fetch origin`을 실행하고, 로컬 `dev`가 `origin/dev`보다 뒤처져 있으면 `git pull origin dev`를 실행한다.
+작업 중 어떤 브랜치에서든 로컬이 `origin/<branch>`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin <branch>`로 로컬을 최신화한다.
 
-`dev`가 수정될 때마다(커밋 후) git user identity(`git config user.name`)에 따라 branch를 선택하여 merge하고 push한다:
+`dev`를 merge하기 전에는 항상 위 확인을 먼저 수행한다.
+
+`dev`가 변경될 때마다 — 직접 커밋한 경우든, 위 pull로 인해 로컬 `dev`가 갱신된 경우든 — git user identity(`git config user.name`)에 따라 branch를 선택하여 merge하고 push한다:
 - `milleion`인 경우: `dev`를 `backend`에만 merge한 후 push
 - `ireyhye`인 경우: `dev`를 `frontend`에만 merge한 후 push
