@@ -22,16 +22,16 @@
 
 | 이름 | 학교 | GitHub | 역할 |
 |---|---|---|---|
-| 김혜리 |  |  |  |
-| 조준호 |  |  |  |
+| 김혜리 | 한양대 | [ireyhye](https://github.com/ireyhye) | Frontend |
+| 조준호 | KAIST | [milleion](https://github.com/milleion) | Backend |
 
 ---
 
 ## 선택 옵션
 
-- [ ] 실시간 인터랙션
-- [ ] LLM Wrapper
-- [ ] Cross-Platform
+- [x] 실시간 인터랙션
+- [x] LLM Wrapper
+- [x] Cross-Platform
 
 ---
 
