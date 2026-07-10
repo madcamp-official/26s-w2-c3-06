@@ -5,6 +5,10 @@ class GameResult {
   final String realWord;
   final String fakeWord;
   final bool citizensWin;
+  final String summary;
+
+  /// 라이어가 역전승을 시도하며 입력한 답. 역전승 시도가 없었다면 null.
+  final String? liarGuess;
 
   const GameResult({
     required this.category,
@@ -12,5 +16,7 @@ class GameResult {
     required this.realWord,
     required this.fakeWord,
     required this.citizensWin,
+    required this.summary,
+    this.liarGuess,
   });
 }

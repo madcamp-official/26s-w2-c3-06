@@ -77,6 +77,9 @@ const mockGameChat = <ChatMessage>[
   ),
 ];
 
+/// VoteScreen에 표시할 투표 후보(자신 제외) 더미 목록.
+const mockVoteCandidates = <String>['방장곰', '토끼', '고양이', 'AI 봇 1'];
+
 /// ResultScreen에 표시할 더미 게임 결과.
 const mockGameResult = GameResult(
   category: '과일',
@@ -84,4 +87,5 @@ const mockGameResult = GameResult(
   realWord: '사과',
   fakeWord: '배',
   citizensWin: true,
+  summary: '투표로 라이어를 지목하고 정체를 밝혔습니다.',
 );

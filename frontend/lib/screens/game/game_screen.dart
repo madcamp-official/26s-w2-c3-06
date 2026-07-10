@@ -6,7 +6,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
 import '../../widgets/responsive_center.dart';
-import '../result/result_screen.dart';
+import '../vote/vote_screen.dart';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -45,7 +45,7 @@ class _GameScreenState extends State<GameScreen> {
 
   void _goToVotePhase() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ResultScreen()),
+      MaterialPageRoute(builder: (_) => const VoteScreen()),
     );
   }
 

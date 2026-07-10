@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../../mock/mock_data.dart';
+import '../../models/game_result.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/section_card.dart';
 import '../lobby/lobby_screen.dart';
 
 class ResultScreen extends StatelessWidget {
-  const ResultScreen({super.key});
+  final GameResult? result;
+
+  const ResultScreen({super.key, this.result});
 
   void _handleRestart(BuildContext context) {
-    // Result -> Game 화면을 걷어내고 대기 중이던 RoomScreen으로 되돌아간다.
-    final navigator = Navigator.of(context);
-    navigator.pop();
-    navigator.pop();
+    // Game/Vote/LiarGuess/Result 화면을 모두 걷어내고 대기 중이던 RoomScreen으로 되돌아간다.
+    Navigator.of(context).popUntil((route) => route.settings.name == 'room');
   }
 
   void _handleBackToLobby(BuildContext context) {
@@ -25,7 +26,7 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final result = mockGameResult;
+    final result = this.result ?? mockGameResult;
     return Scaffold(
       appBar: AppBar(title: const Text('결과')),
       body: SafeArea(
@@ -49,6 +50,8 @@ class ResultScreen extends StatelessWidget {
                           result.citizensWin ? '시민 팀 승리!' : '라이어 승리!',
                           style: Theme.of(context).textTheme.headlineSmall,
                         ),
+                        const SizedBox(height: 8),
+                        Text(result.summary, textAlign: TextAlign.center),
                       ],
                     ),
                   ),
@@ -76,6 +79,28 @@ class ResultScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (result.liarGuess != null) ...[
+                  const SizedBox(height: 12),
+                  SectionCard(
+                    title: '라이어의 역전승 시도',
+                    child: Row(
+                      children: [
+                        Icon(
+                          result.citizensWin ? Icons.cancel_outlined : Icons.check_circle_outline,
+                          color: result.citizensWin
+                              ? Theme.of(context).colorScheme.error
+                              : Theme.of(context).colorScheme.secondary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${result.liarNickname}님이 제출한 답: ${result.liarGuess}',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 AppButton(label: '다시하기', onPressed: () => _handleRestart(context)),
                 const SizedBox(height: 12),

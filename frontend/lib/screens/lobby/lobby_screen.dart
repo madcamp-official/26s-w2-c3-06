@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../mock/mock_data.dart';
 import '../../models/room_summary.dart';
+import '../../services/user_session.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/section_card.dart';
+import '../../widgets/user_avatar.dart';
+import '../profile/profile_screen.dart';
 import '../room/room_screen.dart';
 
 class LobbyScreen extends StatefulWidget {
@@ -38,7 +41,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   void _openRoom({required String code, required bool isHost}) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RoomScreen(roomCode: code, isHost: isHost)),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'room'),
+        builder: (_) => RoomScreen(roomCode: code, isHost: isHost),
+      ),
     );
   }
 
@@ -52,10 +58,29 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _openRoom(code: code, isHost: false);
   }
 
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    );
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('로비')),
+      appBar: AppBar(
+        title: const Text('로비'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: GestureDetector(
+              onTap: _openProfile,
+              child: UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 18),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ResponsiveCenter(
           maxWidth: 640,
