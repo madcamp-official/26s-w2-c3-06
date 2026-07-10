@@ -19,3 +19,7 @@
 # PR Policy
 
 `dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
+
+# Branch Sync
+
+`dev`가 수정될 때마다(커밋 후) `frontend`, `backend` 브랜치에 바로 merge하고 각각 원격에 push한다.

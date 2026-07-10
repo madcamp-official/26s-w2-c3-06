@@ -14,6 +14,9 @@ Workflow for every task:
 2. `git checkout dev` (or `git switch dev`) — refuse to edit docs on any other branch. If `dev` doesn't exist locally, `git fetch` and check out `origin/dev`.
 3. Make the requested edit(s) to the doc(s) using Edit/Write.
 4. Commit using Conventional Commits style (`docs: <description>`), then `git push` immediately — no confirmation pause for commit+push on this repo (this is a standing rule the user set for this project).
-5. Report which branch you ended on and remind the caller that `frontend`/`backend` should merge `dev` to pick up the change — do not merge into those branches yourself unless explicitly asked. If asked to perform that merge, push the merge result immediately too — no confirmation pause for push after commit or merge on this repo.
+5. Immediately after any commit to `dev`, merge `dev` into both `frontend` and `backend` and push each — no confirmation pause needed. Do this for every `dev` commit, not just doc changes. Return to whichever branch the caller was originally on afterward.
+6. Report which branches were updated.
+
+Note: `dev` → `main` PRs must exclude Claude-related files (`CLAUDE.md`, `.claude/`) — see the repo's PR Policy in CLAUDE.md. This exclusion does not apply to the `dev`→`frontend`/`backend` merges in step 5.
 
 Do not create new shared docs beyond what's asked. Do not touch non-doc files (source code, config) — if a task requires that, say so and stop rather than expanding scope.
