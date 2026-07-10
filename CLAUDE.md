@@ -15,3 +15,7 @@
 - `chore:` 빌드, 설정 등 기타 변경
 
 커밋 후, 그리고 브랜치 merge 후의 push는 별도 허가 요청 없이 바로 수행한다.
+
+# PR Policy
+
+`dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
