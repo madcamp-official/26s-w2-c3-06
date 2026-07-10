@@ -52,8 +52,12 @@ backend/
     llm/client.ts             # Anthropic SDK 초기화
     llm/wrapper.ts            # generateWordPair / generateBotTurn / generateTurnComment
     llm/prompts.ts
-    db/client.ts              # 로컬 DB(Postgres 등) 연결 및 유저 프로필/승패 기록 관리 (stretch)
+    db/client.ts              # Prisma ORM 클라이언트, 유저 프로필/승패 기록 관리 (stretch)
     types.ts
+  prisma/
+    schema.prisma             # Prisma 데이터 모델 정의
+    migrations/               # DB 마이그레이션 파일들
+  Dockerfile                  # 멀티스테이지: Flutter 빌드 → Node 실행
   package.json / tsconfig.json / .env.example
 
 frontend/
@@ -237,6 +241,51 @@ interface LiarGameLLM {
 11. `generateTurnComment` 호출 인자에 실제 라이어 정체가 섞여 들어가지 않는지 로그로 확인
 12. 호스트 연결 종료 시 방 정리 및 공개방 목록에서도 제거되는지 확인
 13. `backend`→`frontend` 병합 후 클린 체크아웃에서 두 디렉터리가 충돌 없이 공존하며 각자 정상 실행되는지 확인
+
+## 배포 및 DB 운영
+
+### 배포 플랫폼
+**Railway** — 서버리스 대비 상태 보유(in-memory 방 정보)가 필요하므로 컨테이너 호스팅 선택.
+
+### 서비스 구성
+백엔드(Node/Express)와 프론트엔드(Flutter Web 빌드 결과물)를 **Railway 서비스 1개로 통합 배포**한다. 처음엔 2개로 분리하는 대안도 검토했으나(프론트는 CDN/정적 호스팅, 백엔드는 별도), 백엔드가 게임 상태와 로비 방 정보를 메모리에 들고 있어 서비스 분리 시 상태 동기화가 복잡해지므로, 1서비스 통합으로 결정.
+
+### 빌드 방식
+Dockerfile 멀티스테이지 빌드:
+1. **1단계(Builder)**: Flutter SDK 이미지에서 `flutter build web`을 실행해 정적 파일(`build/web/`) 생성
+2. **2단계(Runtime)**: Node 이미지에서 1단계 결과물을 복사한 후 Express 서버 실행
+
+Express에는 `express.static()` 미들웨어와 SPA catch-all 라우트를 추가해, 백엔드가 프론트 정적 파일을 함께 서빙한다. 이를 통해 프론트엔드 라우팅과 API 요청이 단일 origin에서 처리되므로 CORS 설정이 단순해짐.
+
+**빌드 타이밍**: 매 배포마다 최신 프론트 코드를 자동으로 반영하는 방식(Dockerfile에서 빌드)을 택했다. 로컬에서 미리 빌드한 정적 파일(`build/web/`)을 Git 커밋해두는 대안도 검토했으나, 배포 자동화(push to dev → Railway 자동 배포) 편의를 우선해 현재 방식으로 결정.
+
+### 추적 브랜치(Deployment Tracking)
+이 통합 배포이므로 `backend`와 `frontend` 코드가 한 브랜치에 함께 있어야 한다. 개발 중에는:
+- **`dev` 브랜치 추적**: PR로 백엔드/프론트 변경이 자주 `dev`에 반영되므로, Railway가 `dev`를 자동 추적하도록 설정. 최신 코드가 지속적으로 배포되는 개발 환경(staging 역할).
+- **`main` 브랜치로 전환**: 제출/데모 직전에 최종 검토 후, Railway의 추적 브랜치를 `dev`에서 `main`으로 변경. 이후 제출/그레이딩 중에는 안정적인 `main` 버전이 배포됨.
+
+### DB: PostgreSQL
+
+#### 로컬 개발
+로컬 머신에 직접 설치한 Postgres(`localhost:5432` 등)를 사용.
+
+#### 배포 환경
+**Railway의 매니지드 Postgres 플러그인** 사용. Railway Postgres는:
+- DB 서버(컴퓨트)와 데이터가 저장되는 Volume(영구 디스크)이 분리
+- 백엔드 서비스 재배포 시에도 Volume이 유지되므로 데이터 손실 없음
+- 연결 문자열을 Railway가 자동으로 `DATABASE_URL` 환경변수로 주입
+
+### DB 연결 관리
+연결 문자열을 `DATABASE_URL` 환경변수로 완전히 분리:
+- **로컬**: `.env` 파일에 `DATABASE_URL=postgresql://user:password@localhost:5432/liar_game` 설정
+- **배포**: Railway가 Postgres 플러그인 생성 시 자동으로 `DATABASE_URL` 주입
+- 코드 전환: 환경변수만으로 처리되므로 소스 코드 변경 없음
+
+### ORM / DB 마이그레이션
+**Prisma** 사용:
+- `schema.prisma`로 테이블 및 관계 정의, 타입 안전한 쿼리 클라이언트 자동 생성
+- **로컬 스키마 적용**: `prisma migrate dev` — 스키마 변경 시 마이그레이션 파일 자동 생성, 로컬 DB에 즉시 적용
+- **배포 시 마이그레이션**: Railway에서 배포 직전 또는 startup hook에서 `prisma migrate deploy` 실행 — `migrations/` 폴더의 모든 마이그레이션을 Railway Postgres에 순차 적용, 스키마 동기화 완료
 
 ### 핵심 파일
 - backend/src/socket/handlers.ts
