@@ -22,4 +22,8 @@
 
 # Branch Sync
 
-`dev`가 수정될 때마다(커밋 후) `frontend`, `backend` 브랜치에 바로 merge하고 각각 원격에 push한다.
+`dev`를 merge하기 전에 항상 `git fetch origin`을 실행하고, 로컬 `dev`가 `origin/dev`보다 뒤처져 있으면 `git pull origin dev`를 실행한다.
+
+`dev`가 수정될 때마다(커밋 후) git user identity(`git config user.name`)에 따라 branch를 선택하여 merge하고 push한다:
+- `milleion`인 경우: `dev`를 `backend`에만 merge한 후 push
+- `ireyhye`인 경우: `dev`를 `frontend`에만 merge한 후 push
