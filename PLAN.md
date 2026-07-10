@@ -1,0 +1,200 @@
+# AI 라이어게임 (Liar Game) — 구현 계획
+
+## Context
+
+`26s-w2-c3-06`는 2인 1팀 madcamp 공통과제 저장소로, 현재 `README.md`/`CLAUDE.md` 템플릿만 있고 실제 코드는 전혀 없는 그린필드 상태다 (README 체크박스는 실시간 인터랙션/LLM Wrapper/Cross-Platform 세 개 다 이미 체크됨). 팀은 이 세 옵션을 만족하는 산출물로 **AI가 개입하는 라이어게임**을 만들기로 했다.
+
+**용어 계층**: 방(Room) 안에서 게임(Game)을 여러 번 할 수 있고, 하나의 게임 안에서 라운드(Round)를 여러 번 돌 수 있다. 라운드란 모든 참가자가 자기가 받은 제시어에 대해 한 턴씩 설명하는 것. MVP에서는 게임 하나당 라운드 1번만 돈다 — 라운드 재시작(다시 설명 라운드를 도는) 기능은 나중에 시간이 되면 추가할 스트레치 기능.
+
+**게임 규칙**: 게임 시작 시 방장이 (1) 카테고리를 직접 입력하거나 "AI 랜덤 생성"을 요청하고, (2) AI 봇을 몇 명 추가할지 직접 선택한다 (인원이 부족해서 자동으로 채우는 게 아니라 방장의 명시적 선택). 참가자(사람+봇) 중 한 명(라이어)은 **자신이 라이어라는 사실 자체를 모른 채**, 다수가 받는 진짜 제시어와 비슷하지만 다른 가짜 제시어를 받는다. 라운드에서 각자 받은 제시어를 직접 말하지 않고 설명하고, 투표(익명)로 라이어를 지목한다. 지목된 사람이 실제 라이어였다면, 진짜 제시어를 맞히면 역전승하는 기회를 준다.
+
+AI는 세 지점에 개입해 "LLM Wrapper" 요소를 실질적으로 드러낸다:
+1. 방장이 지정한(또는 AI 랜덤 생성 요청한) 카테고리를 바탕으로 진짜/가짜 제시어 쌍을 LLM이 생성
+2. 방장이 추가하기로 선택한 수만큼 AI 봇이 플레이어로 참여해 자연스럽게 설명을 생성 (봇도 자신이 라이어인지는 모름 — 사람과 동일 조건)
+3. **매 턴마다**(라운드 종료 후가 아니라) 누군가 설명을 제출할 때마다 AI가 그 설명에 대해 일부러 다른 플레이어들을 헷갈리게 만드는 "분탕질" 코멘트를 단다 — 라운드 종료 후 별도의 "AI 판정관" 결과 공개는 없음, 이 상시 분탕질 코멘트가 유일한 AI 개입 지점이다.
+
+**방(Room) UI는 그룹 채팅 형식**이다 — 턴 설명, AI 분탕질 코멘트, 시스템 안내(투표 결과 등), 자유 채팅이 모두 하나의 채팅 피드에 흐른다. 이 채팅은 **새로운 게임이 시작될 때 초기화**되지만, 게임이 끝나고 결과가 나온 뒤에도 초기화되지 않아 참가자들이 끝난 게임에 대해 계속 대화할 수 있다.
+
+방은 두 종류: **공개(public)** — 로비의 공개방 목록에서 선택해 입장, **비공개(private)** — **4자리 숫자 코드**를 공유받은 사람만 입장.
+
+기술 스택은 사용자가 정한 것(Flutter 프론트, 실시간=Socket.IO 온라인 방)과 이번에 추천하는 것(백엔드=Node/Express, 인증+DB=Firebase Auth+Firestore, LLM=Anthropic Claude)을 조합했다. "Cross-Platform"은 Flutter로 iOS/Android/Web 단일 코드베이스를 만들면서 자연스럽게 충족된다.
+
+## 확정된 제품/기술 결정
+
+- **프론트엔드**: Flutter — iOS/Android/Web 단일 코드베이스. `socket_io_client` 패키지로 Socket.IO 서버와 통신.
+- **실시간**: Socket.IO 기반 온라인 방. 공개방은 로비의 방 목록에서 선택 입장, 비공개방은 4자리 코드 입력으로 입장.
+- **백엔드: Node.js + Express + Socket.IO (추천)** — Socket.IO 1st-party 구현이 Node라 가장 안정적. 대안으로 FastAPI + `python-socketio`도 유효하나 기본 추천은 Node.
+- **인증/DB: Firebase Authentication + Firestore (추천)**
+  - FlutterFire가 Flutter SDK를 1급 지원해 로그인 구현 비용이 크게 줄어듦.
+  - 백엔드는 소켓 handshake 시 `firebase-admin`으로 ID 토큰만 검증.
+  - Firestore는 NoSQL(문서형)이지 관계형이 아닐 뿐, 이번 프로젝트가 필요로 하는 단순한 영구 데이터(승패 기록, 프로필)에는 충분히 적합함. 방/게임/라운드 같은 휘발성 상태는 Node 서버 **인메모리**에 두고, 승패 기록처럼 남아야 하는 데이터만 Firestore에 쓴다.
+- **LLM: Anthropic Claude API (추천)**
+  - 세 함수(제시어 쌍 생성, 봇 턴 생성, 매 턴 분탕질 코멘트) 모두 빈도가 높거나 지연에 민감 → **Claude Haiku 4.5**로 시작.
+  - LLM 호출부는 provider(회사)와 모델을 나중에 쉽게 바꿀 수 있도록 얇은 인터페이스로만 감싸고, 과한 멀티프로바이더 프레임워크는 만들지 않음.
+
+## 저장소 구조
+
+`dev` 브랜치는 문서 전용이며 커밋마다 `frontend`/`backend`에 자동 merge된다. 이 관례를 유지하기 위해 코드는 `dev`가 아니라 각 서비스 브랜치에 직접, 자기 소유의 최상위 디렉터리로 작성한다:
+
+- `backend` 브랜치 → `backend/` (Node/Express/Socket.IO)
+- `frontend` 브랜치 → `frontend/` (Flutter)
+
+두 브랜치가 겹치지 않는 경로만 건드리므로 이후 통합(데모/그레이딩용 단일 체크아웃)이 conflict 없이 가능하다.
+
+```
+backend/
+  src/
+    index.ts                 # Express + Socket.IO 부트스트랩
+    socket/handlers.ts        # 이벤트 핸들러 등록
+    socket/middleware.ts      # Firebase 토큰 검증 (handshake)
+    game/roomManager.ts       # 인메모리 방 상태 저장소 (4자리 코드 발급/충돌회피, 공개방 목록)
+    game/gameEngine.ts        # 게임/라운드 상태 머신, 턴 순서, 진짜/가짜 제시어 배정, 채팅 피드 emit
+    llm/client.ts             # Anthropic SDK 초기화
+    llm/wrapper.ts            # generateWordPair / generateBotTurn / generateTurnComment
+    llm/prompts.ts
+    db/firestore.ts           # 승패 기록 등 영구 데이터 (stretch)
+    types.ts
+  package.json / tsconfig.json / .env.example
+
+frontend/
+  lib/
+    main.dart
+    screens/
+      login_screen.dart
+      lobby_screen.dart        # 탭: 공개방 목록 / 코드로 입장 / 방 만들기
+      room_screen.dart          # 채팅 피드 + 게임 페이즈별 하단 컨텍스트 패널(설정/턴입력/투표/역전승 시도)
+    services/socket_service.dart
+    services/auth_service.dart
+    state/room_provider.dart      # Riverpod
+    state/auth_provider.dart
+    models/ (room.dart, game.dart, round.dart, chat_message.dart)
+  pubspec.yaml
+```
+
+방의 메인 화면(`RoomScreen`)은 그룹 채팅 UI 하나로 통일하고, 현재 게임 페이즈(대기/설정/설명/토론/투표/결과)에 따라 하단에 다른 입력 패널만 갈아끼우는 구조로 간다 — 화면을 여러 개로 쪼개지 않아 채팅이 "끊기지 않는" 느낌을 유지할 수 있다.
+
+## Socket.IO 이벤트 계약 (MVP)
+
+단일 기본 네임스페이스 + Socket.IO **room**(`socket.join(roomCode)`)으로 충분.
+
+**Client → Server**:
+- `room:create` `{ nickname, visibility: 'public'|'private' }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성)
+- `room:listPublic` `{}` — 로비 진입 시 공개방 목록 요청
+- `room:join` `{ roomCode, nickname }`
+- `room:leave` `{}`
+- `chat:send` `{ text }` — 언제든 자유 채팅
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용. `category: null`이면 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
+- `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
+- `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
+
+**Server → Client**:
+- `room:created`/`room:joined`, `room:publicList` `{ rooms: [{roomCode, playerCount}] }`, `room:playerListUpdated`, `room:error`
+- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 분탕질 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
+- `game:started` `{ gameNumber }` — 클라이언트도 채팅 뷰 초기화
+- `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
+- `turn:started` `{ playerId, timeLimitSec }`
+- `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
+- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord }`
+- `liar:guessPrompt` `{ timeLimitSec }` — 지목된 사람의 소켓에만
+- `round:finalResult` `{ liarGuessCorrect, winner: 'liar'|'citizens' }`
+- `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
+- `room:closed`
+
+서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
+
+## 데이터 모델 (인메모리, 과도한 정규화 없이)
+
+```ts
+interface Player { id: string; nickname: string; isBot: boolean; isHost: boolean; connected: boolean; }
+
+interface Round {
+  roundNumber: number;
+  playerOrder: string[];
+  turns: { playerId: string; text: string }[];
+  votes: Record<string, string>;   // 서버 전용, 클라이언트로 절대 전송 안 함
+  votedOutId?: string;
+  wasLiar?: boolean;
+  liarGuess?: string;
+  liarGuessCorrect?: boolean;
+  winner?: 'liar' | 'citizens';
+}
+
+interface GameState {
+  gameNumber: number;
+  category: string;
+  realWord: string;
+  liarWord: string;
+  liarId: string;               // 서버 전용 비밀, 라이어 본인에게도 전송 안 함
+  participantIds: string[];     // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
+  aiBotCount: number;
+  phase: 'setup'|'describing'|'discussion'|'voting'|'resolution'|'liarGuess'|'ended';
+  usedWordsThisGame: string[];
+  rounds: Round[];               // MVP: 길이 1. 추후 스트레치: 라운드 재시작 지원 시 길이 증가
+}
+
+interface ChatMessage {
+  id: string;
+  senderId: string | 'ai' | 'system';
+  type: 'chat' | 'turnDescription' | 'aiComment' | 'system';
+  text: string;
+  timestamp: number;
+}
+
+interface RoomState {
+  roomCode: string;          // 4자리 숫자 문자열, 예: "4821"
+  hostId: string;
+  visibility: 'public' | 'private';
+  players: Player[];
+  chatLog: ChatMessage[];    // 방 존재 동안 유지, 새 게임 시작 시에만 초기화
+  currentGame: GameState | null;
+  gameHistory: GameState[];  // 지난 게임들 (참고용)
+  createdAt: number;
+}
+```
+
+## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
+
+```ts
+interface LiarGameLLM {
+  generateWordPair(category: string | null, usedWords: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
+  generateBotTurn(ctx: BotTurnContext): Promise<string>;
+  generateTurnComment(ctx: TurnCommentContext): Promise<string>;
+}
+```
+- 세 함수 모두 Haiku 4.5로 시작. `category`가 null이면 카테고리 자체도 LLM이 생성.
+- `generateWordPair` 프롬프트 핵심: 같은 카테고리 안에서 연관성은 있지만 다른 두 단어를 생성 (예: 카테고리 "동물" → realWord "사자", liarWord "호랑이") — 너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아짐.
+- `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건).
+- `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 **의도적으로 헷갈리게 만드는** 코멘트를 생성. 실제 라이어가 누구인지는 절대 이 프롬프트에 입력하지 않음 — 정답을 아는 채로 분탕질하면 너무 정교해져 게임이 망가지므로, 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다.
+
+## MVP 제외 (stretch)
+
+- 게임 내 라운드 재시작(여러 라운드 반복)
+- Firestore 승패 기록 저장
+- `room:rejoin` 재접속 지원
+- 방별 Socket.IO 네임스페이스
+- 다중 LLM 프로바이더 동시 지원 (인터페이스만 교체 가능하게 열어둠)
+
+## 검증 계획
+
+1. 백엔드 단독 실행 후 소켓 연결 로그 확인, `room:create`(public/private 각각, 4자리 코드 발급 확인)·`room:listPublic`·`room:join` 왕복 확인
+2. Flutter 로그인 → Firebase ID 토큰 handshake 검증 성공/실패(잘못된 토큰) 케이스 확인
+3. `flutter run -d chrome`에서 공개방 생성 → 목록에 뜨는지 확인
+4. 별도 시뮬레이터에서 해당 공개방을 목록에서 선택 입장 + 비공개방은 4자리 코드로 입장, 두 경로 모두 확인
+5. 호스트가 카테고리 직접 입력 / "AI 랜덤 생성" 두 경로, 그리고 AI 봇 추가 인원수 지정까지 게임 시작으로 이어지는지 확인
+6. 한 게임을 끝까지 플레이 — 매 턴 설명 제출 직후 채팅 피드에 분탕질 코멘트가 다른 색/타입으로 표시되고, 매번 다른 코멘트인지 확인
+7. 라이어 역할을 받은 클라이언트(사람/봇 각각 최소 1회)가 자신이 라이어라는 표시를 전혀 받지 않고 배정된 단어만 보이는지 확인
+8. 투표로 실제 라이어가 지목된 라운드에서 `liar:guessPrompt`가 오고, 정답 맞히면 `winner: 'liar'`로 뒤집히는지 확인
+9. 투표 진행 중/후 어떤 클라이언트도 개별 투표 선택(누가 누구를 찍었는지)을 수신하지 않는지 네트워크 로그로 확인
+10. 게임 종료 후 채팅이 그대로 남아 계속 대화 가능한지, 호스트가 새 게임을 시작하면 그 시점에만 채팅이 초기화되는지 확인
+11. `generateTurnComment` 호출 인자에 실제 라이어 정체가 섞여 들어가지 않는지 로그로 확인
+12. 호스트 연결 종료 시 방 정리 및 공개방 목록에서도 제거되는지 확인
+13. `backend`→`frontend` 병합 후 클린 체크아웃에서 두 디렉터리가 충돌 없이 공존하며 각자 정상 실행되는지 확인
+
+### 핵심 파일
+- backend/src/socket/handlers.ts
+- backend/src/game/gameEngine.ts
+- backend/src/game/roomManager.ts
+- backend/src/llm/wrapper.ts
+- frontend/lib/services/socket_service.dart
+- frontend/lib/state/room_provider.dart
