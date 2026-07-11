@@ -15,7 +15,6 @@ model User {
   nickname    String   @unique
   avatarUrl   String? // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용.
   isAnonymous Boolean  @default(true) // 게스트 구분 (리더보드 필터링 · 30일 정리 판별)
-  createdAt   DateTime @default(now())
   lastActive  DateTime @default(now()) // 게스트 cleanup(마지막 활동 30일 경과) 기준
 
   plays                  GamePlay[] // 참여한 게임들 (전적의 source of truth)
