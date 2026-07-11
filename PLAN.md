@@ -25,6 +25,7 @@ AI는 세 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 - [인증/유저 관리 흐름](#인증유저-관리-흐름)
 - [데이터 모델 (인메모리, 과도한 정규화 없이)](#데이터-모델-인메모리-과도한-정규화-없이)
 - [DB 스키마 (영구 저장: 유저·전적·친구)](#db-스키마-영구-저장-유저전적친구)
+- [REST API (전적·친구)](#rest-api-전적친구)
 - [LLM 래퍼 (`backend/src/llm/wrapper.ts`)](#llm-래퍼-backendsrcllmwrapperts)
 - [백엔드 구현 현황 (backend 브랜치)](#백엔드-구현-현황-backend-브랜치)
 - [프론트-백엔드 연결 정합성](#프론트-백엔드-연결-정합성)
@@ -113,7 +114,10 @@ frontend/
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
 
 **Server → Client**:
-- `room:created`/`room:joined`, `room:publicList` `{ rooms: [{roomCode, playerCount}] }`, `room:playerListUpdated`, `room:error`
+- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`)
+- `room:publicList` `{ rooms: [{roomCode, playerCount}] }`
+- `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 시 방 전체에 브로드캐스트
+- `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber }` — 클라이언트도 채팅 뷰 초기화
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
@@ -291,6 +295,22 @@ enum FriendshipStatus {
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
 **정리(cleanup)와의 정합성**: 익명 계정 삭제 시 `User` 행을 지우면 `onDelete: Cascade`로 해당 유저의 `GamePlay`·`Friendship`이 함께 삭제된다(별도 정리 코드 불필요). Firebase Auth 삭제는 기존 `firebase-admin` 스케줄 작업이 담당.
+
+## REST API (전적·친구)
+
+전적 조회·친구 관리는 실시간성이 필요 없는 CRUD라 Socket.IO 이벤트 계약이 아니라 **Express REST**로 구현했다(`backend/src/http/`). 모든 엔드포인트는 `Authorization: Bearer <Firebase ID Token>` 헤더 필수(`requireAuth` 미들웨어) — 서비스 계정 키가 없는 로컬 dev 환경에서는 소켓과 동일하게 토큰 검증을 생략하는 fallback이 적용된다.
+
+**전적** (`/api/users`, `backend/src/http/statsRoutes.ts`):
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate }` (승률은 0~1 float, 분모 0이면 `null`)
+- `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
+
+**친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
+- `POST /api/friends/requests` `{ addresseeUid }` → 201 `Friendship` — 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
+- `GET /api/friends/requests` — 내가 받은 대기 요청 목록. 응답 `{ requests: [{ ...Friendship, requester: { uid, nickname, avatarIndex } }] }`
+- `POST /api/friends/requests/:id/accept` → 200 `Friendship`(status: accepted)
+- `POST /api/friends/requests/:id/decline` → 204 (행 삭제, 재요청 가능)
+- `GET /api/friends` — 수락된 친구 목록. 응답 `{ friends: [{ uid, nickname, avatarIndex }] }`
+- `DELETE /api/friends/:uid` → 204 (친구 해제)
 
 ## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
 
