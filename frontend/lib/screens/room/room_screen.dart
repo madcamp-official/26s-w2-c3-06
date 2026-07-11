@@ -9,6 +9,7 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/section_card.dart';
+import '../../widgets/user_avatar.dart';
 import '../game/game_screen.dart';
 
 class RoomScreen extends StatefulWidget {
@@ -109,7 +110,24 @@ class _RoomScreenState extends State<RoomScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('방 코드 ${widget.roomCode}'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('대기실'),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                widget.roomCode,
+                style: const TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: _handleLeaveRoom,
@@ -128,7 +146,11 @@ class _RoomScreenState extends State<RoomScreen> {
               SectionCard(
                 title: '참가자 (${_allPlayers.length}명)',
                 child: Column(
-                  children: _allPlayers.map((p) => _PlayerTile(player: p)).toList(),
+                  children: _allPlayers
+                      .asMap()
+                      .entries
+                      .map((e) => _PlayerTile(player: e.value, colorIndex: e.key))
+                      .toList(),
                 ),
               ),
               const SizedBox(height: 12),
@@ -238,16 +260,20 @@ class _RoomScreenState extends State<RoomScreen> {
 
 class _PlayerTile extends StatelessWidget {
   final Player player;
+  final int colorIndex;
 
-  const _PlayerTile({required this.player});
+  const _PlayerTile({required this.player, required this.colorIndex});
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: CircleAvatar(
-        child: Icon(player.isBot ? Icons.smart_toy : Icons.person),
-      ),
+      leading: player.isBot
+          ? const CircleAvatar(
+              backgroundColor: AppColors.textSecondary,
+              child: Icon(Icons.smart_toy, color: Colors.white, size: 18),
+            )
+          : UserAvatar(avatarIndex: colorIndex, radius: 18),
       title: Row(
         children: [
           Text(player.nickname),

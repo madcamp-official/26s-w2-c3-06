@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../services/user_session.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
-import '../../widgets/section_card.dart';
 import '../lobby/lobby_screen.dart';
 import 'signup_screen.dart';
 
@@ -86,13 +86,19 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: ResponsiveCenter(
-            maxWidth: 400,
-            child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
+      body: Stack(
+        children: [
+          const _DecorBlob(alignment: Alignment.topLeft, color: AppColors.decorBlobPurple),
+          const _DecorBlob(alignment: Alignment.bottomRight, color: AppColors.decorBlobPeach),
+          SafeArea(
+            child: SingleChildScrollView(
+              child: ResponsiveCenter(
+                maxWidth: 400,
+                child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -102,33 +108,40 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 96),
-        Icon(
-          Icons.theater_comedy,
-          size: 72,
-          color: Theme.of(context).colorScheme.primary,
+        Center(
+          child: Container(
+            width: 88,
+            height: 88,
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.theater_comedy, size: 40, color: Colors.white),
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
         Text(
-          '라이어 게임',
+          '라이어게임',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineMedium,
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
         Text(
           'AI가 개입하는 라이어 게임에 오신 것을 환영합니다',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 40),
         AppButton(
-          label: '로그인 / 회원가입',
+          label: '이메일로 시작하기',
           onPressed: () => setState(() => _showAuthOptions = true),
         ),
-        const SizedBox(height: 12),
-        AppButton(
-          label: '게스트로 계속하기',
-          variant: AppButtonVariant.outlined,
-          onPressed: _handleGuestContinue,
+        const SizedBox(height: 16),
+        Center(
+          child: TextButton(
+            onPressed: _handleGuestContinue,
+            child: const Text('게스트로 계속하기'),
+          ),
         ),
       ],
     );
@@ -139,21 +152,45 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 24),
-        Row(
-          children: [
-            IconButton(
-              onPressed: () => setState(() => _showAuthOptions = false),
-              icon: const Icon(Icons.arrow_back),
-            ),
-            Text('로그인 / 회원가입', style: Theme.of(context).textTheme.titleLarge),
-          ],
+        IconButton(
+          onPressed: () => setState(() => _showAuthOptions = false),
+          icon: const Icon(Icons.arrow_back),
         ),
-        const SizedBox(height: 16),
-        SectionCard(
-          title: '이메일로 로그인',
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Center(
+                child: Text('라이어게임', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                  '로그인하고 게임을 시작하세요',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+                ),
+              ),
+              const SizedBox(height: 24),
+              _GoogleAuthButton(onPressed: _handleGoogleAuth),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('또는', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                  ),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 20),
               AppTextField(
                 controller: _emailController,
                 label: '이메일',
@@ -166,23 +203,40 @@ class _LoginScreenState extends State<LoginScreen> {
                 label: '비밀번호',
                 obscureText: true,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               AppButton(label: '로그인', onPressed: _handleEmailLogin),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Center(
                 child: TextButton(
                   onPressed: _handleSignUp,
-                  child: const Text('회원가입', style: TextStyle(fontSize: 12)),
+                  child: const Text('계정이 없으신가요? 회원가입'),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        SectionCard(
-          child: _GoogleAuthButton(onPressed: _handleGoogleAuth),
-        ),
       ],
+    );
+  }
+}
+
+/// 메인/로그인 화면 배경에 깔리는 흐릿한 장식용 원.
+class _DecorBlob extends StatelessWidget {
+  final AlignmentGeometry alignment;
+  final Color color;
+
+  const _DecorBlob({required this.alignment, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: alignment,
+      child: Container(
+        width: 220,
+        height: 220,
+        margin: const EdgeInsets.all(-60),
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
     );
   }
 }

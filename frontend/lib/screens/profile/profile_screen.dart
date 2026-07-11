@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/user_session.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
@@ -51,11 +52,78 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _handlePickPhoto() async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('프로필 사진 변경', style: Theme.of(sheetContext).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: List.generate(avatarOptions.length, (index) {
+                    final selected = index == _avatarIndex;
+                    return GestureDetector(
+                      onTap: () => Navigator.of(sheetContext).pop(index),
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: selected ? Border.all(color: AppColors.primary, width: 2) : null,
+                        ),
+                        child: UserAvatar(avatarIndex: index, radius: 28),
+                      ),
+                    );
+                  }),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked != null) setState(() => _avatarIndex = picked);
+  }
+
+  Future<void> _handleDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          icon: const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 36),
+          title: const Text('정말 탈퇴하시겠어요?'),
+          content: const Text('탈퇴하면 전적과 프로필 정보가 모두 삭제되며 되돌릴 수 없습니다.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('탈퇴하기'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    if (!mounted) return;
+    _goToLoginScreen();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isGuest = UserSession.isGuest;
     return Scaffold(
-      appBar: AppBar(title: const Text('프로필 수정')),
+      appBar: AppBar(title: const Text('개인정보')),
       body: SafeArea(
         child: SingleChildScrollView(
           child: ResponsiveCenter(
@@ -63,30 +131,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(child: UserAvatar(avatarIndex: _avatarIndex, radius: 44)),
-                const SizedBox(height: 16),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: List.generate(avatarOptions.length, (index) {
-                    final selected = index == _avatarIndex;
-                    return GestureDetector(
-                      onTap: () => setState(() => _avatarIndex = index),
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: selected
-                              ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
-                              : null,
+                Center(
+                  child: Stack(
+                    children: [
+                      UserAvatar(avatarIndex: _avatarIndex, radius: 48),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: GestureDetector(
+                          onTap: _handlePickPhoto,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.surface, width: 2),
+                            ),
+                            child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                          ),
                         ),
-                        child: UserAvatar(avatarIndex: index, radius: 20),
                       ),
-                    );
-                  }),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
+                Center(
+                  child: TextButton(
+                    onPressed: _handlePickPhoto,
+                    child: const Text('사진 변경'),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 SectionCard(
                   title: '기본 정보',
                   child: Column(
@@ -120,12 +195,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                   )
-                else
+                else ...[
                   AppButton(
                     label: '로그아웃',
                     variant: AppButtonVariant.outlined,
                     onPressed: _goToLoginScreen,
                   ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: TextButton(
+                      onPressed: _handleDeleteAccount,
+                      style: TextButton.styleFrom(foregroundColor: AppColors.error),
+                      child: const Text('계정 탈퇴'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
               ],
             ),

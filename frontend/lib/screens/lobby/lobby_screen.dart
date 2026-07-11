@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../mock/mock_data.dart';
 import '../../models/room_summary.dart';
 import '../../services/user_session.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
@@ -10,6 +11,11 @@ import '../../widgets/section_card.dart';
 import '../../widgets/user_avatar.dart';
 import '../profile/profile_screen.dart';
 import '../room/room_screen.dart';
+
+/// 로비 상단에 표시할 내 전적 요약(백엔드 연동 전까지 쓰는 더미 값).
+const _mockLevel = 5;
+const _mockWinRate = 0.62;
+const _mockTotalGames = 24;
 
 class LobbyScreen extends StatefulWidget {
   const LobbyScreen({super.key});
@@ -70,7 +76,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('로비'),
+        title: const Text('라이어게임'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -82,84 +88,182 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ],
       ),
       body: SafeArea(
+        child: SingleChildScrollView(
         child: ResponsiveCenter(
-          maxWidth: 640,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+          maxWidth: 960,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 720;
+              final roomList = _buildRoomListPanel(context);
+              final statsPanel = _buildStatsPanel(context);
+              if (!isWide) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [statsPanel, const SizedBox(height: 16), roomList],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text('공개방 목록', style: Theme.of(context).textTheme.titleLarge),
-                  ),
-                  IconButton(
-                    onPressed: _isRefreshing ? null : _handleRefresh,
-                    icon: _isRefreshing
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh),
-                  ),
+                  Expanded(flex: 2, child: roomList),
+                  const SizedBox(width: 16),
+                  SizedBox(width: 280, child: statsPanel),
                 ],
-              ),
-              const SizedBox(height: 8),
+              );
+            },
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsPanel(BuildContext context) {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 24),
+              const SizedBox(width: 12),
               Expanded(
-                child: ListView.separated(
-                  itemCount: _publicRooms.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final room = _publicRooms[index];
-                    return _PublicRoomTile(
-                      room: room,
-                      onTap: () => _openRoom(code: room.code, isHost: false),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              AppButton(label: '방 만들기', icon: Icons.add, onPressed: _handleCreateRoom),
-              const SizedBox(height: 12),
-              SectionCard(
-                title: '코드로 입장',
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: AppTextField(
-                        controller: _codeController,
-                        hintText: '4자리 코드',
-                        keyboardType: TextInputType.number,
-                        maxLength: 4,
+                    Text(UserSession.nickname, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        'Lv.$_mockLevel',
+                        style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.bold),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    AppButton(label: '입장', fullWidth: false, onPressed: _handleJoinByCode),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text('${(_mockWinRate * 100).round()}%', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      Text('승률', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                Container(width: 1, height: 32, color: Colors.black.withValues(alpha: 0.08)),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text('$_mockTotalGames', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      Text('총 게임', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          AppButton(label: '방 만들기', icon: Icons.add, onPressed: _handleCreateRoom),
+          const SizedBox(height: 12),
+          Text('코드로 입장', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: AppTextField(
+                  controller: _codeController,
+                  hintText: '4자리 코드',
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                ),
+              ),
+              const SizedBox(width: 8),
+              AppButton(label: '입장', fullWidth: false, onPressed: _handleJoinByCode),
+            ],
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildRoomListPanel(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('공개방 목록', style: Theme.of(context).textTheme.titleLarge),
+            ),
+            IconButton(
+              onPressed: _isRefreshing ? null : _handleRefresh,
+              icon: _isRefreshing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _publicRooms.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final room = _publicRooms[index];
+            return _PublicRoomTile(
+              room: room,
+              colorIndex: index,
+              onTap: () => _openRoom(code: room.code, isHost: false),
+            );
+          },
+        ),
+      ],
     );
   }
 }
 
 class _PublicRoomTile extends StatelessWidget {
   final RoomSummary room;
+  final int colorIndex;
   final VoidCallback onTap;
 
-  const _PublicRoomTile({required this.room, required this.onTap});
+  const _PublicRoomTile({required this.room, required this.colorIndex, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final isFull = room.playerCount >= room.maxPlayers;
     return Card(
       child: ListTile(
+        leading: UserAvatar(avatarIndex: colorIndex, radius: 20),
         title: Text(room.title),
         subtitle: Text('방장 ${room.hostNickname} · ${room.playerCount}/${room.maxPlayers}명'),
-        trailing: FilledButton(onPressed: onTap, child: const Text('입장')),
+        trailing: FilledButton(
+          onPressed: isFull ? null : onTap,
+          child: Text(isFull ? '가득 참' : '입장'),
+        ),
       ),
     );
   }
