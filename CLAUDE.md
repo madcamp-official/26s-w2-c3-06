@@ -1,6 +1,6 @@
 # Document Management
 
-`CLAUDE.md`, `README.md`, `.claude/agents/` 서브에이전트 등 공유 문서는 `dev` 브랜치에서만 관리한다. 다른 브랜치(`main`, `backend` 등)에는 커밋하지 않는다.
+`CLAUDE.md`, `README.md`, `.claude/agents/` 서브에이전트, 루트 `.gitignore` 등 공유 문서/설정은 `dev` 브랜치에서만 관리한다. 다른 브랜치(`main`, `backend` 등)에는 커밋하지 않는다.
 
 # Git Commit Convention
 
@@ -13,6 +13,8 @@
 - `refactor:` 리팩토링 (기능 변경 없음)
 - `test:` 테스트 추가/수정
 - `chore:` 빌드, 설정 등 기타 변경
+
+커밋 메시지의 설명 부분은 한국어로 작성한다.
 
 커밋 후, 그리고 브랜치 merge 후의 push는 별도 허가 요청 없이 바로 수행한다.
 
