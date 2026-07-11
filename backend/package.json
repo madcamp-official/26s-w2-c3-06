@@ -1,0 +1,32 @@
+{
+  "name": "liar-game-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI 라이어게임 백엔드 (Express + Socket.IO + Prisma)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@prisma/client": "^6.16.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.10.5",
+    "prisma": "^6.16.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

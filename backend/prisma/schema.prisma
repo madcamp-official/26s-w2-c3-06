@@ -1,0 +1,59 @@
+// PLAN "DB 스키마 (영구 저장: 유저·전적·친구)" 참고.
+// Firebase Auth는 인증 전용, 이 DB가 uid를 PK로 유저 데이터를 소유한다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  uid         String   @id // Firebase Auth uid를 그대로 PK로 사용 (link 시 불변)
+  nickname    String
+  avatarIndex Int      @default(0)
+  isAnonymous Boolean  @default(true) // 게스트 구분 (리더보드 필터링 · 30일 정리 판별)
+  createdAt   DateTime @default(now())
+  lastActive  DateTime @default(now()) // 게스트 cleanup(마지막 활동 30일 경과) 기준
+
+  plays                  GamePlay[] // 참여한 게임들 (전적의 source of truth)
+  sentFriendRequests     Friendship[] @relation("requester")
+  receivedFriendRequests Friendship[] @relation("addressee")
+}
+
+// 사람 참가자 1명이 게임 1판을 마칠 때마다 1행 (봇은 Firebase uid가 없어 기록 안 함).
+// 전적 4종(전체 게임수·전체/라이어/비라이어 승률)은 모두 이 테이블 집계로 파생.
+model GamePlay {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [uid], onDelete: Cascade)
+  wasLiar  Boolean // 이 게임에서 라이어였는지
+  won      Boolean // 이 유저가 속한 팀이 최종 승리했는지
+  category String
+  playedAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// 친구 관계 (요청→수락 모델). 한 쌍당 1행이며 방향(requester/addressee) 보존.
+model Friendship {
+  id          String           @id @default(cuid())
+  requesterId String
+  addresseeId String
+  requester   User             @relation("requester", fields: [requesterId], references: [uid], onDelete: Cascade)
+  addressee   User             @relation("addressee", fields: [addresseeId], references: [uid], onDelete: Cascade)
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now())
+  respondedAt DateTime?
+
+  @@unique([requesterId, addresseeId]) // 같은 쌍 중복 요청 방지
+  @@index([addresseeId]) // 받은 요청 조회용
+}
+
+enum FriendshipStatus {
+  pending
+  accepted
+  blocked
+}
