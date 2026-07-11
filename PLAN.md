@@ -55,36 +55,42 @@ AI는 세 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 
 ```
 backend/
-  src/
-    index.ts                 # Express + Socket.IO 부트스트랩
-    socket/handlers.ts        # 이벤트 핸들러 등록
-    socket/middleware.ts      # Firebase 토큰 검증 (handshake)
-    game/roomManager.ts       # 인메모리 방 상태 저장소 (4자리 코드 발급/충돌회피, 공개방 목록)
-    game/gameEngine.ts        # 게임/라운드 상태 머신, 턴 순서, 진짜/가짜 제시어 배정, 채팅 피드 emit
-    llm/client.ts             # Anthropic SDK 초기화
-    llm/wrapper.ts            # generateWordPair / generateBotTurn / generateTurnComment
-    llm/prompts.ts
-    db/client.ts              # Prisma ORM 클라이언트, 유저 프로필/승패 기록 관리 (stretch)
-    types.ts
-  prisma/
-    schema.prisma             # Prisma 데이터 모델 정의
-    migrations/               # DB 마이그레이션 파일들
-  Dockerfile                  # 멀티스테이지: Flutter 빌드 → Node 실행
-  package.json / tsconfig.json / .env.example
+├── src/
+│   ├── index.ts                # Express + Socket.IO 부트스트랩
+│   ├── socket/
+│   │   ├── handlers.ts         # 이벤트 핸들러 등록
+│   │   └── middleware.ts       # Firebase 토큰 검증 (handshake)
+│   ├── game/
+│   │   ├── roomManager.ts      # 인메모리 방 상태 저장소 (4자리 코드 발급/충돌회피, 공개방 목록)
+│   │   └── gameEngine.ts       # 게임/라운드 상태 머신, 턴 순서, 진짜/가짜 제시어 배정, 채팅 피드 emit
+│   ├── llm/
+│   │   ├── client.ts           # Anthropic SDK 초기화
+│   │   ├── wrapper.ts          # generateWordPair / generateBotTurn / generateTurnComment
+│   │   └── prompts.ts
+│   ├── db/
+│   │   └── client.ts           # Prisma ORM 클라이언트, 유저 프로필/승패 기록 관리 (stretch)
+│   └── types.ts
+├── prisma/
+│   ├── schema.prisma           # Prisma 데이터 모델 정의
+│   └── migrations/             # DB 마이그레이션 파일들
+├── Dockerfile                  # 멀티스테이지: Flutter 빌드 → Node 실행
+└── package.json / tsconfig.json / .env.example
 
 frontend/
-  lib/
-    main.dart
-    screens/
-      login_screen.dart
-      lobby_screen.dart        # 탭: 공개방 목록 / 코드로 입장 / 방 만들기
-      room_screen.dart          # 채팅 피드 + 게임 페이즈별 하단 컨텍스트 패널(설정/턴입력/투표/역전승 시도)
-    services/socket_service.dart
-    services/auth_service.dart
-    state/room_provider.dart      # Riverpod
-    state/auth_provider.dart
-    models/ (room.dart, game.dart, round.dart, chat_message.dart)
-  pubspec.yaml
+├── lib/
+│   ├── main.dart
+│   ├── screens/
+│   │   ├── login_screen.dart
+│   │   ├── lobby_screen.dart   # 탭: 공개방 목록 / 코드로 입장 / 방 만들기
+│   │   └── room_screen.dart    # 채팅 피드 + 게임 페이즈별 하단 컨텍스트 패널(설정/턴입력/투표/역전승 시도)
+│   ├── services/
+│   │   ├── socket_service.dart
+│   │   └── auth_service.dart
+│   ├── state/
+│   │   ├── room_provider.dart  # Riverpod
+│   │   └── auth_provider.dart
+│   └── models/                 # room.dart, game.dart, round.dart, chat_message.dart
+└── pubspec.yaml
 ```
 
 방의 메인 화면(`RoomScreen`)은 그룹 채팅 UI 하나로 통일하고, 현재 게임 페이즈(대기/설정/설명/토론/투표/결과)에 따라 하단에 다른 입력 패널만 갈아끼우는 구조로 간다 — 화면을 여러 개로 쪼개지 않아 채팅이 "끊기지 않는" 느낌을 유지할 수 있다.
