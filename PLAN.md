@@ -98,7 +98,7 @@ frontend/
 └── pubspec.yaml
 ```
 
-방의 메인 화면(`RoomScreen`)은 그룹 채팅 UI 하나로 통일하고, 현재 게임 페이즈(대기/설정/설명/토론/투표/결과)에 따라 하단에 다른 입력 패널만 갈아끼우는 구조로 간다 — 화면을 여러 개로 쪼개지 않아 채팅이 "끊기지 않는" 느낌을 유지할 수 있다.
+방의 메인 화면(`RoomScreen`)은 그룹 채팅 UI 하나로 통일하고, 현재 게임 페이즈(대기/설정/설명/토론/투표/결과)에 따라 하단에 다른 입력 패널만 갈아끼우는 구조로 간다 — 화면을 여러 개로 쪼개지 않아 채팅이 "끊기지 않는" 느낌을 유지할 수 있다. 게임이 끝나면 같은 화면에서 대기 패널로 되돌아가고, 채팅 피드는 비워지지 않은 채 그대로 이어진다(초기화는 다음 게임 시작 시점에만). "방 나가기" 버튼은 대기 패널에만 노출한다.
 
 ## 인증/유저 관리 흐름
 
@@ -279,7 +279,7 @@ enum FriendshipStatus {
 - `room:create` `{ nickname, visibility: 'public'|'private', maxPlayers: number }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성). `maxPlayers`는 방장이 지정, 시스템상 상한 없음
 - `room:listPublic` `{}` — 로비 진입 시 공개방 목록 요청
 - `room:join` `{ roomCode, nickname }` — 방이 꽉 찼거나(`players.length >= maxPlayers`) 이미 게임 진행 중이면 `room:error`
-- `room:leave` `{}`
+- `room:leave` `{}` — 대기 상태(설정 전/게임 종료 후 대기 복귀 상태)에서만 유효. 게임 진행 중(`설명~역전승 시도`)에는 UI에 "방 나가기" 버튼 자체를 노출하지 않아 이 시나리오가 발생하지 않게 한다
 - `chat:send` `{ text }` — 언제든 자유 채팅
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
 - `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용, 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 추가된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열 — 프리셋에 없는 새 이름이면 서버가 해당 방의 `customCategories`에 추가해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함), (3) `null` — 이 경우 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
