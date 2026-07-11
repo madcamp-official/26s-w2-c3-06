@@ -13,6 +13,14 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     return roomManager.getRoomBySocket(socket.id);
   }
 
+  // 로비 화면이 실시간으로 갱신되도록, 공개방 목록에 영향을 주는 변화(생성/입장/퇴장/폭파)가
+  // 있을 때마다 모든 연결된 소켓에 최신 목록을 브로드캐스트한다. 비공개방 변화는 목록에
+  // 어차피 안 잡히니 불필요한 브로드캐스트를 피하려 visibility가 public일 때만 보낸다.
+  function broadcastPublicRoomsIfPublic(visibility: 'public' | 'private'): void {
+    if (visibility !== 'public') return;
+    io.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
+  }
+
   // ── 방(Room) ──
 
   socket.on(
@@ -32,6 +40,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         visibility: room.visibility,
         players: room.players,
       });
+      broadcastPublicRoomsIfPublic(room.visibility);
       upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
         console.error('[handlers] upsertUser 실패', err),
       );
@@ -62,6 +71,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       players: room.players,
     });
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
+    broadcastPublicRoomsIfPublic(room.visibility);
     broadcastChat(io, room, 'system', 'system', `${payload.nickname}님이 입장했습니다.`);
     upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
       console.error('[handlers] upsertUser 실패', err),
@@ -106,9 +116,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     socket.leave(result.room.roomCode);
     if (result.roomClosed) {
       io.to(result.room.roomCode).emit('room:closed');
+      broadcastPublicRoomsIfPublic(result.room.visibility);
       return;
     }
     io.to(result.room.roomCode).emit('room:playerListUpdated', { players: result.room.players });
+    broadcastPublicRoomsIfPublic(result.room.visibility);
     if (player) {
       broadcastChat(io, result.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
     }
@@ -130,9 +142,11 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       if (!removal) return;
       if (removal.roomClosed) {
         io.to(roomCode).emit('room:closed');
+        broadcastPublicRoomsIfPublic(removal.room.visibility);
         return;
       }
       io.to(roomCode).emit('room:playerListUpdated', { players: removal.room.players });
+      broadcastPublicRoomsIfPublic(removal.room.visibility);
       if (player) {
         broadcastChat(io, removal.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
       }
