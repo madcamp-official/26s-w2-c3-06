@@ -25,6 +25,14 @@ export async function upsertUser(opts: {
   });
 }
 
+// 닉네임 중복 확인. 회원가입 폼의 "중복 확인" 버튼과, DB @unique 제약의 사전 체크용.
+// excludeUid를 주면 "본인 소유 닉네임"은 사용 가능으로 취급(프로필 수정 시 재사용 대비).
+export async function isNicknameAvailable(nickname: string, excludeUid?: string): Promise<boolean> {
+  const existing = await prisma.user.findUnique({ where: { nickname }, select: { uid: true } });
+  if (!existing) return true;
+  return existing.uid === excludeUid;
+}
+
 export async function touchLastActive(uid: string): Promise<void> {
   await prisma.user.update({ where: { uid }, data: { lastActive: new Date() } }).catch(() => {
     // 유저 행이 아직 없으면(예: DB 연동 전 소켓 흐름) 조용히 무시 — 전적 기록 시 upsert로 생성됨.

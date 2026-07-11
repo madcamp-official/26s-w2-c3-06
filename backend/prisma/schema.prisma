@@ -12,7 +12,7 @@ datasource db {
 
 model User {
   uid         String   @id // Firebase Auth uid를 그대로 PK로 사용 (link 시 불변)
-  nickname    String
+  nickname    String   @unique
   avatarIndex Int      @default(0)
   isAnonymous Boolean  @default(true) // 게스트 구분 (리더보드 필터링 · 30일 정리 판별)
   createdAt   DateTime @default(now())

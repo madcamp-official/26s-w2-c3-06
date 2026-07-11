@@ -1,11 +1,24 @@
 import { Router } from 'express';
 import { requireAuth, type AuthedRequest } from './authMiddleware';
-import { deleteUserProfile, getUserStats } from '../db/userRepo';
+import { deleteUserProfile, getUserStats, isNicknameAvailable } from '../db/userRepo';
 import { admin, initFirebaseAdmin, isFirebaseReady } from '../firebase/admin';
 
 // PLAN "DB 스키마" 전적 4종(전체 게임수·전체/라이어/비라이어 승률) 조회 API.
 // Socket.IO 이벤트 계약에는 없는 프로필 조회용 REST 확장.
 export const statsRouter = Router();
+
+// 닉네임 중복 확인. 회원가입 단계에서는 아직 Firebase 세션이 없으므로(익명 로그인조차
+// 하기 전) 유일하게 인증 없이 여는 엔드포인트다 — 닉네임 사용 여부(boolean)만 노출해
+// 민감정보 유출은 없다.
+statsRouter.get('/nickname-availability/:nickname', async (req, res) => {
+  const nickname = (req.params.nickname as string).trim();
+  if (!nickname) {
+    res.status(400).json({ error: 'nickname이 필요합니다.' });
+    return;
+  }
+  const available = await isNicknameAvailable(nickname);
+  res.json({ available });
+});
 
 statsRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const stats = await getUserStats(req.uid!);
