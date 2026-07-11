@@ -300,9 +300,10 @@ enum FriendshipStatus {
 
 전적 조회·친구 관리는 실시간성이 필요 없는 CRUD라 Socket.IO 이벤트 계약이 아니라 **Express REST**로 구현했다(`backend/src/http/`). 모든 엔드포인트는 `Authorization: Bearer <Firebase ID Token>` 헤더 필수(`requireAuth` 미들웨어) — 서비스 계정 키가 없는 로컬 dev 환경에서는 소켓과 동일하게 토큰 검증을 생략하는 fallback이 적용된다.
 
-**전적** (`/api/users`, `backend/src/http/statsRoutes.ts`):
+**전적·계정** (`/api/users`, `backend/src/http/statsRoutes.ts`):
 - `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate }` (승률은 0~1 float, 분모 0이면 `null`)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
+- `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
 - `POST /api/friends/requests` `{ addresseeUid }` → 201 `Friendship` — 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
