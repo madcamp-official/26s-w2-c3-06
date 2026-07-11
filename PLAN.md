@@ -209,7 +209,7 @@ enum FriendshipStatus {
 - 전체 게임수 = `count(plays)`
 - 전체 승률 = `count(won = true) / count(plays)`
 - 라이어 승률 = `count(won = true AND wasLiar = true) / count(wasLiar = true)`
-- 비(非)라이어 승률 = `count(won = true AND wasLiar = false) / count(wasLiar = false)`
+- 시민 승률 = `count(won = true AND wasLiar = false) / count(wasLiar = false)`
 
 분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
 
