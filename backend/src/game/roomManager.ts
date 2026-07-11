@@ -83,11 +83,21 @@ export function getUidBySocket(socketId: string): string | undefined {
   return socketIndex.get(socketId)?.uid;
 }
 
-// 로비 공개방 목록. PLAN 계약대로 { roomCode, playerCount, maxPlayers }를 노출.
-export function listPublicRooms(): { roomCode: string; playerCount: number; maxPlayers: number }[] {
+// 로비 공개방 목록. { roomCode, playerCount, maxPlayers, inProgress }를 노출.
+export function listPublicRooms(): {
+  roomCode: string;
+  playerCount: number;
+  maxPlayers: number;
+  inProgress: boolean;
+}[] {
   return [...rooms.values()]
     .filter((r) => r.visibility === 'public')
-    .map((r) => ({ roomCode: r.roomCode, playerCount: r.players.length, maxPlayers: r.maxPlayers }));
+    .map((r) => ({
+      roomCode: r.roomCode,
+      playerCount: r.players.length,
+      maxPlayers: r.maxPlayers,
+      inProgress: r.currentGame !== null,
+    }));
 }
 
 export function createRoom(opts: {
