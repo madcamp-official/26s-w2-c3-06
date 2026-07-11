@@ -1,7 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { getAnthropic, MODEL } from './client';
+import { getAnthropic, hasAnthropicKey, MODEL } from './client';
 import { wordPairPrompt, botTurnPrompt, turnCommentPrompt } from './prompts';
 import type { BotTurnContext, TurnCommentContext } from '../types';
+import { mockLLM } from './mock';
 
 // PLAN "LLM 래퍼" 인터페이스. provider/모델을 나중에 쉽게 바꿀 수 있도록 얇게만 감싼다.
 export interface LiarGameLLM {
@@ -26,7 +27,7 @@ async function completeText(prompt: string, maxTokens: number): Promise<string> 
     .trim();
 }
 
-export const llm: LiarGameLLM = {
+const realLLM: LiarGameLLM = {
   async generateWordPair(category, usedWords) {
     const raw = await completeText(wordPairPrompt(category, usedWords), 256);
     // 모델이 JSON만 반환하도록 프롬프트했지만, 방어적으로 첫 JSON 블록만 파싱.
@@ -43,3 +44,12 @@ export const llm: LiarGameLLM = {
     return completeText(turnCommentPrompt(ctx), 128);
   },
 };
+
+// ANTHROPIC_API_KEY가 없는 로컬 dev 환경에서도 게임 흐름 전체를 테스트할 수 있도록,
+// firebase-admin과 동일한 패턴으로 키가 없으면 결정적 mock 응답으로 폴백한다.
+// 키를 넣으면 코드 변경 없이 바로 실제 Claude 호출로 전환된다.
+export const llm: LiarGameLLM = hasAnthropicKey() ? realLLM : mockLLM;
+
+if (!hasAnthropicKey()) {
+  console.warn('[llm] ANTHROPIC_API_KEY 없음 — mock LLM으로 동작 (실제 Claude 호출 안 함)');
+}

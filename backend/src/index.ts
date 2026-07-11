@@ -4,6 +4,9 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { socketAuthMiddleware } from './socket/middleware';
 import { registerSocketHandlers } from './socket/handlers';
+import { statsRouter } from './http/statsRoutes';
+import { friendsRouter } from './http/friendsRoutes';
+import { startGuestCleanupCron } from './cron/guestCleanup';
 
 const app = express();
 app.use(express.json());
@@ -12,6 +15,10 @@ app.use(express.json());
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', ts: Date.now() });
 });
+
+// PLAN "DB 스키마" 전적·친구 조회용 REST 확장 (Socket.IO 계약에는 없음)
+app.use('/api/users', statsRouter);
+app.use('/api/friends', friendsRouter);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -35,4 +42,5 @@ io.on('connection', (socket) => {
 const PORT = Number(process.env.PORT ?? 3000);
 httpServer.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`);
+  startGuestCleanupCron();
 });

@@ -5,6 +5,10 @@ export const MODEL = 'claude-haiku-4-5-20251001';
 
 let client: Anthropic | null = null;
 
+export function hasAnthropicKey(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
 export function getAnthropic(): Anthropic {
   if (!client) {
     const apiKey = process.env.ANTHROPIC_API_KEY;

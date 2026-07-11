@@ -1,46 +1,137 @@
 import type { Server, Socket } from 'socket.io';
 import * as roomManager from '../game/roomManager';
+import * as gameEngine from '../game/gameEngine';
+import { broadcastChat } from '../game/chat';
+import { upsertUser } from '../db/userRepo';
 
-// PLAN "Socket.IO 이벤트 계약 (MVP)" 참고.
-// 스캐폴드 단계: 각 Client→Server 이벤트의 핸들러 골격만 등록한다.
-// 실제 로직은 roomManager / gameEngine으로 위임 예정.
+// PLAN "Socket.IO 이벤트 계약 (MVP)" 참고. 각 이벤트를 roomManager/gameEngine으로 위임한다.
 export function registerSocketHandlers(io: Server, socket: Socket): void {
+  const uid = socket.data.uid as string;
+  const isAnonymous = Boolean(socket.data.isAnonymous);
+
+  function currentRoom() {
+    return roomManager.getRoomBySocket(socket.id);
+  }
+
   // ── 방(Room) ──
-  socket.on('room:create', (_payload: { nickname: string; visibility: 'public' | 'private' }) => {
-    // TODO: roomManager.createRoom → 'room:created' emit
+
+  socket.on('room:create', async (payload: { nickname: string; visibility: 'public' | 'private' }) => {
+    const room = roomManager.createRoom({
+      socketId: socket.id,
+      uid,
+      nickname: payload.nickname,
+      visibility: payload.visibility,
+    });
+    socket.join(room.roomCode);
+    socket.emit('room:created', {
+      roomCode: room.roomCode,
+      hostId: room.hostId,
+      visibility: room.visibility,
+      players: room.players,
+    });
+    upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
+      console.error('[handlers] upsertUser 실패', err),
+    );
   });
 
   socket.on('room:listPublic', () => {
     socket.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
   });
 
-  socket.on('room:join', (_payload: { roomCode: string; nickname: string }) => {
-    // TODO: roomManager.joinRoom → 'room:joined' / 'room:playerListUpdated'
+  socket.on('room:join', async (payload: { roomCode: string; nickname: string }) => {
+    const result = roomManager.joinRoom({
+      socketId: socket.id,
+      uid,
+      nickname: payload.nickname,
+      roomCode: payload.roomCode,
+    });
+    if (roomManager.isJoinError(result)) {
+      socket.emit('room:error', { message: result.error });
+      return;
+    }
+    const room = result;
+    socket.join(room.roomCode);
+    socket.emit('room:joined', {
+      roomCode: room.roomCode,
+      hostId: room.hostId,
+      visibility: room.visibility,
+      players: room.players,
+    });
+    io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
+    broadcastChat(io, room, 'system', 'system', `${payload.nickname}님이 입장했습니다.`);
+    upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
+      console.error('[handlers] upsertUser 실패', err),
+    );
   });
 
   socket.on('room:leave', () => {
-    // TODO: roomManager.leaveRoom
+    handleLeave();
   });
 
-  // ── 채팅 ──
-  socket.on('chat:send', (_payload: { text: string }) => {
-    // TODO: 통합 채팅 피드에 append 후 'chat:message' 브로드캐스트
+  socket.on('disconnect', () => {
+    handleLeave();
+  });
+
+  function handleLeave() {
+    const room = currentRoom();
+    const player = room?.players.find((p) => p.id === uid);
+    const result = roomManager.leaveRoom(socket.id);
+    if (!result) return;
+    socket.leave(result.room.roomCode);
+    if (result.roomClosed) {
+      io.to(result.room.roomCode).emit('room:closed');
+      return;
+    }
+    io.to(result.room.roomCode).emit('room:playerListUpdated', { players: result.room.players });
+    if (player) {
+      broadcastChat(io, result.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
+    }
+  }
+
+  // ── 채팅 (언제든 자유 채팅) ──
+
+  socket.on('chat:send', (payload: { text: string }) => {
+    const room = currentRoom();
+    if (!room || !payload.text?.trim()) return;
+    broadcastChat(io, room, uid, 'chat', payload.text.trim());
   });
 
   // ── 게임 진행 ──
-  socket.on('game:configure', (_payload: { category: string | null; aiBotCount: number }) => {
-    // TODO(호스트 전용): gameEngine.startGame → 'game:started' + 채팅 초기화
+
+  socket.on('game:configure', async (payload: { category: string | null; aiBotCount: number }) => {
+    const room = currentRoom();
+    if (!room) return;
+    if (!roomManager.isHost(room, uid)) {
+      socket.emit('room:error', { message: '호스트만 게임을 시작할 수 있습니다.' });
+      return;
+    }
+    if (room.currentGame && room.currentGame.phase !== 'ended') {
+      socket.emit('room:error', { message: '이미 게임이 진행 중입니다.' });
+      return;
+    }
+    try {
+      await gameEngine.startGame(io, room, payload);
+    } catch (err) {
+      console.error('[handlers] game:configure 실패', err);
+      socket.emit('room:error', { message: '게임 시작에 실패했습니다. 잠시 후 다시 시도해주세요.' });
+    }
   });
 
-  socket.on('turn:submitDescription', (_payload: { text: string }) => {
-    // TODO(현재 턴만): 설명 append + LLM 교란 코멘트 생성
+  socket.on('turn:submitDescription', (payload: { text: string }) => {
+    const room = currentRoom();
+    if (!room || !payload.text?.trim()) return;
+    gameEngine.submitDescription(io, room, uid, payload.text.trim());
   });
 
-  socket.on('vote:cast', (_payload: { votedPlayerId: string }) => {
-    // TODO: 서버 내부 집계 (개별 선택은 어떤 클라에도 전송 안 함)
+  socket.on('vote:cast', (payload: { votedPlayerId: string }) => {
+    const room = currentRoom();
+    if (!room) return;
+    gameEngine.castVote(io, room, uid, payload.votedPlayerId);
   });
 
-  socket.on('liar:guessWord', (_payload: { guess: string }) => {
-    // TODO(지목된 라이어만): 역전승 판정 → 'round:finalResult'
+  socket.on('liar:guessWord', (payload: { guess: string }) => {
+    const room = currentRoom();
+    if (!room || !payload.guess?.trim()) return;
+    gameEngine.submitLiarGuess(io, room, uid, payload.guess.trim());
   });
 }

@@ -1,18 +1,423 @@
-import type { GameState, RoomState } from '../types';
+import type { Server } from 'socket.io';
+import type { GameState, Round, RoomState } from '../types';
+import { llm } from '../llm/wrapper';
+import * as roomManager from './roomManager';
+import { broadcastChat } from './chat';
+import { recordGame } from '../db/gamePlayRepo';
 
-// 게임/라운드 상태 머신. PLAN "Socket.IO 이벤트 계약"의 페이즈 전이를 서버가 전적으로 소유.
+// 게임/라운드 상태 머신. PLAN "Socket.IO 이벤트 계약"의 페이즈 전이를 서버가 전적으로 소유:
 // 대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)
 //
-// 스캐폴드 단계: 시그니처만 정의. 실제 전이·타이머·제시어 배정은 추후 구현.
+// 타이머 초 값은 PLAN에 명시되어 있지 않아 이 스캐폴드에서 합리적 기본값으로 잡았다. 튜닝 대상.
+export const TURN_TIME_LIMIT_SEC = 60;
+export const DISCUSSION_TIME_LIMIT_SEC = 30;
+export const VOTE_TIME_LIMIT_SEC = 30;
+export const LIAR_GUESS_TIME_LIMIT_SEC = 30;
+const BOT_THINK_DELAY_MS = 1500;
 
-// 새 게임 시작: 제시어 쌍 생성, 라이어 배정(MVP 1명), 봇 추가, 채팅 초기화.
-export async function startGame(
-  _room: RoomState,
-  _opts: { category: string | null; aiBotCount: number },
-): Promise<GameState> {
-  // TODO: LLM generateWordPair → liarIds 배정 → participantIds 구성 → phase 전이
-  throw new Error('not implemented');
+// 문서화된 GameState/Round는 그대로 두고, 타이머 핸들·봇 목록 같은 휘발성 런타임 부가정보는
+// roomCode로 키잉한 모듈 내부 맵으로 별도 관리한다(직렬화 대상 타입을 오염시키지 않기 위함).
+interface BotInfo {
+  id: string;
+  nickname: string;
+}
+const botsByRoom = new Map<string, BotInfo[]>();
+const turnIndexByRoom = new Map<string, number>();
+const turnTimers = new Map<string, NodeJS.Timeout>();
+const phaseTimers = new Map<string, NodeJS.Timeout>();
+
+function isBotId(id: string): boolean {
+  return id.startsWith('bot-');
 }
 
-// 타이머 만료 동작(PLAN): 설명/투표 시간이 지나면 미제출·미투표로 간주하고 다음 페이즈로 진행.
-// TODO: submitDescription / castVote / resolveRound / handleLiarGuess
+function clearRoomTimers(roomCode: string): void {
+  const t1 = turnTimers.get(roomCode);
+  if (t1) clearTimeout(t1);
+  turnTimers.delete(roomCode);
+  const t2 = phaseTimers.get(roomCode);
+  if (t2) clearTimeout(t2);
+  phaseTimers.delete(roomCode);
+}
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function getParticipantNickname(room: RoomState, id: string): string {
+  const human = room.players.find((p) => p.id === id);
+  if (human) return human.nickname;
+  const bot = (botsByRoom.get(room.roomCode) ?? []).find((b) => b.id === id);
+  return bot?.nickname ?? id;
+}
+
+function normalizeWord(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function currentRound(game: GameState): Round {
+  return game.rounds[0];
+}
+
+// ── 게임 시작 ──
+
+export async function startGame(
+  io: Server,
+  room: RoomState,
+  opts: { category: string | null; aiBotCount: number },
+): Promise<void> {
+  const usedWords = room.gameHistory.flatMap((g) => [g.realWord, g.liarWord]);
+  const { category, realWord, liarWord } = await llm.generateWordPair(opts.category, usedWords);
+
+  const bots: BotInfo[] = Array.from({ length: opts.aiBotCount }, (_, i) => ({
+    id: `bot-${room.roomCode}-${i + 1}`,
+    nickname: `AI 봇 ${i + 1}`,
+  }));
+  botsByRoom.set(room.roomCode, bots);
+
+  const participantIds = [...room.players.map((p) => p.id), ...bots.map((b) => b.id)];
+  const liarIds = [pickRandom(participantIds)]; // MVP: 1명 고정 (PLAN TODO: 추후 방장이 수 선택)
+  const playerOrder = shuffle(participantIds);
+
+  const round: Round = { roundNumber: 1, playerOrder, turns: [], votes: {} };
+  const game: GameState = {
+    gameNumber: room.gameHistory.length + 1,
+    category,
+    realWord,
+    liarWord,
+    liarIds,
+    participantIds,
+    aiBotCount: opts.aiBotCount,
+    phase: 'setup',
+    usedWordsThisGame: [realWord, liarWord],
+    rounds: [round],
+  };
+  room.currentGame = game;
+  roomManager.resetChatLog(room);
+  turnIndexByRoom.set(room.roomCode, 0);
+
+  io.to(room.roomCode).emit('game:started', { gameNumber: game.gameNumber });
+  broadcastChat(io, room, 'system', 'system', `새 게임이 시작되었습니다! 카테고리: ${category}`);
+
+  for (const player of room.players) {
+    const word = liarIds.includes(player.id) ? liarWord : realWord;
+    const socketId = roomManager.getSocketIdByUid(player.id);
+    if (socketId) io.to(socketId).emit('round:yourWord', { word });
+  }
+
+  game.phase = 'describing';
+  startTurn(io, room);
+}
+
+// ── 설명(턴) 페이즈 ──
+
+function startTurn(io: Server, room: RoomState): void {
+  const game = room.currentGame;
+  if (!game) return;
+  const round = currentRound(game);
+  const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
+
+  if (idx >= round.playerOrder.length) {
+    endDescribingPhase(io, room);
+    return;
+  }
+
+  const playerId = round.playerOrder[idx];
+  io.to(room.roomCode).emit('turn:started', { playerId, timeLimitSec: TURN_TIME_LIMIT_SEC });
+
+  if (isBotId(playerId)) {
+    setTimeout(() => void runBotTurn(io, room, playerId), BOT_THINK_DELAY_MS);
+    return;
+  }
+
+  const timer = setTimeout(() => handleTurnTimeout(io, room, playerId), TURN_TIME_LIMIT_SEC * 1000);
+  turnTimers.set(room.roomCode, timer);
+}
+
+async function runBotTurn(io: Server, room: RoomState, botId: string): Promise<void> {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'describing') return;
+  const round = currentRound(game);
+  // 다른 곳에서 이미 넘어갔으면(방 정리 등) 무시
+  const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  if (round.playerOrder[idx] !== botId) return;
+
+  try {
+    const assignedWord = game.liarIds.includes(botId) ? game.liarWord : game.realWord;
+    const priorTurns = round.turns.map((t) => ({
+      nickname: getParticipantNickname(room, t.playerId),
+      text: t.text,
+    }));
+    const text = await llm.generateBotTurn({ category: game.category, assignedWord, priorTurns });
+    submitDescriptionInternal(io, room, botId, text);
+  } catch (err) {
+    console.error('[gameEngine] generateBotTurn 실패, 빈 턴으로 넘어감', err);
+    advanceTurn(io, room);
+  }
+}
+
+function handleTurnTimeout(io: Server, room: RoomState, playerId: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'describing') return;
+  const round = currentRound(game);
+  const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  if (round.playerOrder[idx] !== playerId) return;
+  // PLAN 타이머 만료 규칙: 미제출은 그냥 못 하는 것으로 처리(빈 채로 다음 턴).
+  advanceTurn(io, room);
+}
+
+// 현재 턴인 사람만 유효 (PLAN 이벤트 계약). 소켓 핸들러에서 검증 후 호출.
+export function submitDescription(io: Server, room: RoomState, uid: string, text: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'describing') return;
+  const round = currentRound(game);
+  const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  if (round.playerOrder[idx] !== uid) return;
+
+  const timer = turnTimers.get(room.roomCode);
+  if (timer) clearTimeout(timer);
+  turnTimers.delete(room.roomCode);
+
+  submitDescriptionInternal(io, room, uid, text);
+}
+
+function submitDescriptionInternal(
+  io: Server,
+  room: RoomState,
+  playerId: string,
+  text: string,
+): void {
+  const game = room.currentGame;
+  if (!game) return;
+  const round = currentRound(game);
+  round.turns.push({ playerId, text });
+  broadcastChat(io, room, playerId, 'turnDescription', text);
+
+  // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음)
+  void generateAndBroadcastComment(io, room, text, round);
+
+  advanceTurn(io, room);
+}
+
+async function generateAndBroadcastComment(
+  io: Server,
+  room: RoomState,
+  latestDescription: string,
+  round: Round,
+): Promise<void> {
+  const game = room.currentGame;
+  if (!game) return;
+  try {
+    const priorTurns = round.turns.slice(0, -1).map((t) => ({
+      nickname: getParticipantNickname(room, t.playerId),
+      text: t.text,
+    }));
+    const comment = await llm.generateTurnComment({
+      category: game.category,
+      latestDescription,
+      priorTurns,
+    });
+    broadcastChat(io, room, 'ai', 'aiComment', comment);
+  } catch (err) {
+    console.error('[gameEngine] generateTurnComment 실패, 코멘트 생략', err);
+  }
+}
+
+function advanceTurn(io: Server, room: RoomState): void {
+  const idx = (turnIndexByRoom.get(room.roomCode) ?? 0) + 1;
+  turnIndexByRoom.set(room.roomCode, idx);
+  const game = room.currentGame;
+  if (!game) return;
+  if (idx >= currentRound(game).playerOrder.length) {
+    endDescribingPhase(io, room);
+  } else {
+    startTurn(io, room);
+  }
+}
+
+function endDescribingPhase(io: Server, room: RoomState): void {
+  const game = room.currentGame;
+  if (!game) return;
+  game.phase = 'discussion';
+  broadcastChat(io, room, 'system', 'system', '모든 설명이 끝났습니다. 잠시 자유롭게 토론해보세요.');
+  const timer = setTimeout(() => startVoting(io, room), DISCUSSION_TIME_LIMIT_SEC * 1000);
+  phaseTimers.set(room.roomCode, timer);
+}
+
+// ── 투표 페이즈 ──
+
+function startVoting(io: Server, room: RoomState): void {
+  const game = room.currentGame;
+  if (!game) return;
+  game.phase = 'voting';
+  currentRound(game).votes = {};
+
+  broadcastChat(io, room, 'system', 'system', '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.');
+  io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC });
+
+  const timer = setTimeout(() => resolveVoting(io, room), VOTE_TIME_LIMIT_SEC * 1000);
+  phaseTimers.set(room.roomCode, timer);
+
+  const bots = botsByRoom.get(room.roomCode) ?? [];
+  for (const bot of bots) {
+    const delay = 500 + Math.random() * (VOTE_TIME_LIMIT_SEC * 1000 * 0.5);
+    setTimeout(() => {
+      const target = pickRandom(game.participantIds.filter((id) => id !== bot.id));
+      castVote(io, room, bot.id, target);
+    }, delay);
+  }
+}
+
+// 익명 투표, 서버 내부 집계 전용 (PLAN: 개인별 선택은 어떤 클라이언트에도 전송 안 함).
+export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'voting') return;
+  const round = currentRound(game);
+  if (round.votes[voterId]) return; // 이미 투표함 (idempotent)
+  if (!game.participantIds.includes(votedPlayerId)) return;
+
+  round.votes[voterId] = votedPlayerId;
+  const votesInCount = Object.keys(round.votes).length;
+  const totalCount = game.participantIds.length;
+  io.to(room.roomCode).emit('vote:progress', { votesInCount, totalCount });
+
+  if (votesInCount >= totalCount) {
+    const timer = phaseTimers.get(room.roomCode);
+    if (timer) clearTimeout(timer);
+    phaseTimers.delete(room.roomCode);
+    resolveVoting(io, room);
+  }
+}
+
+function resolveVoting(io: Server, room: RoomState): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'voting') return;
+  phaseTimers.delete(room.roomCode);
+  const round = currentRound(game);
+
+  const tally = new Map<string, number>();
+  for (const votedId of Object.values(round.votes)) {
+    tally.set(votedId, (tally.get(votedId) ?? 0) + 1);
+  }
+
+  let votedOutId: string | undefined;
+  let maxVotes = 0;
+  let tied: string[] = [];
+  for (const [id, count] of tally.entries()) {
+    if (count > maxVotes) {
+      maxVotes = count;
+      tied = [id];
+    } else if (count === maxVotes) {
+      tied.push(id);
+    }
+  }
+  if (tied.length > 0) votedOutId = pickRandom(tied);
+
+  round.votedOutId = votedOutId;
+  round.wasLiar = votedOutId ? game.liarIds.includes(votedOutId) : false;
+  game.phase = 'resolution';
+
+  const summary = votedOutId
+    ? `${getParticipantNickname(room, votedOutId)}님이 최다 득표로 지목되었습니다. (라이어 ${round.wasLiar ? 'O' : 'X'})`
+    : '투표가 충분히 모이지 않아 아무도 지목되지 않았습니다.';
+  broadcastChat(io, room, 'system', 'system', summary);
+
+  io.to(room.roomCode).emit('round:resolved', {
+    votedOutId,
+    wasLiar: round.wasLiar,
+    realWord: game.realWord,
+    liarWord: game.liarWord,
+  });
+
+  if (round.wasLiar && votedOutId) {
+    startLiarGuess(io, room, votedOutId);
+  } else {
+    round.winner = 'liar'; // 라이어가 지목되지 않음 → 라이어 승
+    finalizeGame(io, room, { liarGuessCorrect: null, winner: 'liar' });
+  }
+}
+
+// ── 라이어 역전승 페이즈 ──
+
+function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
+  const game = room.currentGame;
+  if (!game) return;
+  game.phase = 'liarGuess';
+
+  if (isBotId(liarId)) {
+    // 봇 라이어도 정답을 모르므로, 자신에게 배정된 가짜 단어를 그대로 "추측"한다 (대개 오답).
+    setTimeout(() => submitLiarGuess(io, room, liarId, game.liarWord), 800);
+    return;
+  }
+
+  const socketId = roomManager.getSocketIdByUid(liarId);
+  if (socketId) io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+
+  const timer = setTimeout(() => {
+    if (room.currentGame?.phase !== 'liarGuess') return;
+    const round = currentRound(room.currentGame);
+    round.liarGuessCorrect = false;
+    round.winner = 'citizens';
+    finalizeGame(io, room, { liarGuessCorrect: false, winner: 'citizens' });
+  }, LIAR_GUESS_TIME_LIMIT_SEC * 1000);
+  phaseTimers.set(room.roomCode, timer);
+}
+
+// 지목된 사람이 실제 라이어일 때만 유효 (PLAN 이벤트 계약).
+export function submitLiarGuess(io: Server, room: RoomState, uid: string, guess: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'liarGuess') return;
+  const round = currentRound(game);
+  if (round.votedOutId !== uid) return;
+
+  const timer = phaseTimers.get(room.roomCode);
+  if (timer) clearTimeout(timer);
+  phaseTimers.delete(room.roomCode);
+
+  const correct = normalizeWord(guess) === normalizeWord(game.realWord);
+  round.liarGuess = guess;
+  round.liarGuessCorrect = correct;
+  round.winner = correct ? 'liar' : 'citizens';
+  finalizeGame(io, room, { liarGuessCorrect: correct, winner: round.winner });
+}
+
+// ── 게임 종료 ──
+
+function finalizeGame(
+  io: Server,
+  room: RoomState,
+  result: { liarGuessCorrect: boolean | null; winner: 'liar' | 'citizens' },
+): void {
+  const game = room.currentGame;
+  if (!game) return;
+
+  io.to(room.roomCode).emit('round:finalResult', result);
+
+  const humanEntries = game.participantIds
+    .filter((id) => !isBotId(id))
+    .map((id) => ({
+      userId: id,
+      wasLiar: game.liarIds.includes(id),
+      won: result.winner === 'liar' ? game.liarIds.includes(id) : !game.liarIds.includes(id),
+      category: game.category,
+    }));
+  recordGame(humanEntries).catch((err) => console.error('[gameEngine] GamePlay 기록 실패', err));
+
+  io.to(room.roomCode).emit('game:ended', {});
+
+  game.phase = 'ended';
+  room.gameHistory.push(game);
+  room.currentGame = null;
+
+  clearRoomTimers(room.roomCode);
+  botsByRoom.delete(room.roomCode);
+  turnIndexByRoom.delete(room.roomCode);
+}
