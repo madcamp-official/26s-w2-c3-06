@@ -119,7 +119,7 @@ frontend/
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 시 방 전체에 브로드캐스트
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
-- `game:started` `{ gameNumber }` — 클라이언트도 채팅 뷰 초기화
+- `game:started` `{ gameNumber, category }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드(하위호환 추가)
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
 - `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
