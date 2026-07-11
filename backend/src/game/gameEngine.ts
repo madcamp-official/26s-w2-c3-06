@@ -104,7 +104,18 @@ export async function startGame(
   roomManager.resetChatLog(room);
   turnIndexByRoom.set(room.roomCode, 0);
 
-  io.to(room.roomCode).emit('game:started', { gameNumber: game.gameNumber, category: game.category });
+  // 클라이언트가 투표 후보·턴 배너에 봇 닉네임까지 표시할 수 있도록 참가자 전체(봇 포함) 목록을
+  // 함께 보낸다. room:playerListUpdated는 사람만 추적하므로 이 정보를 별도로 실어야 함
+  // (하위호환 추가 — 기존 { gameNumber } 클라이언트도 그대로 동작).
+  const participants = [
+    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
+    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
+  ];
+  io.to(room.roomCode).emit('game:started', {
+    gameNumber: game.gameNumber,
+    category: game.category,
+    participants,
+  });
   broadcastChat(io, room, 'system', 'system', `새 게임이 시작되었습니다! 카테고리: ${category}`);
 
   for (const player of room.players) {
@@ -247,6 +258,9 @@ function endDescribingPhase(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
   game.phase = 'discussion';
+  // 설명 페이즈 종료를 명시적으로 알려 클라이언트가 "현재 턴" 배너를 내리고 자유 채팅
+  // 모드로 전환할 수 있게 한다 (이전엔 system 채팅 텍스트로만 암시됐음).
+  io.to(room.roomCode).emit('discussion:started', { timeLimitSec: DISCUSSION_TIME_LIMIT_SEC });
   broadcastChat(io, room, 'system', 'system', '모든 설명이 끝났습니다. 잠시 자유롭게 토론해보세요.');
   const timer = setTimeout(() => startVoting(io, room), DISCUSSION_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
