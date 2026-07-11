@@ -54,6 +54,13 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+// 방장이 대기방에서 만지고 있는 다음 게임 설정(아직 시작 전). game:configure와 같은 모양 —
+// 다른 참가자 화면에 실시간으로 보여주기 위해 방 상태에 들고 있는다.
+export interface DraftGameConfig {
+  category: string | null; // null이면 AI 랜덤 생성
+  aiBotCount: number;
+}
+
 export interface RoomState {
   roomCode: string; // 4자리 숫자 문자열, 예: "4821"
   hostId: string;
@@ -61,6 +68,7 @@ export interface RoomState {
   maxPlayers: number; // 방장이 방 생성 시 지정, 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];
   customCategories: string[]; // 방장이 이 방에서 직접 추가한 카테고리 이름. 방 종료(소멸) 시 함께 사라짐
+  draftConfig: DraftGameConfig; // 방장이 게임 시작 전 고르고 있는 봇 수/카테고리 (실시간 공유용)
   chatLog: ChatMessage[]; // 방 존재 동안 유지, 새 게임 시작 시에만 초기화
   currentGame: GameState | null;
   gameHistory: GameState[];

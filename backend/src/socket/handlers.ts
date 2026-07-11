@@ -39,6 +39,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         hostId: room.hostId,
         visibility: room.visibility,
         players: room.players,
+        draftConfig: room.draftConfig,
       });
       broadcastPublicRoomsIfPublic(room.visibility);
       upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
@@ -69,6 +70,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       hostId: room.hostId,
       visibility: room.visibility,
       players: room.players,
+      draftConfig: room.draftConfig,
     });
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
     broadcastPublicRoomsIfPublic(room.visibility);
@@ -101,6 +103,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       players: room.players,
       chatLog: room.chatLog,
       currentGame: room.currentGame ? gameEngine.toPublicGameState(room, room.currentGame) : null,
+      draftConfig: room.draftConfig,
     });
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
     gameEngine.resendYourWord(io, room, uid);
@@ -170,6 +173,17 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
   });
 
+  // 방장이 대기방에서 봇 수/카테고리를 만지작거릴 때마다(아직 시작 전) 다른 참가자
+  // 화면에도 실시간으로 보이도록 방 상태에 반영하고 브로드캐스트한다.
+  socket.on('game:draftConfig', (payload: { category: string | null; aiBotCount: number }) => {
+    const room = currentRoom();
+    if (!room) return;
+    if (!roomManager.isHost(room, uid)) return;
+    const config = { category: payload.category, aiBotCount: Number(payload.aiBotCount) || 0 };
+    roomManager.setDraftConfig(room, config);
+    io.to(room.roomCode).emit('game:draftConfigUpdated', config);
+  });
+
   // ── 게임 진행 ──
 
   const MIN_PARTICIPANTS = 3;
@@ -195,6 +209,9 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     }
     try {
       await gameEngine.startGame(io, room, payload);
+      const resetConfig = { category: null, aiBotCount: 0 };
+      roomManager.setDraftConfig(room, resetConfig);
+      io.to(room.roomCode).emit('game:draftConfigUpdated', resetConfig);
     } catch (err) {
       console.error('[handlers] game:configure 실패', err);
       socket.emit('room:error', { message: '게임 시작에 실패했습니다. 잠시 후 다시 시도해주세요.' });

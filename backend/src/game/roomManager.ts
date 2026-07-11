@@ -1,4 +1,11 @@
-import type { ChatMessage, ChatMessageType, ChatSenderKind, Player, RoomState } from '../types';
+import type {
+  ChatMessage,
+  ChatMessageType,
+  ChatSenderKind,
+  DraftGameConfig,
+  Player,
+  RoomState,
+} from '../types';
 
 // 인메모리 방 상태 저장소. PLAN "데이터 모델" · "저장소 구조" 참고.
 // 방/게임/라운드 같은 휘발성 상태는 이 프로세스 메모리에만 둔다.
@@ -106,6 +113,7 @@ export function createRoom(opts: {
     maxPlayers: opts.maxPlayers,
     players: [host],
     customCategories: [],
+    draftConfig: { category: null, aiBotCount: 0 },
     chatLog: [],
     currentGame: null,
     gameHistory: [],
@@ -154,6 +162,12 @@ export function setPlayerReady(room: RoomState, uid: string, isReady: boolean): 
   const player = room.players.find((p) => p.id === uid);
   if (!player) return;
   player.isReady = isReady;
+}
+
+// 방장이 대기방에서 봇 수/카테고리를 만지작거릴 때마다 호출 — 다른 참가자 화면에도
+// 실시간으로 보여주기 위해 방 상태에 반영한다(아직 game:configure를 보낸 건 아님).
+export function setDraftConfig(room: RoomState, config: DraftGameConfig): void {
+  room.draftConfig = config;
 }
 
 // 방장이 프리셋에 없는 카테고리를 자유 입력하면 이 방의 재사용 목록에 추가한다(중복 방지).
