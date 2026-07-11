@@ -31,6 +31,13 @@ export async function touchLastActive(uid: string): Promise<void> {
   });
 }
 
+// 로컬 DB 프로필 삭제. onDelete: Cascade로 GamePlay·Friendship도 함께 삭제됨 (schema.prisma 참고).
+export async function deleteUserProfile(uid: string): Promise<void> {
+  await prisma.user.delete({ where: { uid } }).catch(() => {
+    // 로컬 DB에 프로필이 아직 없던 유저(게임을 한 번도 안 한 경우)면 조용히 무시.
+  });
+}
+
 export interface UserStats {
   totalGames: number;
   overallWinRate: number | null;
