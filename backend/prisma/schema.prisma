@@ -25,7 +25,7 @@ model User {
 }
 
 // 사람 참가자 1명이 게임 1판을 마칠 때마다 1행 (봇은 Firebase uid가 없어 기록 안 함).
-// 전적 4종(전체 게임수·전체/라이어/비라이어 승률)은 모두 이 테이블 집계로 파생.
+// 전적 4종(전체 게임수·전체/라이어/시민 승률)은 모두 이 테이블 집계로 파생.
 model GamePlay {
   id       String   @id @default(cuid())
   userId   String

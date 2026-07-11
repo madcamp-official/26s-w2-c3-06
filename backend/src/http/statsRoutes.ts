@@ -10,7 +10,7 @@ import {
 } from '../db/userRepo';
 import { admin, initFirebaseAdmin, isFirebaseReady } from '../firebase/admin';
 
-// PLAN "DB 스키마" 전적 4종(전체 게임수·전체/라이어/비라이어 승률) 조회 API.
+// PLAN "DB 스키마" 전적 4종(전체 게임수·전체/라이어/시민 승률) 조회 API.
 // Socket.IO 이벤트 계약에는 없는 프로필 조회용 REST 확장.
 export const statsRouter = Router();
 
