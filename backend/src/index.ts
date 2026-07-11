@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import cors from 'cors';
 import express from 'express';
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
@@ -9,6 +10,8 @@ import { friendsRouter } from './http/friendsRoutes';
 import { startGuestCleanupCron } from './cron/guestCleanup';
 
 const app = express();
+// TODO: 배포 시 프론트와 단일 origin이면 제한. 개발 중에는 전체 허용(Socket.IO cors 설정과 동일 기조).
+app.use(cors());
 app.use(express.json());
 
 // 헬스체크 (배포 상태 확인용)
