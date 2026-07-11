@@ -104,7 +104,7 @@ export async function startGame(
   roomManager.resetChatLog(room);
   turnIndexByRoom.set(room.roomCode, 0);
 
-  io.to(room.roomCode).emit('game:started', { gameNumber: game.gameNumber });
+  io.to(room.roomCode).emit('game:started', { gameNumber: game.gameNumber, category: game.category });
   broadcastChat(io, room, 'system', 'system', `새 게임이 시작되었습니다! 카테고리: ${category}`);
 
   for (const player of room.players) {
