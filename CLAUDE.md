@@ -1,6 +1,6 @@
 # Document Management
 
-`CLAUDE.md`, `README.md`, `.claude/agents/` 서브에이전트 등 공유 문서는 `dev` 브랜치에서만 관리한다. 다른 브랜치(`main`, `backend` 등)에는 커밋하지 않는다.
+`CLAUDE.md`, `README.md`, `.claude/agents/` 서브에이전트, 루트 `.gitignore` 등 공유 문서/설정은 `dev` 브랜치에서만 관리한다. 다른 브랜치(`main`, `backend` 등)에는 커밋하지 않는다.
 
 # Git Commit Convention
 
