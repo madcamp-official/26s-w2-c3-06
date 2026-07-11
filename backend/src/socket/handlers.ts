@@ -69,14 +69,36 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   });
 
   socket.on('room:leave', () => {
-    handleLeave();
+    handleExplicitLeave();
   });
 
   socket.on('disconnect', () => {
-    handleLeave();
+    handleDisconnect();
   });
 
-  function handleLeave() {
+  socket.on('room:rejoin', (payload: { roomCode: string }) => {
+    const result = roomManager.rejoin({ socketId: socket.id, uid, roomCode: payload.roomCode });
+    if (roomManager.isJoinError(result)) {
+      socket.emit('room:error', { message: result.error });
+      return;
+    }
+    const room = result;
+    socket.join(room.roomCode);
+    socket.emit('room:rejoined', {
+      roomCode: room.roomCode,
+      hostId: room.hostId,
+      visibility: room.visibility,
+      players: room.players,
+      chatLog: room.chatLog,
+      currentGame: room.currentGame ? gameEngine.toPublicGameState(room, room.currentGame) : null,
+    });
+    io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
+    gameEngine.resendYourWord(io, room, uid);
+    gameEngine.resendLiarGuessPromptIfPending(io, room, uid);
+  });
+
+  // 명시적 나가기 — 즉시 퇴장 처리(방장이 나가면 방 폭파, 아니면 남은 인원 유지).
+  function handleExplicitLeave() {
     const room = currentRoom();
     const player = room?.players.find((p) => p.id === uid);
     const result = roomManager.leaveRoom(socket.id);
@@ -90,6 +112,31 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     if (player) {
       broadcastChat(io, result.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
     }
+  }
+
+  // 원인 불명의 연결 끊김(새로고침 포함) — 곧바로 퇴장시키지 않고 유예 시간을 준다.
+  // 그 사이 room:rejoin이 오면 복귀, 만료되면 그때 진짜 퇴장 처리(방장이면 방 폭파).
+  function handleDisconnect() {
+    const room = currentRoom();
+    const player = room?.players.find((p) => p.id === uid);
+    const result = roomManager.markDisconnected(socket.id);
+    if (!result) return;
+    const { roomCode } = result;
+    if (room) {
+      io.to(roomCode).emit('room:playerListUpdated', { players: room.players });
+    }
+    roomManager.scheduleRemoval(roomCode, uid, () => {
+      const removal = roomManager.removePlayerByUid(roomCode, uid);
+      if (!removal) return;
+      if (removal.roomClosed) {
+        io.to(roomCode).emit('room:closed');
+        return;
+      }
+      io.to(roomCode).emit('room:playerListUpdated', { players: removal.room.players });
+      if (player) {
+        broadcastChat(io, removal.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
+      }
+    });
   }
 
   // ── 채팅 (언제든 자유 채팅) ──

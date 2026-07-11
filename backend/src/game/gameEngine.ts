@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import type { GameState, Round, RoomState } from '../types';
+import type { GamePhase, GameState, Round, RoomState } from '../types';
 import { llm } from '../llm/wrapper';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
@@ -141,6 +141,62 @@ export async function startGame(
 
   game.phase = 'describing';
   startTurn(io, room);
+}
+
+// room:rejoin으로 클라이언트에 내려줄 게임 상태. liarIds/realWord/liarWord와 라운드별
+// votes(서버 전용)는 절대 포함하지 않는다 — 이 정보는 round:yourWord/round:resolved로
+// 각자에게 필요한 만큼만 이미 개별 전달된다.
+// participants는 game:started와 동일한 모양({id, nickname, isBot})으로 봇 닉네임까지 포함해
+// 클라이언트가 턴 배너·투표 후보를 새로고침 이전과 동일하게 그릴 수 있게 한다.
+// resolution/liarGuess/ended 단계는 round:resolved로 이미 모두에게 realWord/liarWord가
+// 공개된 이후이므로, rejoin 시에도 이 단계에서만 함께 내려준다.
+const REVEALED_PHASES: GamePhase[] = ['resolution', 'liarGuess', 'ended'];
+
+export function toPublicGameState(room: RoomState, game: GameState) {
+  const bots = botsByRoom.get(room.roomCode) ?? [];
+  const participants = [
+    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
+    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
+  ];
+  const revealed = REVEALED_PHASES.includes(game.phase);
+  return {
+    gameNumber: game.gameNumber,
+    category: game.category,
+    aiBotCount: game.aiBotCount,
+    phase: game.phase,
+    participantIds: game.participantIds,
+    participants,
+    realWord: revealed ? game.realWord : null,
+    liarWord: revealed ? game.liarWord : null,
+    rounds: game.rounds.map(({ votes: _votes, ...publicRound }) => publicRound),
+  };
+}
+
+// room:rejoin 시, 게임이 진행 중이면 그 플레이어에게 배정된 단어를 다시 보내준다
+// (새로고침으로 메모리 상의 round:yourWord 수신 내역이 날아갔기 때문).
+export function resendYourWord(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase === 'setup' || !game.participantIds.includes(uid)) return;
+  const isLiar = game.liarIds.includes(uid);
+  const word = isLiar ? game.liarWord : game.realWord;
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (socketId) {
+    io.to(socketId).emit('round:yourWord', { word });
+  }
+}
+
+// room:rejoin 시, 마침 라이어 역전승 판정 대상으로 지목된 상태였다면 프롬프트를 다시 보내준다.
+// 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, 남은 시간이 표시값보다
+// 짧을 수 있다(재접속이 잦지 않은 30초 남짓의 좁은 구간이라 우선순위를 낮춰 단순화함).
+export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'liarGuess') return;
+  const round = currentRound(game);
+  if (round.votedOutId !== uid) return;
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (socketId) {
+    io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+  }
 }
 
 // ── 설명(턴) 페이즈 ──
