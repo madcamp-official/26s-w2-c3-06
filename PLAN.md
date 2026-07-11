@@ -21,10 +21,10 @@ AI는 세 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 
 - [확정된 제품/기술 결정](#확정된-제품기술-결정)
 - [저장소 구조](#저장소-구조)
-- [Socket.IO 이벤트 계약 (MVP)](#socketio-이벤트-계약-mvp)
 - [인증/유저 관리 흐름](#인증유저-관리-흐름)
 - [데이터 모델 (인메모리, 과도한 정규화 없이)](#데이터-모델-인메모리-과도한-정규화-없이)
 - [DB 스키마 (영구 저장: 유저·전적·친구)](#db-스키마-영구-저장-유저전적친구)
+- [Socket.IO 이벤트 계약 (MVP)](#socketio-이벤트-계약-mvp)
 - [REST API (전적·친구)](#rest-api-전적친구)
 - [LLM 래퍼 (`backend/src/llm/wrapper.ts`)](#llm-래퍼-backendsrcllmwrapperts)
 - [백엔드 구현 현황 (backend 브랜치)](#백엔드-구현-현황-backend-브랜치)
@@ -97,42 +97,6 @@ frontend/
 ```
 
 방의 메인 화면(`RoomScreen`)은 그룹 채팅 UI 하나로 통일하고, 현재 게임 페이즈(대기/설정/설명/토론/투표/결과)에 따라 하단에 다른 입력 패널만 갈아끼우는 구조로 간다 — 화면을 여러 개로 쪼개지 않아 채팅이 "끊기지 않는" 느낌을 유지할 수 있다.
-
-## Socket.IO 이벤트 계약 (MVP)
-
-단일 기본 네임스페이스 + Socket.IO **room**(`socket.join(roomCode)`)으로 충분.
-
-**Client → Server**:
-- `room:create` `{ nickname, visibility: 'public'|'private' }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성)
-- `room:listPublic` `{}` — 로비 진입 시 공개방 목록 요청
-- `room:join` `{ roomCode, nickname }`
-- `room:leave` `{}`
-- `chat:send` `{ text }` — 언제든 자유 채팅
-- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. 프론트는 이 세 입력 수단(칩·자유입력 필드·"AI 랜덤 생성" 토글)을 모두 제공해야 한다. 전송 즉시 새 게임 시작 + 방 채팅 초기화
-- `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
-- `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
-- `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
-
-**Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`)
-- `room:publicList` `{ rooms: [{roomCode, playerCount}] }`
-- `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 시 방 전체에 브로드캐스트
-- `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
-- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
-- `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
-- `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
-- `turn:started` `{ playerId, timeLimitSec }`
-- `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
-- `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
-- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord }`
-- `liar:guessPrompt` `{ timeLimitSec }` — 지목된 사람의 소켓에만
-- `round:finalResult` `{ liarGuessCorrect, winner: 'liar'|'citizens' }`
-- `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
-- `room:closed`
-
-서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
-
-**타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 두지 않는다.
 
 ## 인증/유저 관리 흐름
 
@@ -296,6 +260,42 @@ enum FriendshipStatus {
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
 **정리(cleanup)와의 정합성**: 익명 계정 삭제 시 `User` 행을 지우면 `onDelete: Cascade`로 해당 유저의 `GamePlay`·`Friendship`이 함께 삭제된다(별도 정리 코드 불필요). Firebase Auth 삭제는 기존 `firebase-admin` 스케줄 작업이 담당.
+
+## Socket.IO 이벤트 계약 (MVP)
+
+단일 기본 네임스페이스 + Socket.IO **room**(`socket.join(roomCode)`)으로 충분.
+
+**Client → Server**:
+- `room:create` `{ nickname, visibility: 'public'|'private' }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성)
+- `room:listPublic` `{}` — 로비 진입 시 공개방 목록 요청
+- `room:join` `{ roomCode, nickname }`
+- `room:leave` `{}`
+- `chat:send` `{ text }` — 언제든 자유 채팅
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. 프론트는 이 세 입력 수단(칩·자유입력 필드·"AI 랜덤 생성" 토글)을 모두 제공해야 한다. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
+- `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
+- `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
+
+**Server → Client**:
+- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`)
+- `room:publicList` `{ rooms: [{roomCode, playerCount}] }`
+- `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 시 방 전체에 브로드캐스트
+- `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
+- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
+- `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
+- `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
+- `turn:started` `{ playerId, timeLimitSec }`
+- `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
+- `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
+- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord }`
+- `liar:guessPrompt` `{ timeLimitSec }` — 지목된 사람의 소켓에만
+- `round:finalResult` `{ liarGuessCorrect, winner: 'liar'|'citizens' }`
+- `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
+- `room:closed`
+
+서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
+
+**타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 두지 않는다.
 
 ## REST API (전적·친구)
 
