@@ -239,7 +239,7 @@ async function runBotTurn(io: Server, room: RoomState, botId: string): Promise<v
       text: t.text,
     }));
     const text = await llm.generateBotTurn({ category: game.category, assignedWord, priorTurns });
-    submitDescriptionInternal(io, room, botId, text);
+    await submitDescriptionInternal(io, room, botId, text);
   } catch (err) {
     console.error('[gameEngine] generateBotTurn 실패, 빈 턴으로 넘어감', err);
     advanceTurn(io, room);
@@ -257,7 +257,12 @@ function handleTurnTimeout(io: Server, room: RoomState, playerId: string): void 
 }
 
 // 현재 턴인 사람만 유효 (PLAN 이벤트 계약). 소켓 핸들러에서 검증 후 호출.
-export function submitDescription(io: Server, room: RoomState, uid: string, text: string): void {
+export async function submitDescription(
+  io: Server,
+  room: RoomState,
+  uid: string,
+  text: string,
+): Promise<void> {
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
   const round = currentRound(game);
@@ -268,24 +273,28 @@ export function submitDescription(io: Server, room: RoomState, uid: string, text
   if (timer) clearTimeout(timer);
   turnTimers.delete(room.roomCode);
 
-  submitDescriptionInternal(io, room, uid, text);
+  await submitDescriptionInternal(io, room, uid, text);
 }
 
-function submitDescriptionInternal(
+async function submitDescriptionInternal(
   io: Server,
   room: RoomState,
   playerId: string,
   text: string,
-): void {
+): Promise<void> {
   const game = room.currentGame;
   if (!game) return;
   const round = currentRound(game);
   round.turns.push({ playerId, text });
   broadcastChat(io, room, playerId, 'turnDescription', text);
 
-  // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음)
-  void generateAndBroadcastComment(io, room, text, round);
+  // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음).
+  // 다음 턴 시작(또는 마지막 턴이면 "모든 설명이 끝났습니다" 페이즈 전환 안내)보다
+  // 먼저 끝나도록 기다려, 채팅 순서가 "설명 → AI 코멘트 → 다음 안내"로 항상 고정되게 한다.
+  await generateAndBroadcastComment(io, room, text, round);
 
+  // 코멘트를 기다리는 동안 방이 정리되는 등 상태가 바뀌었을 수 있으니 다시 확인.
+  if (room.currentGame?.phase !== 'describing') return;
   advanceTurn(io, room);
 }
 

@@ -221,7 +221,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('turn:submitDescription', (payload: { text: string }) => {
     const room = currentRoom();
     if (!room || !payload.text?.trim()) return;
-    gameEngine.submitDescription(io, room, uid, payload.text.trim());
+    void gameEngine.submitDescription(io, room, uid, payload.text.trim());
   });
 
   socket.on('vote:cast', (payload: { votedPlayerId: string }) => {
