@@ -42,7 +42,7 @@ export async function sendRequest(requesterId: string, addresseeId: string) {
 export async function listPendingRequests(userId: string) {
   return prisma.friendship.findMany({
     where: { addresseeId: userId, status: FriendshipStatus.pending },
-    include: { requester: { select: { uid: true, nickname: true, avatarIndex: true } } },
+    include: { requester: { select: { uid: true, nickname: true, avatarIndex: true, avatarUrl: true } } },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -74,8 +74,8 @@ export async function listFriends(userId: string) {
       OR: [{ requesterId: userId }, { addresseeId: userId }],
     },
     include: {
-      requester: { select: { uid: true, nickname: true, avatarIndex: true } },
-      addressee: { select: { uid: true, nickname: true, avatarIndex: true } },
+      requester: { select: { uid: true, nickname: true, avatarIndex: true, avatarUrl: true } },
+      addressee: { select: { uid: true, nickname: true, avatarIndex: true, avatarUrl: true } },
     },
   });
   return rows.map((r) => (r.requesterId === userId ? r.addressee : r.requester));

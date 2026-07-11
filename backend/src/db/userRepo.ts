@@ -25,6 +25,28 @@ export async function upsertUser(opts: {
   });
 }
 
+export interface UserProfile {
+  nickname: string;
+  avatarIndex: number;
+  avatarUrl: string | null;
+}
+
+// 로그인 시 프론트가 프리셋 인덱스·업로드 사진을 복원하기 위한 조회.
+// 로컬 DB에 아직 프로필이 없는 유저(막 가입해 upsertUser가 아직 안 돈 경우)는 null.
+export async function getUserProfile(uid: string): Promise<UserProfile | null> {
+  const user = await prisma.user.findUnique({
+    where: { uid },
+    select: { nickname: true, avatarIndex: true, avatarUrl: true },
+  });
+  return user ?? null;
+}
+
+// 프로필 사진 업로드/삭제(avatarUrl: null). 실제 파일은 Firebase Storage가 들고 있고
+// 여기선 다운로드 URL만 소유 — updateAvatarUrl 호출 전 라우트에서 본인 경로인지 검증한다.
+export async function updateAvatarUrl(uid: string, avatarUrl: string | null): Promise<void> {
+  await prisma.user.update({ where: { uid }, data: { avatarUrl } });
+}
+
 // 닉네임 중복 확인. 회원가입 폼의 "중복 확인" 버튼과, DB @unique 제약의 사전 체크용.
 // excludeUid를 주면 "본인 소유 닉네임"은 사용 가능으로 취급(프로필 수정 시 재사용 대비).
 export async function isNicknameAvailable(nickname: string, excludeUid?: string): Promise<boolean> {
