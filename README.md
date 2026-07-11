@@ -88,7 +88,7 @@
 | 매 턴 AI 교란 코멘트 | 설명 제출마다 LLM이 의도적으로 헷갈리게 하는 코멘트 실시간 추가 | 필수 |
 | Firebase Auth 로그인 | 이메일/소셜 로그인, 소켓 handshake 시 ID 토큰 검증 | 필수 |
 | 라이어 역전승 | 투표로 지목된 라이어가 진짜 제시어를 맞히면 승리 | 필수 |
-| Firestore 승패 기록 | 게임 결과를 영구 저장해 프로필/통계로 노출 | 선택 |
+| 유저 전적·친구 (로컬 DB) | 게임 결과를 로컬 DB(PostgreSQL+Prisma)에 영구 저장해 전적(승률 등)·친구 기능으로 노출 | 선택 |
 | 게임 내 라운드 재시작 | 하나의 게임에서 설명 라운드를 여러 번 반복 | 선택 |
 
 ---
@@ -109,7 +109,7 @@ Flutter(iOS/Android/Web) 클라이언트가 `socket_io_client`로 Node/Express +
 
 ### 데이터 구조
 
-방(Room) > 게임(Game) > 라운드(Round) 계층. 방은 인메모리 `RoomState`(방 코드, 플레이어, 채팅 로그, 현재 게임)로 관리하고, 승패 기록만 Firestore에 영구 저장(선택 구현). 상세 TypeScript 인터페이스는 [PLAN.md](./PLAN.md)의 "데이터 모델" 섹션 참고.
+방(Room) > 게임(Game) > 라운드(Round) 계층. 방은 인메모리 `RoomState`(방 코드, 플레이어, 채팅 로그, 현재 게임)로 관리하고, 유저 프로필·전적·친구 관계만 로컬 DB(PostgreSQL+Prisma)에 영구 저장(선택 구현). 상세 인터페이스는 [PLAN.md](./PLAN.md)의 "데이터 모델"·"DB 스키마" 섹션 참고.
 
 ### API / 외부 서비스 연동
 
@@ -145,9 +145,9 @@ npm run dev   # 또는 python main.py 등
 |---|---|
 | 핵심 기술 | Flutter, Node.js + Express + Socket.IO, Anthropic Claude API |
 | 실행 환경 | iOS / Android / Web (Flutter 단일 코드베이스) |
-| 데이터 저장 | 인메모리(방/게임/라운드 상태), Firestore(승패 기록, 선택 구현) |
-| 외부 API / 서비스 | Firebase Authentication, Firestore, Anthropic Claude API |
-| 기타 | `socket_io_client`(Flutter), `firebase-admin`(백엔드 토큰 검증), Riverpod(상태관리) |
+| 데이터 저장 | 인메모리(방/게임/라운드 상태), 로컬 DB PostgreSQL+Prisma(유저 프로필·전적·친구, 선택 구현) |
+| 외부 API / 서비스 | Firebase Authentication(인증 전용), Anthropic Claude API |
+| 기타 | `socket_io_client`(Flutter), `firebase-admin`(백엔드 토큰 검증), Prisma(ORM), Riverpod(상태관리) |
 
 ---
 
