@@ -63,15 +63,15 @@ statsRouter.put('/me', requireAuth, async (req: AuthedRequest, res) => {
   res.status(204).end();
 });
 
-// 로그인 시 프리셋 인덱스·업로드 사진을 복원하기 위한 프로필 조회.
+// 로그인 시 업로드한 프로필 사진을 복원하기 위한 프로필 조회.
 statsRouter.get('/me/profile', requireAuth, async (req: AuthedRequest, res) => {
   const profile = await getUserProfile(req.uid!);
-  res.json(profile ?? { nickname: null, avatarIndex: 0, avatarUrl: null });
+  res.json(profile ?? { nickname: null, avatarUrl: null });
 });
 
 // 프로필 사진 저장. 클라이언트가 Firebase Storage(avatars/{uid} 경로, Storage 보안 규칙으로
 // 본인만 쓰기 가능)에 직접 업로드한 뒤, 그 다운로드 URL만 이 엔드포인트로 넘겨 DB에 기록한다
-// — 서버는 파일을 직접 다루지 않는다. avatarUrl: null이면 프리셋(avatarIndex)으로 되돌리는 것.
+// — 서버는 파일을 직접 다루지 않는다. avatarUrl: null이면 기본 아이콘으로 되돌리는 것.
 statsRouter.patch('/me/avatar', requireAuth, async (req: AuthedRequest, res) => {
   const uid = req.uid!;
   const { avatarUrl } = req.body as { avatarUrl?: string | null };

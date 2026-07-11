@@ -5,21 +5,18 @@ import { prisma } from './client';
 export async function upsertUser(opts: {
   uid: string;
   nickname: string;
-  avatarIndex?: number;
   isAnonymous: boolean;
 }) {
   return prisma.user.upsert({
     where: { uid: opts.uid },
     update: {
       nickname: opts.nickname,
-      avatarIndex: opts.avatarIndex ?? undefined,
       isAnonymous: opts.isAnonymous,
       lastActive: new Date(),
     },
     create: {
       uid: opts.uid,
       nickname: opts.nickname,
-      avatarIndex: opts.avatarIndex ?? 0,
       isAnonymous: opts.isAnonymous,
     },
   });
@@ -27,16 +24,15 @@ export async function upsertUser(opts: {
 
 export interface UserProfile {
   nickname: string;
-  avatarIndex: number;
   avatarUrl: string | null;
 }
 
-// 로그인 시 프론트가 프리셋 인덱스·업로드 사진을 복원하기 위한 조회.
+// 로그인 시 프론트가 업로드한 프로필 사진을 복원하기 위한 조회.
 // 로컬 DB에 아직 프로필이 없는 유저(막 가입해 upsertUser가 아직 안 돈 경우)는 null.
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const user = await prisma.user.findUnique({
     where: { uid },
-    select: { nickname: true, avatarIndex: true, avatarUrl: true },
+    select: { nickname: true, avatarUrl: true },
   });
   return user ?? null;
 }

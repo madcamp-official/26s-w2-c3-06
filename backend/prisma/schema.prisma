@@ -13,8 +13,7 @@ datasource db {
 model User {
   uid         String   @id // Firebase Auth uid를 그대로 PK로 사용 (link 시 불변)
   nickname    String   @unique
-  avatarIndex Int      @default(0)
-  avatarUrl   String? // Firebase Storage 업로드 사진(avatars/{uid}). null이면 avatarIndex 프리셋 사용.
+  avatarUrl   String? // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용.
   isAnonymous Boolean  @default(true) // 게스트 구분 (리더보드 필터링 · 30일 정리 판별)
   createdAt   DateTime @default(now())
   lastActive  DateTime @default(now()) // 게스트 cleanup(마지막 활동 30일 경과) 기준
