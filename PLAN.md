@@ -246,7 +246,7 @@ enum FriendshipStatus {
 - `turn:started` `{ playerId, timeLimitSec }`
 - `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
 - `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
-- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord }` — `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행
+- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행
 - `liar:guessPrompt` `{ timeLimitSec }` — `wasLiar`가 `true`일 때만 발생, 지목된 사람의 소켓에만
 - `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens' }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect: null`. 정답 판정은 서버가 LLM(`judgeLiarGuess`)에게 위임해 유사 표현·오타·한글/영어 표기 차이를 허용
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
