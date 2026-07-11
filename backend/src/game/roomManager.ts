@@ -49,11 +49,11 @@ export function getUidBySocket(socketId: string): string | undefined {
   return socketIndex.get(socketId)?.uid;
 }
 
-// 로비 공개방 목록. PLAN 계약대로 { roomCode, playerCount }만 노출.
-export function listPublicRooms(): { roomCode: string; playerCount: number }[] {
+// 로비 공개방 목록. PLAN 계약대로 { roomCode, playerCount, maxPlayers }를 노출.
+export function listPublicRooms(): { roomCode: string; playerCount: number; maxPlayers: number }[] {
   return [...rooms.values()]
     .filter((r) => r.visibility === 'public')
-    .map((r) => ({ roomCode: r.roomCode, playerCount: r.players.length }));
+    .map((r) => ({ roomCode: r.roomCode, playerCount: r.players.length, maxPlayers: r.maxPlayers }));
 }
 
 export function createRoom(opts: {
@@ -61,6 +61,7 @@ export function createRoom(opts: {
   uid: string;
   nickname: string;
   visibility: 'public' | 'private';
+  maxPlayers: number;
 }): RoomState {
   const roomCode = generateRoomCode();
   const host: Player = {
@@ -69,12 +70,15 @@ export function createRoom(opts: {
     isBot: false,
     isHost: true,
     connected: true,
+    isReady: false,
   };
   const room: RoomState = {
     roomCode,
     hostId: opts.uid,
     visibility: opts.visibility,
+    maxPlayers: opts.maxPlayers,
     players: [host],
+    customCategories: [],
     chatLog: [],
     currentGame: null,
     gameHistory: [],
@@ -100,6 +104,9 @@ export function joinRoom(opts: {
   if (room.players.some((p) => p.id === opts.uid)) {
     return { error: '이미 참가 중인 방입니다.' };
   }
+  if (room.players.length >= room.maxPlayers) {
+    return { error: '방 인원이 가득 찼습니다.' };
+  }
 
   const player: Player = {
     id: opts.uid,
@@ -107,11 +114,26 @@ export function joinRoom(opts: {
     isBot: false,
     isHost: false,
     connected: true,
+    isReady: false,
   };
   room.players.push(player);
   socketIndex.set(opts.socketId, { roomCode: opts.roomCode, uid: opts.uid });
   uidSocketIndex.set(opts.uid, opts.socketId);
   return room;
+}
+
+// 대기방 준비 상태 토글. 게임 중이거나 대상 플레이어가 없으면 조용히 무시.
+export function setPlayerReady(room: RoomState, uid: string, isReady: boolean): void {
+  const player = room.players.find((p) => p.id === uid);
+  if (!player) return;
+  player.isReady = isReady;
+}
+
+// 방장이 프리셋에 없는 카테고리를 자유 입력하면 이 방의 재사용 목록에 추가한다(중복 방지).
+export function addCustomCategory(room: RoomState, category: string): void {
+  if (!room.customCategories.includes(category)) {
+    room.customCategories.push(category);
+  }
 }
 
 // 방 나가기. 방장이 나가면 다음 플레이어에게 방장을 승계하고, 마지막 인원이면 방을 닫는다.

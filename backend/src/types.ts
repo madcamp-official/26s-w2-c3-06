@@ -6,6 +6,7 @@ export interface Player {
   isBot: boolean;
   isHost: boolean;
   connected: boolean;
+  isReady: boolean; // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
 }
 
 export interface Round {
@@ -57,7 +58,9 @@ export interface RoomState {
   roomCode: string; // 4자리 숫자 문자열, 예: "4821"
   hostId: string;
   visibility: 'public' | 'private';
+  maxPlayers: number; // 방장이 방 생성 시 지정, 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];
+  customCategories: string[]; // 방장이 이 방에서 직접 추가한 카테고리 이름. 방 종료(소멸) 시 함께 사라짐
   chatLog: ChatMessage[]; // 방 존재 동안 유지, 새 게임 시작 시에만 초기화
   currentGame: GameState | null;
   gameHistory: GameState[];

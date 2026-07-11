@@ -51,6 +51,14 @@ export interface UserStats {
   overallWinRate: number | null;
   liarWinRate: number | null;
   citizenWinRate: number | null;
+  level: number;
+}
+
+// PLAN "레벨": 승패 무관, 참여 자체(count(plays))로 오르는 구간제 레벨.
+// 정확한 구간표는 PLAN TODO에 "추후 확정"으로 남아 있어, 5판당 1레벨을 잠정 기본값으로 둔다.
+const GAMES_PER_LEVEL = 5;
+function deriveLevel(totalGames: number): number {
+  return Math.floor(totalGames / GAMES_PER_LEVEL) + 1;
 }
 
 // 전적 4종은 GamePlay 집계로 파생 (PLAN "DB 스키마" 파생 방식 참고). 분모 0이면 null("기록 없음").
@@ -72,5 +80,6 @@ export async function getUserStats(uid: string): Promise<UserStats> {
     overallWinRate: rate(plays),
     liarWinRate: rate(liarPlays),
     citizenWinRate: rate(citizenPlays),
+    level: deriveLevel(totalGames),
   };
 }

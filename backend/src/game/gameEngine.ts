@@ -77,6 +77,17 @@ export async function startGame(
   const usedWords = room.gameHistory.flatMap((g) => [g.realWord, g.liarWord]);
   const { category, realWord, liarWord } = await llm.generateWordPair(opts.category, usedWords);
 
+  // 방장이 프리셋에 없는 카테고리를 직접 입력했으면 이 방의 재사용 목록에 추가한다.
+  if (opts.category && opts.category.trim()) {
+    roomManager.addCustomCategory(room, opts.category.trim());
+  }
+
+  // 낯선 단어면 AI가 텍스트 설명을 함께 준다. real/liar 단어 딱 2개뿐이므로 한 번씩만 판단.
+  const [realExplanation, liarExplanation] = await Promise.all([
+    llm.explainWordIfUnfamiliar(realWord).catch(() => null),
+    llm.explainWordIfUnfamiliar(liarWord).catch(() => null),
+  ]);
+
   const bots: BotInfo[] = Array.from({ length: opts.aiBotCount }, (_, i) => ({
     id: `bot-${room.roomCode}-${i + 1}`,
     nickname: `AI 봇 ${i + 1}`,
@@ -119,9 +130,13 @@ export async function startGame(
   broadcastChat(io, room, 'system', 'system', `새 게임이 시작되었습니다! 카테고리: ${category}`);
 
   for (const player of room.players) {
-    const word = liarIds.includes(player.id) ? liarWord : realWord;
+    const isLiar = liarIds.includes(player.id);
+    const word = isLiar ? liarWord : realWord;
+    const explanation = isLiar ? liarExplanation : realExplanation;
     const socketId = roomManager.getSocketIdByUid(player.id);
-    if (socketId) io.to(socketId).emit('round:yourWord', { word });
+    if (socketId) {
+      io.to(socketId).emit('round:yourWord', explanation ? { word, explanation } : { word });
+    }
   }
 
   game.phase = 'describing';
@@ -368,7 +383,7 @@ function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
 
   if (isBotId(liarId)) {
     // 봇 라이어도 정답을 모르므로, 자신에게 배정된 가짜 단어를 그대로 "추측"한다 (대개 오답).
-    setTimeout(() => submitLiarGuess(io, room, liarId, game.liarWord), 800);
+    setTimeout(() => void submitLiarGuess(io, room, liarId, game.liarWord), 800);
     return;
   }
 
@@ -386,7 +401,13 @@ function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
 }
 
 // 지목된 사람이 실제 라이어일 때만 유효 (PLAN 이벤트 계약).
-export function submitLiarGuess(io: Server, room: RoomState, uid: string, guess: string): void {
+// 정답 판정은 LLM(judgeLiarGuess)에게 위임 — 오타·맞춤법·한글/영어 표기 차이를 허용한다.
+export async function submitLiarGuess(
+  io: Server,
+  room: RoomState,
+  uid: string,
+  guess: string,
+): Promise<void> {
   const game = room.currentGame;
   if (!game || game.phase !== 'liarGuess') return;
   const round = currentRound(game);
@@ -396,7 +417,16 @@ export function submitLiarGuess(io: Server, room: RoomState, uid: string, guess:
   if (timer) clearTimeout(timer);
   phaseTimers.delete(room.roomCode);
 
-  const correct = normalizeWord(guess) === normalizeWord(game.realWord);
+  let correct: boolean;
+  try {
+    correct = await llm.judgeLiarGuess(guess, game.realWord);
+  } catch (err) {
+    console.error('[gameEngine] judgeLiarGuess 실패, 단순 일치 비교로 폴백', err);
+    correct = normalizeWord(guess) === normalizeWord(game.realWord);
+  }
+  // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
+  if (room.currentGame?.phase !== 'liarGuess') return;
+
   round.liarGuess = guess;
   round.liarGuessCorrect = correct;
   round.winner = correct ? 'liar' : 'citizens';

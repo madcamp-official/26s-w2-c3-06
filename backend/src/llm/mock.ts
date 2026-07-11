@@ -32,4 +32,14 @@ export const mockLLM: LiarGameLLM = {
   async generateTurnComment(ctx: TurnCommentContext) {
     return `(mock) "${ctx.latestDescription.slice(0, 10)}..."는 좀 수상한데요?`;
   },
+
+  async explainWordIfUnfamiliar(word: string) {
+    // 결정적 테스트를 위해 항상 설명 없음으로 응답 (실제 판단은 real LLM에서만 발생).
+    void word;
+    return null;
+  },
+
+  async judgeLiarGuess(guess: string, realWord: string) {
+    return guess.trim().toLowerCase() === realWord.trim().toLowerCase();
+  },
 };

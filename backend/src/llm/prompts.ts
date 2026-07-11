@@ -37,6 +37,29 @@ export function turnCommentPrompt(ctx: TurnCommentContext): string {
     `방금 제출된 설명: "${ctx.latestDescription}"`,
     `이전 설명들:\n${prior}`,
     '이 설명에 대해 다른 플레이어들을 의도적으로 헷갈리게 만드는 짧은 교란 코멘트를 한 문장 생성하라.',
+    '플레이어를 지칭할 때는 항상 닉네임을 사용하라.',
     '정답을 아는 척하지 말고, 자연스러운 노이즈가 되도록 하라. 코멘트 문장만 출력하라.',
+  ].join('\n');
+}
+
+// 낯선 단어로 판단되면 짧은 텍스트 설명을, 아니면 빈 문자열을 반환하도록 요청한다.
+export function explainWordPrompt(word: string): string {
+  return [
+    `단어: "${word}"`,
+    '이 단어가 일반적으로 낯설거나 어려운 단어인지 판단하라.',
+    '낯설다고 판단되면 한두 문장으로 짧게 설명하라(이미지 생성 없이 텍스트로만).',
+    '흔히 아는 단어라면 설명 없이 빈 문자열만 출력하라.',
+    '다른 말 없이 설명 문장 또는 빈 문자열만 출력하라.',
+  ].join('\n');
+}
+
+// 라이어의 역전승 답안과 진짜 제시어가 의미상 같은지 판정. 오타·맞춤법·한글/영어 표기 차이는 정답으로 인정.
+export function judgeLiarGuessPrompt(guess: string, realWord: string): string {
+  return [
+    `진짜 제시어: "${realWord}"`,
+    `라이어가 제출한 답: "${guess}"`,
+    '두 표현이 의미상 같은 대상을 가리키는지 판단하라.',
+    '오타, 맞춤법 오류, 한글/영어 표기 차이(예: "burger"와 "버거")는 정답으로 인정한다.',
+    '정답이면 "true", 아니면 "false"만 출력하라. 다른 말은 절대 출력하지 마라.',
   ].join('\n');
 }

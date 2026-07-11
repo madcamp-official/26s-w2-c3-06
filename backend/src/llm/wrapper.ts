@@ -1,6 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL } from './client';
-import { wordPairPrompt, botTurnPrompt, turnCommentPrompt } from './prompts';
+import {
+  wordPairPrompt,
+  botTurnPrompt,
+  turnCommentPrompt,
+  explainWordPrompt,
+  judgeLiarGuessPrompt,
+} from './prompts';
 import type { BotTurnContext, TurnCommentContext } from '../types';
 import { mockLLM } from './mock';
 
@@ -12,6 +18,8 @@ export interface LiarGameLLM {
   ): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
+  explainWordIfUnfamiliar(word: string): Promise<string | null>; // 낯설면 설명 텍스트, 아니면 null
+  judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 
 async function completeText(prompt: string, maxTokens: number): Promise<string> {
@@ -42,6 +50,16 @@ const realLLM: LiarGameLLM = {
 
   async generateTurnComment(ctx) {
     return completeText(turnCommentPrompt(ctx), 128);
+  },
+
+  async explainWordIfUnfamiliar(word) {
+    const raw = await completeText(explainWordPrompt(word), 200);
+    return raw.trim().length > 0 ? raw.trim() : null;
+  },
+
+  async judgeLiarGuess(guess, realWord) {
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord), 8);
+    return raw.trim().toLowerCase().startsWith('true');
   },
 };
 

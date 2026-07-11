@@ -15,24 +15,28 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
   // ── 방(Room) ──
 
-  socket.on('room:create', async (payload: { nickname: string; visibility: 'public' | 'private' }) => {
-    const room = roomManager.createRoom({
-      socketId: socket.id,
-      uid,
-      nickname: payload.nickname,
-      visibility: payload.visibility,
-    });
-    socket.join(room.roomCode);
-    socket.emit('room:created', {
-      roomCode: room.roomCode,
-      hostId: room.hostId,
-      visibility: room.visibility,
-      players: room.players,
-    });
-    upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
-      console.error('[handlers] upsertUser 실패', err),
-    );
-  });
+  socket.on(
+    'room:create',
+    (payload: { nickname: string; visibility: 'public' | 'private'; maxPlayers: number }) => {
+      const room = roomManager.createRoom({
+        socketId: socket.id,
+        uid,
+        nickname: payload.nickname,
+        visibility: payload.visibility,
+        maxPlayers: payload.maxPlayers,
+      });
+      socket.join(room.roomCode);
+      socket.emit('room:created', {
+        roomCode: room.roomCode,
+        hostId: room.hostId,
+        visibility: room.visibility,
+        players: room.players,
+      });
+      upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
+        console.error('[handlers] upsertUser 실패', err),
+      );
+    },
+  );
 
   socket.on('room:listPublic', () => {
     socket.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
@@ -96,7 +100,18 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     broadcastChat(io, room, uid, 'chat', payload.text.trim());
   });
 
+  // ── 대기방 준비 상태 ──
+
+  socket.on('player:ready', (payload: { isReady: boolean }) => {
+    const room = currentRoom();
+    if (!room) return;
+    roomManager.setPlayerReady(room, uid, Boolean(payload.isReady));
+    io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
+  });
+
   // ── 게임 진행 ──
+
+  const MIN_PARTICIPANTS = 3;
 
   socket.on('game:configure', async (payload: { category: string | null; aiBotCount: number }) => {
     const room = currentRoom();
@@ -107,6 +122,14 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     }
     if (room.currentGame && room.currentGame.phase !== 'ended') {
       socket.emit('room:error', { message: '이미 게임이 진행 중입니다.' });
+      return;
+    }
+    if (!room.players.every((p) => p.isReady)) {
+      socket.emit('room:error', { message: '모든 참가자가 준비 완료 상태여야 합니다.' });
+      return;
+    }
+    if (room.players.length + payload.aiBotCount < MIN_PARTICIPANTS) {
+      socket.emit('room:error', { message: `참가자(사람+봇)가 최소 ${MIN_PARTICIPANTS}명 이상이어야 합니다.` });
       return;
     }
     try {
@@ -132,6 +155,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('liar:guessWord', (payload: { guess: string }) => {
     const room = currentRoom();
     if (!room || !payload.guess?.trim()) return;
-    gameEngine.submitLiarGuess(io, room, uid, payload.guess.trim());
+    void gameEngine.submitLiarGuess(io, room, uid, payload.guess.trim());
   });
 }
