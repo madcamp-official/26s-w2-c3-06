@@ -24,6 +24,7 @@ AI는 세 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 - [Socket.IO 이벤트 계약 (MVP)](#socketio-이벤트-계약-mvp)
 - [인증/유저 관리 흐름](#인증유저-관리-흐름)
 - [데이터 모델 (인메모리, 과도한 정규화 없이)](#데이터-모델-인메모리-과도한-정규화-없이)
+- [DB 스키마 (영구 저장: 유저·전적·친구)](#db-스키마-영구-저장-유저전적친구)
 - [LLM 래퍼 (`backend/src/llm/wrapper.ts`)](#llm-래퍼-backendsrcllmwrapperts)
 - [프론트-백엔드 연결 정합성](#프론트-백엔드-연결-정합성)
 - [MVP 제외 (stretch)](#mvp-제외-stretch)
@@ -224,6 +225,72 @@ interface RoomState {
 }
 ```
 
+## DB 스키마 (영구 저장: 유저·전적·친구)
+
+방/게임/라운드 같은 휘발성 상태는 인메모리에 두지만, **유저 프로필·전적·친구 관계는 로컬 Postgres에 Prisma로 영구 저장**한다(현재는 stretch). Firebase Auth는 인증만 담당하고, `uid`를 PK로 삼아 이 DB가 유저 데이터를 소유한다. 아래는 `backend/prisma/schema.prisma`의 영구 저장 모델 설계다.
+
+```prisma
+model User {
+  uid         String   @id                  // Firebase Auth uid를 그대로 PK로 사용 (link 시 불변 → 게스트→가입 자동 이어짐)
+  nickname    String
+  avatarIndex Int      @default(0)
+  isAnonymous Boolean  @default(true)        // 게스트 구분 (리더보드 필터링 · 30일 정리 대상 판별)
+  createdAt   DateTime @default(now())
+  lastActive  DateTime @default(now())       // 게스트 cleanup(마지막 활동 30일 경과) 기준
+
+  plays                  GamePlay[]          // 참여한 게임들 (전적의 source of truth)
+  sentFriendRequests     Friendship[] @relation("requester")
+  receivedFriendRequests Friendship[] @relation("addressee")
+}
+
+// 사람 참가자 1명이 게임 1판을 마칠 때마다 1행 기록 (봇은 Firebase uid가 없으므로 기록 안 함).
+// 전적 4종은 모두 이 테이블 집계로 파생한다 — 별도 카운터를 두지 않아 드리프트가 없고, 추후 카테고리별·기간별 통계도 확장 가능.
+model GamePlay {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [uid], onDelete: Cascade)
+  wasLiar  Boolean                           // 이 게임에서 라이어였는지
+  won      Boolean                           // 이 유저가 속한 팀이 최종 승리했는지
+  category String
+  playedAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// 친구 관계 (요청→수락 모델). 한 쌍당 1행이며 방향(requester/addressee)을 보존한다.
+model Friendship {
+  id          String           @id @default(cuid())
+  requesterId String
+  addresseeId String
+  requester   User             @relation("requester", fields: [requesterId], references: [uid], onDelete: Cascade)
+  addressee   User             @relation("addressee", fields: [addresseeId], references: [uid], onDelete: Cascade)
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now())
+  respondedAt DateTime?
+
+  @@unique([requesterId, addresseeId])       // 같은 쌍 중복 요청 방지
+  @@index([addresseeId])                      // 받은 요청 조회용
+}
+
+enum FriendshipStatus {
+  pending
+  accepted
+  blocked
+}
+```
+
+**전적 4종 파생 방식** (한 유저의 `plays` 집계):
+- 전체 게임수 = `count(plays)`
+- 전체 승률 = `count(won = true) / count(plays)`
+- 라이어 승률 = `count(won = true AND wasLiar = true) / count(wasLiar = true)`
+- 비(非)라이어 승률 = `count(won = true AND wasLiar = false) / count(wasLiar = false)`
+
+분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
+
+**친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
+
+**정리(cleanup)와의 정합성**: 익명 계정 삭제 시 `User` 행을 지우면 `onDelete: Cascade`로 해당 유저의 `GamePlay`·`Friendship`이 함께 삭제된다(별도 정리 코드 불필요). Firebase Auth 삭제는 기존 `firebase-admin` 스케줄 작업이 담당.
+
 ## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
 
 ```ts
@@ -252,7 +319,8 @@ interface LiarGameLLM {
 ## MVP 제외 (stretch)
 
 - 게임 내 라운드 재시작(여러 라운드 반복)
-- 로컬 DB 연결 및 승패 기록 저장
+- 로컬 DB 연결 및 유저 전적(전체 게임수·전체/라이어/비라이어 승률) 저장 — 스키마는 "DB 스키마" 섹션 참조
+- 유저 간 친구 기능(요청/수락, 친구 목록) — `Friendship` 모델 기반
 - 방별 Socket.IO 네임스페이스
 - 다중 LLM 프로바이더 동시 지원 (인터페이스만 교체 가능하게 열어둠)
 
