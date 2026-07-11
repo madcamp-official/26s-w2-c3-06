@@ -6,6 +6,7 @@ import {
   getUserStats,
   isNicknameAvailable,
   updateAvatarUrl,
+  upsertUser,
 } from '../db/userRepo';
 import { admin, initFirebaseAdmin, isFirebaseReady } from '../firebase/admin';
 
@@ -29,6 +30,37 @@ statsRouter.get('/nickname-availability/:nickname', async (req, res) => {
 statsRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
   const stats = await getUserStats(req.uid!);
   res.json(stats);
+});
+
+// 회원가입/닉네임 변경 직후 로컬 DB 즉시 반영용. Firebase ID 토큰의 name 클레임은
+// updateDisplayName 직후 바로 갱신되지 않을 수 있어(토큰이 캐시돼 있으면 다음 자연
+// 갱신 전까지 옛 값), requireAuth의 토큰 클레임 동기화만으로는 가입 직후 시점을
+// 보장할 수 없다. 프론트가 닉네임 확정 직후 이 엔드포인트를 명시적으로 호출해,
+// 친구 요청(FK: Friendship.addresseeId → User.uid) 등이 가입 직후에도 바로
+// 동작하도록 로컬 User 행을 즉시 생성/갱신한다.
+statsRouter.put('/me', requireAuth, async (req: AuthedRequest, res) => {
+  const { nickname } = req.body as { nickname?: string };
+  const trimmed = nickname?.trim();
+  if (!trimmed) {
+    res.status(400).json({ error: 'nickname이 필요합니다.' });
+    return;
+  }
+  const available = await isNicknameAvailable(trimmed, req.uid!);
+  if (!available) {
+    res.status(409).json({ error: '이미 사용 중인 닉네임입니다.' });
+    return;
+  }
+  try {
+    await upsertUser({ uid: req.uid!, nickname: trimmed, isAnonymous: req.isAnonymous ?? true });
+  } catch (err) {
+    // 동시 요청 등으로 사전 체크 이후 유일성 제약에 걸린 경우(P2002)의 방어적 처리.
+    if ((err as { code?: string }).code === 'P2002') {
+      res.status(409).json({ error: '이미 사용 중인 닉네임입니다.' });
+      return;
+    }
+    throw err;
+  }
+  res.status(204).end();
 });
 
 // 로그인 시 프리셋 인덱스·업로드 사진을 복원하기 위한 프로필 조회.
