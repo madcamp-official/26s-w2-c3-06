@@ -1,12 +1,12 @@
 # AI 라이어게임 (Liar Game) — 구현 계획
 
-## Context
+## 게임 규칙
 
 madcamp 공통과제(2인 1팀)로, 실시간 인터랙션·LLM Wrapper·Cross-Platform 세 옵션을 모두 만족하는 **AI가 개입하는 라이어게임**을 만든다.
 
 **용어 계층**: 방(Room) > 게임(Game) > 라운드(Round). 라운드는 모든 참가자가 받은 제시어를 한 턴씩 설명하는 것으로, MVP에서는 게임당 1라운드만 돈다(라운드 재시작은 스트레치).
 
-**게임 규칙**: 방장이 방을 만들 때 최대 인원을 지정한다(시스템상 상한 없음). 게임 시작에는 최소 3명(사람+봇 합산)이 필요하고, 방이 다 차지 않아도 이 조건만 충족하면 시작할 수 있다. 방장은 카테고리(프리셋 선택·직접 입력·"AI 랜덤 생성" 중 택1)와 AI 봇 수를 정하며, 전원(사람+봇)이 준비 완료 상태여야 방장이 게임 시작 버튼을 누를 수 있다. 참가자(사람+봇) 중 라이어(고정 1명)는 **자신이 라이어인지 모른 채** 진짜 제시어와 비슷하지만 다른 가짜 제시어를 받는다. 각자 제시어를 직접 말하지 않고 설명한 뒤 익명 투표로 라이어를 지목한다. 지목된 사람이 실제 라이어면 진짜 제시어를 맞혀 역전승할 기회를 주고, 실제 라이어가 아니면 역전승 기회 없이 그 즉시 라이어 팀 승리로 게임이 끝난다.
+참가자(사람+봇) 중 라이어(고정 1명)는 **자신이 라이어인지 모른 채** 진짜 제시어와 비슷하지만 다른 가짜 제시어를 받는다. 각자 제시어를 직접 말하지 않고 설명한 뒤 익명 투표로 라이어를 지목한다. 지목된 사람이 실제 라이어면 진짜 제시어를 맞혀 역전승할 기회를 주고, 실제 라이어가 아니면 역전승 기회 없이 그 즉시 라이어 팀 승리로 게임이 끝난다. 세부 규칙(최소 참가 인원, 준비 상태 게이팅, 카테고리 지정 방식 등)은 "Socket.IO 이벤트 계약"의 `game:configure` 참고.
 
 AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 1. 방장이 지정(또는 AI 랜덤)한 카테고리로 진짜/가짜 제시어 쌍을 생성
@@ -15,12 +15,11 @@ AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 4. 제시어가 낯선 단어로 판단되면 AI가 해당 단어에 대한 텍스트 설명을 함께 제공한다 (이미지 생성은 하지 않음)
 5. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
 
-**방 UI는 그룹 채팅 형식**으로, 턴 설명·AI 교란 코멘트·시스템 안내·자유 채팅이 하나의 피드에 흐른다. 채팅은 **새 게임 시작 시에만 초기화**되어, 게임 종료 후에도 남아 계속 대화할 수 있다. 방은 **공개(public, 목록에서 입장)**와 **비공개(private, 4자리 코드로 입장)** 두 종류다.
-
-**기술 스택**: Flutter(iOS/Android/Web 단일 코드베이스로 Cross-Platform 충족) + Socket.IO 온라인 방, 백엔드 Node/Express, 인증 Firebase Auth + 백엔드 로컬 DB, LLM Anthropic Claude.
+**방 UI는 그룹 채팅 형식**으로, 턴 설명·AI 교란 코멘트·시스템 안내·자유 채팅이 하나의 피드에 흐른다. 채팅은 새 게임 시작 시에만 초기화된다(데이터 모델 `chatLog` 참고).
 
 ## 목차
 
+- [게임 규칙](#게임-규칙)
 - [확정된 제품/기술 결정](#확정된-제품기술-결정)
 - [인증/유저 관리 흐름](#인증유저-관리-흐름)
 - [데이터 모델 (인메모리, 과도한 정규화 없이)](#데이터-모델-인메모리-과도한-정규화-없이)
@@ -230,15 +229,19 @@ enum FriendshipStatus {
 - `room:leave` `{}` — 대기 상태(설정 전/게임 종료 후 대기 복귀 상태)에서만 유효. 게임 진행 중(`설명~역전승 시도`)에는 UI에 "방 나가기" 버튼 자체를 노출하지 않아 이 시나리오가 발생하지 않게 한다
 - `chat:send` `{ text }` — 언제든 자유 채팅
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
-- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용, 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 추가된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열 — 프리셋에 없는 새 이름이면 서버가 해당 방의 `customCategories`에 추가해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함), (3) `null` — 이 경우 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 추가된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열 — 프리셋에 없는 새 이름이면 서버가 해당 방의 `customCategories`에 추가해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함), (3) `null` — 이 경우 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
 - `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
 - `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
+- `room:rejoin` `{ roomCode }` — 새로고침 등으로 연결이 끊겼다 되돌아왔을 때 방 상태 복구 요청
 
 **Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`)
+- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
+- `game:draftConfigUpdated` `{ category, aiBotCount }` — `game:draftConfig` 수신 시 방 전체 브로드캐스트, 게임 시작(`game:configure`) 시 `{ category: null, aiBotCount: 0 }`로 리셋
 - `room:publicList` `{ rooms: [{roomCode, playerCount, maxPlayers}] }`
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
+- `room:rejoined` `{ roomCode, hostId, visibility, players, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
@@ -250,7 +253,7 @@ enum FriendshipStatus {
 - `liar:guessPrompt` `{ timeLimitSec }` — `wasLiar`가 `true`일 때만 발생, 지목된 사람의 소켓에만
 - `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens' }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect: null`. 정답 판정은 서버가 LLM(`judgeLiarGuess`)에게 위임해 유사 표현·오타·한글/영어 표기 차이를 허용
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
-- `room:closed`
+- `room:closed` — 호스트가 방을 나가면(재접속 유예 시간 만료 포함) 방이 폭파되며 전송. 호스트가 아닌 인원의 퇴장은 방을 유지한 채 `room:playerListUpdated`만 브로드캐스트
 
 서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
 
@@ -296,35 +299,39 @@ interface LiarGameLLM {
 
 이 문서의 MVP Socket.IO 계약과 "DB 스키마"(원래 선택 항목이었던 유저 전적·친구)까지 `backend` 브랜치에 구현 완료됨. 실제 Firebase 서비스 계정 키·Anthropic API 키로 동작 검증 완료(방 생성→게임 진행→투표→결과→종료까지 end-to-end, DB 기록 포함).
 
-- **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙), `socket/handlers`(이벤트 계약 전체), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Claude Haiku 4.5 실 연동, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장), 게스트 정리 cron(매일 04:00)
-- **이번 결정으로 backend에 추가 반영 필요**(기존 구현 완료 당시엔 없던 요구사항): `maxPlayers`/`customCategories`(방 생성·`game:configure` 최소인원 검사), `player:ready`(준비 상태 토글 및 게임 시작 게이팅), `explainWordIfUnfamiliar`·`judgeLiarGuess`(LLM 래퍼 신규 함수), 오지목 시 즉시 `round:finalResult` 분기, `User.level` 파생 응답 필드
-- **미구현으로 남은 것**: 아래 "MVP 제외(stretch)" 항목(라운드 재시작, `room:rejoin` 재접속, 방별 네임스페이스) — "라이어 수 선택"과 "준비(isReady) 기능 유지 여부"는 이번에 결정 완료되어 TODO에서 제외됨(각각 "고정 1명", "유지"로 확정)
-- **프론트 연동은 별개**: 아래 "프론트-백엔드 연결 정합성" 섹션의 갭은 아직 해소되지 않음 — 프론트는 여전히 mock 데이터 기반 골격이라, 백엔드가 완성됐다고 해서 앱이 바로 붙는 것은 아님
+- **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Claude Haiku 4.5 실 연동, 다섯 함수 전부, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(매일 04:00)
+- **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 라이어 다수 선택)뿐
+- **프론트 연동도 완료**: `frontend-2` 브랜치가 이 문서의 백엔드 계약에 맞춰 실연동을 마쳤다. 자세한 내용은 "프론트-백엔드 연결 정합성" 참고.
 
 ## 프론트-백엔드 연결 정합성
 
-현재 `frontend` 브랜치는 **mock 데이터 기반 순수 UI 골격**이라, 그대로는 이 문서의 백엔드 계약과 연결되지 않는다. 아래 항목은 **백엔드 계약(이 문서)을 source of truth로 삼고 프론트가 맞춰야 할 갭**이다. 백엔드 구현과 병행해 프론트에서 정리한다.
+`frontend-2` 브랜치가 이 문서의 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 아래와 같이 정리됐다.
 
-- **네트워킹/상태 의존성 추가**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod`를 추가하고, 지금 없는 `services/socket_service.dart`·`services/auth_service.dart`·`state/room_provider.dart`(Riverpod)를 신설한다. 현재의 `services/user_session.dart`(static 전역)와 빈 `lib/api/`는 이걸로 대체·정리.
-- **단일 `RoomScreen` + 페이즈 패널로 재구성**: 현재 `GameScreen`/`VoteScreen`/`LiarGuessScreen`/`ResultScreen`이 `Navigator.push`로 분리돼 게임 채팅이 방 채팅과 단절돼 있다. 이 문서의 "하나의 채팅 피드" 설계대로, 화면을 쪼개지 말고 `RoomScreen` 하나에서 페이즈별 **하단 컨텍스트 패널만 교체**하고 채팅 리스트는 하나로 유지한다.
-- **`ChatMessage` 모델 정렬**: 프론트 모델을 이 문서의 계약(`{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }`)에 맞춘다. 현재 프론트는 표시이름 기반 `sender`, `timestamp` 없음, `turnDescription` 타입 없음 → `senderId`·`timestamp` 추가, 턴 설명은 `turnDescription` 타입으로 구분.
-- **투표/판정을 서버 소유로 전환**: 현재 `VoteScreen`은 nickname 문자열로 투표하고 mock 라이어와 비교해 **클라이언트에서 판정**한다. 계약대로 `vote:cast { votedPlayerId }`(id 기반)로 보내고 판정은 서버(`round:resolved`/`round:finalResult`)만 수행하도록 클라 판정 로직을 제거한다. id↔nickname 매핑은 `room:playerListUpdated`로 받은 플레이어 목록에서 해결.
-- **개별 전송 이벤트 수신부 추가**: `round:yourWord`(본인 단어, 개별 전송)와 `liar:guessPrompt`(지목된 소켓에만)를 받을 UI가 프론트에 없다. 본인 단어 표시 영역과, 역전승 입력은 **지목된 당사자에게만** 뜨도록 수신부를 추가한다(전원에게 push하던 현재 방식 제거).
-- **`RoomSummary` 필드 정리**: `room:create`에 방 제목 필드는 없으므로 프론트의 `title`은 제거한다(또는 표시하지 않는다). `maxPlayers`는 (기존 결정과 달리) 이번에 다시 계약에 포함되었으므로 유지하되, `room:publicList`도 `{ roomCode, playerCount, maxPlayers }`로 응답 형태를 맞춰야 한다.
+- **네트워킹/상태 의존성**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod` 추가. `services/socket_service.dart`(소켓 송수신 전담), `services/auth_service.dart`(Firebase Auth), `state/room_provider.dart`(Riverpod, 방/게임 상태) 신설. 기존 `services/user_session.dart`(static 전역)는 `services/room_session_store.dart`로 대체.
+- **단일 `RoomScreen` + 페이즈 패널**: `screens/room/room_screen.dart` 하나로 통일. 채팅 리스트는 고정하고 하단만 `screens/room/panels/{waiting,describing,voting,liar_guess,result_card}.dart`로 교체해, 게임 채팅과 방 채팅이 하나의 피드로 유지된다.
+- **`ChatMessage` 모델**: `models/chat_message.dart`가 계약(`{ id, senderId, type, text, timestamp }`)과 동일. `senderId`는 uid 또는 `'ai'`/`'system'` 특수값.
+- **투표/판정 서버 소유**: `panels/voting_panel.dart`는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
+- **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, `panels/liar_guess_panel.dart`는 자신에게 온 경우에만 렌더링한다.
+- **`RoomSummary`**: `models/room_summary.dart`가 `{ roomCode, playerCount, maxPlayers }`만 가진다(`title` 없음).
+- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 `panels/waiting_panel.dart`의 준비 완료 토글로 반영.
+- **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
+- **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
+- **`maxPlayers` 방 생성 UI**: `screens/lobby/lobby_screen.dart`에 슬라이더로 지정, `createRoom()`이 이 값을 emit.
+- **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
+
+위 정리는 정적 코드 검토 기준이며, 런타임 동작(빌드/실행)은 별도로 확인해야 한다.
 
 ## MVP 제외 (stretch)
 
 - 게임 내 라운드 재시작(여러 라운드 반복)
-- ~~로컬 DB 연결 및 유저 전적(전체 게임수·전체/라이어/시민 승률) 저장~~ — **백엔드 구현 완료** (스키마는 "DB 스키마" 섹션 참조)
-- ~~유저 간 친구 기능(요청/수락, 친구 목록)~~ — **백엔드 구현 완료** (`Friendship` 모델 기반)
 - 방별 Socket.IO 네임스페이스
 - 다중 LLM 프로바이더 동시 지원 (인터페이스만 교체 가능하게 열어둠)
+- **라이어 다수 선택**: 지금은 라이어가 1명 고정이지만(데이터 모델 `GameState.liarIds` 참고), 방장이 라이어 수를 선택할 수 있도록 확장하는 것도 고려 가능. 확장 시 배정·투표 판정(라이어 전원 지목 필요 여부 등) 규칙을 다인 라이어 기준으로 새로 정의해야 한다.
 
 ## TODO / 향후 과제
 
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
-- **재접속(`room:rejoin`) 지원**: 모바일 환경에서 네트워크 끊김이 흔하므로 최소한의 재접속 처리가 필요할지 나중에 검토한다. 지금 MVP에는 넣지 않는다.
 - **레벨 구간표**: 게임수 기반 레벨을 도입하기로 확정했으나(데이터 모델 섹션 참조), 구체적인 구간(몇 판당 레벨업)은 아직 미정.
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 
