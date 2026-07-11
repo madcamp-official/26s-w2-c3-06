@@ -156,9 +156,8 @@ interface RoomState {
 model User {
   uid         String   @id                  // Firebase Auth uid를 그대로 PK로 사용 (link 시 불변 → 게스트→가입 자동 이어짐)
   nickname    String   @unique               // 전역 유일. 회원가입 폼에서 중복 확인 필수(GET /api/users/nickname-availability/:nickname)
-  avatarIndex Int      @default(0)
+  avatarUrl   String?                        // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용
   isAnonymous Boolean  @default(true)        // 게스트 구분 (리더보드 필터링 · 30일 정리 대상 판별)
-  createdAt   DateTime @default(now())
   lastActive  DateTime @default(now())       // 게스트 cleanup(마지막 활동 30일 경과) 기준
 
   plays                  GamePlay[]          // 참여한 게임들 (전적의 source of truth)
@@ -263,16 +262,19 @@ enum FriendshipStatus {
 
 **전적·계정** (`/api/users`, `backend/src/http/statsRoutes.ts`):
 - `GET /api/users/nickname-availability/:nickname` — **인증 불필요**(회원가입 단계엔 아직 Firebase 세션 자체가 없음). 응답 `{ available: boolean }`. `User.nickname`은 DB `@unique` 제약이 걸려 있어, 프론트는 회원가입 폼에서 이 엔드포인트로 중복 확인을 통과해야만 가입 제출을 허용해야 한다
-- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate }` (승률은 0~1 float, 분모 0이면 `null`)
+- `PUT /api/users/me` `{ nickname }` → 204 — 회원가입/닉네임 변경 직후 로컬 DB에 즉시 반영. Firebase ID 토큰의 name 클레임이 `updateDisplayName` 직후 바로 갱신되지 않을 수 있어, 프론트가 닉네임 확정 시 명시적으로 호출해 친구 요청 등이 가입 직후에도 바로 동작하게 한다. 닉네임 중복이면 409
+- `GET /api/users/me/profile` — 로그인 시 업로드한 프로필 사진을 복원하기 위한 조회. 응답 `{ nickname, avatarUrl }`
+- `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, level }` (승률은 0~1 float, 분모 0이면 `null`. `level`은 `count(plays)`에서 파생되는 정수, 정확한 구간표는 TODO 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
 - `POST /api/friends/requests` `{ addresseeUid }` → 201 `Friendship` — 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
-- `GET /api/friends/requests` — 내가 받은 대기 요청 목록. 응답 `{ requests: [{ ...Friendship, requester: { uid, nickname, avatarIndex } }] }`
+- `GET /api/friends/requests` — 내가 받은 대기 요청 목록. 응답 `{ requests: [{ ...Friendship, requester: { uid, nickname, avatarUrl } }] }`
 - `POST /api/friends/requests/:id/accept` → 200 `Friendship`(status: accepted)
 - `POST /api/friends/requests/:id/decline` → 204 (행 삭제, 재요청 가능)
-- `GET /api/friends` — 수락된 친구 목록. 응답 `{ friends: [{ uid, nickname, avatarIndex }] }`
+- `GET /api/friends` — 수락된 친구 목록. 응답 `{ friends: [{ uid, nickname, avatarUrl }] }`
 - `DELETE /api/friends/:uid` → 204 (친구 해제)
 
 ## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
