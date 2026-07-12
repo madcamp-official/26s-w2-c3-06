@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../services/user_session.dart';
@@ -28,12 +31,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _showNew = false;
   bool _showConfirm = false;
   late int _avatarIndex;
+  Uint8List? _profileImageBytes;
 
   @override
   void initState() {
     super.initState();
     _nicknameController = TextEditingController(text: UserSession.nickname);
     _avatarIndex = UserSession.avatarIndex;
+    _profileImageBytes = UserSession.profileImageBytes;
   }
 
   @override
@@ -79,43 +84,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handlePickPhoto() async {
-    final picked = await showModalBottomSheet<int>(
-      context: context,
-      backgroundColor: AppColors.card,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('프로필 사진 변경', style: Theme.of(sheetContext).textTheme.titleMedium),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: List.generate(avatarOptions.length, (index) {
-                    final selected = index == _avatarIndex;
-                    return GestureDetector(
-                      onTap: () => Navigator.of(sheetContext).pop(index),
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          border: selected ? Border.all(color: AppColors.primary, width: 2) : null,
-                        ),
-                        child: UserAvatar(avatarIndex: index, radius: 28),
-                      ),
-                    );
-                  }),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    final XFile? file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 85,
     );
-    if (picked != null) setState(() => _avatarIndex = picked);
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    setState(() => _profileImageBytes = bytes);
+    UserSession.profileImageBytes = bytes;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('프로필 사진이 변경되었습니다.')));
+  }
+
+  void _handleRemovePhoto() {
+    setState(() => _profileImageBytes = null);
+    UserSession.profileImageBytes = null;
   }
 
   Future<void> _handleDeleteAccount() async {
@@ -171,7 +157,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         height: 96,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
-                        child: UserAvatar(avatarIndex: _avatarIndex, radius: 40),
+                        child: UserAvatar(avatarIndex: _avatarIndex, radius: 40, imageBytes: _profileImageBytes),
                       ),
                       Positioned(
                         right: -6,
@@ -190,12 +176,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 Center(
-                  child: AppButton(
-                    label: '사진 변경',
-                    icon: Icons.camera_alt_outlined,
-                    variant: AppButtonVariant.outlined,
-                    fullWidth: false,
-                    onPressed: _handlePickPhoto,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppButton(
+                        label: '사진 변경',
+                        icon: Icons.photo_library_outlined,
+                        variant: AppButtonVariant.outlined,
+                        fullWidth: false,
+                        onPressed: _handlePickPhoto,
+                      ),
+                      if (_profileImageBytes != null) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: _handleRemovePhoto,
+                          style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
+                          child: const Text('사진 삭제'),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(height: 20),

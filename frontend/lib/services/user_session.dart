@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 /// 로그인에 사용한 방식. 이메일 가입 계정만 비밀번호 변경이 가능하다(PLAN.md 결정).
 enum AuthProvider { guest, email, google }
 
@@ -11,11 +13,15 @@ class UserSession {
   static int avatarIndex = 0;
   static AuthProvider authProvider = AuthProvider.guest;
 
+  /// 실제로 첨부한 프로필 사진. null이면 [avatarIndex] 기반 기본 아이콘을 대신 보여준다.
+  static Uint8List? profileImageBytes;
+
   static void signInAsGuest(String guestNickname) {
     nickname = guestNickname;
     isGuest = true;
     avatarIndex = 0;
     authProvider = AuthProvider.guest;
+    profileImageBytes = null;
   }
 
   static void signInAsMember({required String nickname, AuthProvider provider = AuthProvider.email}) {
@@ -23,5 +29,6 @@ class UserSession {
     isGuest = false;
     avatarIndex = 0;
     authProvider = provider;
+    profileImageBytes = null;
   }
 }

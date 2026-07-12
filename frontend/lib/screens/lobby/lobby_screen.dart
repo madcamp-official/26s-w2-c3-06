@@ -10,6 +10,7 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/pixel_dialog.dart';
 import '../../widgets/user_avatar.dart';
 import '../friends/friends_screen.dart';
+import '../login/login_screen.dart';
 import '../profile/profile_screen.dart';
 import '../room/room_screen.dart';
 
@@ -99,6 +100,53 @@ class _LobbyScreenState extends State<LobbyScreen> {
   }
 
   Future<void> _openFriends() async {
+    if (UserSession.isGuest) {
+      await showPixelDialog(
+        context: context,
+        barrierDismissible: true,
+        maxWidth: 320,
+        builder: (dialogContext) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('👥 친구 기능', style: PixelFont.title(fontSize: 12, color: AppColors.primary)),
+              const SizedBox(height: 12),
+              Text(
+                '게스트는 친구 기능을 이용할 수 없습니다.',
+                style: TextStyle(color: AppColors.mutedForeground),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '닫기',
+                      variant: AppButtonVariant.outlined,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AppButton(
+                      label: '회원가입',
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop();
+                        Navigator.of(context).pushAndRemoveUntil(
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          (route) => false,
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendsScreen()));
     if (!mounted) return;
     setState(() {});
@@ -202,7 +250,7 @@ class _Header extends StatelessWidget {
           const SizedBox(width: 8),
           _IconBox(
             onTap: onProfile,
-            child: UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 12),
+            child: UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 12, imageBytes: UserSession.profileImageBytes),
           ),
         ],
       ),

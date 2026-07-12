@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/chat_message.dart';
+import '../services/user_session.dart';
 import '../theme/app_colors.dart';
 import 'user_avatar.dart';
 
@@ -73,7 +74,11 @@ class ChatBubble extends StatelessWidget {
   Widget _buildPlayerBubble(BuildContext context) {
     final isMine = message.senderId == 'me';
 
-    final avatar = UserAvatar(avatarIndex: message.avatarIndex, radius: 16);
+    final avatar = UserAvatar(
+      avatarIndex: message.avatarIndex,
+      radius: 16,
+      imageBytes: isMine ? UserSession.profileImageBytes : null,
+    );
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(

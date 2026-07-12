@@ -7,6 +7,7 @@ import '../../theme/pixel_font.dart';
 import '../../mock/mock_data.dart';
 import '../../models/chat_message.dart';
 import '../../models/player.dart';
+import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
@@ -810,7 +811,6 @@ class _RoomScreenState extends State<RoomScreen> {
 
   Widget _buildTurnInfoBar(BuildContext context) {
     final playerId = _currentTurnIndex < _turnOrder.length ? _turnOrder[_currentTurnIndex] : null;
-    final emoji = playerId == null ? '' : avatarOptions[_avatarIndexFor(playerId) % avatarOptions.length].emoji;
     final progress = _turnSeconds == 0 ? 0.0 : _secondsLeft / _turnSeconds;
 
     return Container(
@@ -827,15 +827,15 @@ class _RoomScreenState extends State<RoomScreen> {
             child: Row(
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
                   decoration: const BoxDecoration(
-                    color: AppColors.card,
-                    border: Border.fromBorderSide(BorderSide(color: AppColors.primary, width: 3)),
                     boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
                   ),
-                  child: Text(emoji, style: const TextStyle(fontSize: 18)),
+                  child: UserAvatar(
+                    avatarIndex: playerId == null ? 0 : _avatarIndexFor(playerId),
+                    radius: 18,
+                    borderColor: AppColors.primary,
+                    imageBytes: playerId == 'me' ? UserSession.profileImageBytes : null,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Column(
@@ -912,18 +912,22 @@ class _RoomScreenState extends State<RoomScreen> {
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        color: AppColors.card,
-                        border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
-                      ),
-                      child: player.isBot
-                          ? const Icon(Icons.smart_toy, size: 15, color: AppColors.mutedForeground)
-                          : Text(avatarOptions[entry.key % avatarOptions.length].emoji, style: const TextStyle(fontSize: 13)),
-                    ),
+                    player.isBot
+                        ? Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: AppColors.card,
+                              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
+                            ),
+                            child: const Icon(Icons.smart_toy, size: 15, color: AppColors.mutedForeground),
+                          )
+                        : UserAvatar(
+                            avatarIndex: entry.key,
+                            radius: 14,
+                            imageBytes: player.id == 'me' ? UserSession.profileImageBytes : null,
+                          ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
