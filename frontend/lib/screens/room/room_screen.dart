@@ -2,14 +2,15 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import '../../theme/pixel_font.dart';
 
 import '../../mock/mock_data.dart';
 import '../../models/chat_message.dart';
 import '../../models/player.dart';
-import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
+import '../../theme/pixel_font.dart';
+import '../../utils/breakpoints.dart';
 import '../../widgets/app_button.dart';
+import '../../widgets/app_nav_rail.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
 import '../../widgets/pixel_dialog.dart';
@@ -747,20 +748,58 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isWaiting = _phase == _Phase.waiting;
+    final isDesktop = context.isDesktop;
     return Scaffold(
+      appBar: AppBar(
+        title: Text(isWaiting ? '🎮 레이니의 방' : '🎮 GAME'),
+        actions: [
+          // 데스크탑에서는 나가기 버튼이 좌측 내비게이션 바로 이동한다.
+          if (isWaiting && !isDesktop)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: AppButton(label: '방 나가기', fullWidth: false, variant: AppButtonVariant.outlined, onPressed: _handleLeaveRoom),
+            )
+          else if (_phase == _Phase.describing)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('$_secondsLeft', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primary)),
+                  SizedBox(
+                    width: 100,
+                    child: LinearProgressIndicator(
+                      value: _secondsLeft / _turnSeconds,
+                      backgroundColor: AppColors.secondary,
+                      color: AppColors.primary,
+                      minHeight: 4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
       body: SafeArea(
-        child: Column(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildTopBar(context),
-            if (_phase == _Phase.describing) _buildTurnInfoBar(context),
+            if (isDesktop)
+              AppNavRail(
+                items: [
+                  if (isWaiting) AppNavRailItem(icon: Icons.logout, label: '나가기', onTap: _handleLeaveRoom),
+                ],
+              ),
             Expanded(
               child: ResponsiveCenter(
                 maxWidth: 1000,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 190, child: _buildPlayerSidebar(context)),
+                    SizedBox(width: isDesktop ? 200 : 160, child: _buildPlayerSidebar(context)),
                     const SizedBox(width: 12),
                     Expanded(child: _buildMainArea(context)),
                   ],
@@ -773,197 +812,58 @@ class _RoomScreenState extends State<RoomScreen> {
     );
   }
 
-  Widget _buildTopBar(BuildContext context) {
-    final isWaiting = _phase == _Phase.waiting;
-    return Container(
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: AppColors.accent,
-        border: Border(bottom: BorderSide(color: AppColors.border, width: 3)),
-        boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(0, 3), blurRadius: 0)],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              isWaiting ? '🎮 레이니의 방' : '🎮 GAME',
-              style: PixelFont.title(fontSize: 11, color: AppColors.foreground),
-            ),
-          ),
-          if (isWaiting)
-            GestureDetector(
-              onTap: _handleLeaveRoom,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: const BoxDecoration(
-                  color: AppColors.secondary,
-                  border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
-                  boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
-                ),
-                child: Text('방 나가기', style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTurnInfoBar(BuildContext context) {
-    final playerId = _currentTurnIndex < _turnOrder.length ? _turnOrder[_currentTurnIndex] : null;
-    final progress = _turnSeconds == 0 ? 0.0 : _secondsLeft / _turnSeconds;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        color: AppColors.accent,
-        border: Border(bottom: BorderSide(color: AppColors.border, width: 3)),
-        boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(0, 3), blurRadius: 0)],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  decoration: const BoxDecoration(
-                    boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
-                  ),
-                  child: UserAvatar(
-                    avatarIndex: playerId == null ? 0 : _avatarIndexFor(playerId),
-                    radius: 18,
-                    borderColor: AppColors.primary,
-                    imageBytes: playerId == 'me' ? UserSession.profileImageBytes : null,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'NOW TURN',
-                      style: PixelFont.title(fontSize: 7, color: AppColors.mutedForeground, letterSpacing: 1),
-                    ),
-                    Text(
-                      playerId != null ? _nicknameFor(playerId) : '',
-                      style: PixelFont.title(fontSize: 10, color: AppColors.foreground),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('$_secondsLeft', style: PixelFont.title(fontSize: 16, color: AppColors.primary)),
-              const SizedBox(height: 4),
-              Container(
-                width: 90,
-                height: 6,
-                decoration: const BoxDecoration(
-                  color: AppColors.secondary,
-                  border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
-                ),
-                child: FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: progress.clamp(0, 1),
-                  child: Container(color: AppColors.primary),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPlayerSidebar(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      decoration: const BoxDecoration(
-        color: AppColors.secondary,
-        border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
-      ),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 6, right: 6, bottom: 6),
-            child: Text(
-              'PLAYERS (${_allPlayers.length})',
-              style: PixelFont.title(fontSize: 7, color: AppColors.mutedForeground, letterSpacing: 1),
-            ),
-          ),
+          Text('PLAYERS (${_allPlayers.length})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground)),
+          const SizedBox(height: 8),
           ..._allPlayers.asMap().entries.map((entry) {
             final player = entry.value;
             final isCurrentTurn = _phase == _Phase.describing &&
                 _currentTurnIndex < _turnOrder.length &&
                 _turnOrder[_currentTurnIndex] == player.id;
-            return GestureDetector(
-              onTap: player.id == 'me' ? () => _toggleReady('me') : null,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.1) : null,
-                  border: isCurrentTurn ? Border.all(color: AppColors.primary.withValues(alpha: 0.33), width: 2) : null,
-                ),
-                child: Row(
-                  children: [
-                    player.isBot
-                        ? Container(
-                            width: 28,
-                            height: 28,
-                            alignment: Alignment.center,
-                            decoration: const BoxDecoration(
-                              color: AppColors.card,
-                              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
-                            ),
-                            child: const Icon(Icons.smart_toy, size: 15, color: AppColors.mutedForeground),
-                          )
-                        : UserAvatar(
-                            avatarIndex: entry.key,
-                            radius: 14,
-                            imageBytes: player.id == 'me' ? UserSession.profileImageBytes : null,
-                          ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        player.nickname,
-                        style: PixelFont.body(
-                          fontSize: 12,
-                          color: player.id == 'me' ? AppColors.primary : AppColors.foreground,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (_phase == _Phase.waiting)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: player.isReady ? AppColors.readyBadgeBg : AppColors.waitingBadgeBg,
-                          border: Border.all(color: player.isReady ? AppColors.readyBadgeBorder : AppColors.waitingBadgeBorder),
-                        ),
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: GestureDetector(
+                onTap: player.id == 'me' ? () => _toggleReady('me') : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : null,
+                    border: isCurrentTurn ? Border.all(color: AppColors.primary) : null,
+                  ),
+                  child: Row(
+                    children: [
+                      player.isBot
+                          ? const Icon(Icons.smart_toy, size: 22, color: AppColors.mutedForeground)
+                          : UserAvatar(avatarIndex: entry.key, radius: 12),
+                      const SizedBox(width: 6),
+                      Expanded(
                         child: Text(
-                          player.isReady ? '준비' : '대기',
-                          style: PixelFont.body(
-                            fontSize: 10,
-                            color: player.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText,
-                          ),
+                          player.nickname,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      )
-                    else if (player.isHost)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
-                        decoration: BoxDecoration(
-                          color: AppColors.crownBadgeBg,
-                          border: Border.all(color: AppColors.crownBadgeBorder),
-                        ),
-                        child: const Text('👑', style: TextStyle(fontSize: 9)),
                       ),
-                  ],
+                      if (_phase == _Phase.waiting)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: player.isReady ? AppColors.success : AppColors.secondary,
+                          ),
+                          child: Text(
+                            player.isReady ? '준비' : '대기',
+                            style: TextStyle(fontSize: 9, color: player.isReady ? Colors.white : AppColors.mutedForeground),
+                          ),
+                        )
+                      else if (player.isHost)
+                        const Text('🦊', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -977,15 +877,17 @@ class _RoomScreenState extends State<RoomScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_phase == _Phase.allDone)
+        if (_phase == _Phase.describing)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('NOW TURN', style: TextStyle(fontSize: 10, color: AppColors.mutedForeground)),
+          )
+        else if (_phase == _Phase.allDone)
           Container(
             margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: const BoxDecoration(
-              color: AppColors.primary,
-              boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
-            ),
-            child: Text('ALL DONE!', style: PixelFont.title(fontSize: 11, color: Colors.white)),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            color: AppColors.primary,
+            child: const Text('ALL DONE!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
           ),
         Expanded(
           child: Container(

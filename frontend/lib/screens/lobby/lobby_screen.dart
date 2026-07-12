@@ -5,9 +5,13 @@ import '../../mock/mock_data.dart';
 import '../../models/room_summary.dart';
 import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/breakpoints.dart';
 import '../../widgets/app_button.dart';
+import '../../widgets/app_nav_rail.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/pixel_box.dart';
 import '../../widgets/pixel_dialog.dart';
+import '../../widgets/pixel_top_bar.dart';
 import '../../widgets/user_avatar.dart';
 import '../friends/friends_screen.dart';
 import '../login/login_screen.dart';
@@ -161,61 +165,95 @@ class _LobbyScreenState extends State<LobbyScreen> {
   @override
   Widget build(BuildContext context) {
     final pendingRequests = mockFriendRequests.length;
+    final isDesktop = context.isDesktop;
 
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            _Header(
-              pendingRequests: pendingRequests,
-              onFriends: _openFriends,
-              onProfile: _openProfile,
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text('LOBBY', style: PixelFont.title(fontSize: 12, color: AppColors.foreground)),
-                        ),
-                        _HeaderPixelButton(
-                          label: '코드 입장',
-                          icon: Icons.vpn_key_outlined,
-                          isPrimary: false,
-                          onTap: _handleJoinByCode,
-                        ),
-                        const SizedBox(width: 7),
-                        _HeaderPixelButton(
-                          label: '방 만들기',
-                          icon: Icons.add,
-                          isPrimary: true,
-                          onTap: _handleCreateRoom,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    AppTextField(
-                      controller: _searchController,
-                      hintText: '방 이름 / 카테고리 검색',
-                      prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.mutedForeground),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    ..._filteredRooms.map((room) => _PublicRoomTile(
-                          room: room,
-                          onTap: room.inProgress ? null : () => _openRoom(code: room.code, isHost: false),
-                        )),
-                  ],
-                ),
+        child: isDesktop
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AppNavRail(
+                    items: [
+                      const AppNavRailItem(icon: Icons.home_outlined, label: '로비', selected: true),
+                      AppNavRailItem(
+                        icon: Icons.people_outline,
+                        label: '친구',
+                        badgeCount: pendingRequests,
+                        onTap: _openFriends,
+                      ),
+                      AppNavRailItem(icon: Icons.person_outline, label: '프로필', onTap: _openProfile),
+                    ],
+                  ),
+                  Expanded(child: _buildBody(isDesktop: true)),
+                ],
+              )
+            : Column(
+                children: [
+                  _Header(pendingRequests: pendingRequests, onFriends: _openFriends, onProfile: _openProfile),
+                  Expanded(child: _buildBody(isDesktop: false)),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
+    );
+  }
+
+  Widget _buildBody({required bool isDesktop}) {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(isDesktop ? 24 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('LOBBY', style: PixelFont.title(fontSize: 12, color: AppColors.foreground)),
+              ),
+              _HeaderPixelButton(
+                label: '코드 입장',
+                icon: Icons.vpn_key_outlined,
+                isPrimary: false,
+                onTap: _handleJoinByCode,
+              ),
+              const SizedBox(width: 7),
+              _HeaderPixelButton(
+                label: '방 만들기',
+                icon: Icons.add,
+                isPrimary: true,
+                onTap: _handleCreateRoom,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AppTextField(
+            controller: _searchController,
+            hintText: '방 이름 / 카테고리 검색',
+            prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.mutedForeground),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          _buildRoomList(isDesktop: isDesktop),
+        ],
+      ),
+    );
+  }
+
+  /// 모바일은 세로 목록, 데스크탑은 넓은 화면을 활용해 카드가 여러 열로 흐르는 그리드로 표시한다.
+  Widget _buildRoomList({required bool isDesktop}) {
+    final tiles = _filteredRooms
+        .map((room) => _PublicRoomTile(
+              room: room,
+              onTap: room.inProgress ? null : () => _openRoom(code: room.code, isHost: false),
+            ))
+        .toList();
+
+    if (!isDesktop) {
+      return Column(children: tiles);
+    }
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [for (final tile in tiles) SizedBox(width: 320, child: tile)],
     );
   }
 }
@@ -229,14 +267,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: AppColors.accent,
-        border: Border(bottom: BorderSide(color: AppColors.border, width: 3)),
-        boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(0, 3), blurRadius: 0)],
-      ),
+    return PixelTopBar(
       child: Row(
         children: [
           Expanded(
@@ -272,15 +303,13 @@ class _IconBox extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
+          PixelBox(
             width: 36,
             height: 36,
             alignment: Alignment.center,
-            decoration: const BoxDecoration(
-              color: AppColors.secondary,
-              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
-              boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
-            ),
+            color: AppColors.secondary,
+            border: const Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
+            shadowOffset: const Offset(2, 2),
             child: child,
           ),
           if (badgeCount > 0)
@@ -321,13 +350,11 @@ class _HeaderPixelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: PixelBox(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: isPrimary ? AppColors.primary : AppColors.secondary,
-          border: Border.all(color: isPrimary ? AppColors.primaryBorder : AppColors.border, width: 3),
-          boxShadow: const [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
-        ),
+        color: isPrimary ? AppColors.primary : AppColors.secondary,
+        border: Border.all(color: isPrimary ? AppColors.primaryBorder : AppColors.border, width: 3),
+        shadowOffset: const Offset(2, 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -361,13 +388,8 @@ class _PublicRoomTile extends StatelessWidget {
         opacity: disabled ? 0.6 : 1,
         child: GestureDetector(
           onTap: disabled ? null : onTap,
-          child: Container(
+          child: PixelBox(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: const BoxDecoration(
-              color: AppColors.card,
-              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
-              boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
-            ),
             child: Row(
               children: [
                 Expanded(
@@ -426,9 +448,11 @@ class _Tag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return PixelBox(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      decoration: BoxDecoration(color: color, border: Border.all(color: AppColors.border)),
+      color: color,
+      border: Border.all(color: AppColors.border),
+      shadowOffset: null,
       child: Text(text, style: PixelFont.body(fontSize: 11, color: textColor)),
     );
   }
