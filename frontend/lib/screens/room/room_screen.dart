@@ -796,14 +796,23 @@ class _RoomScreenState extends State<RoomScreen> {
               child: ResponsiveCenter(
                 maxWidth: 1000,
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(width: isDesktop ? 200 : 160, child: _buildPlayerSidebar(context)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildMainArea(context)),
-                  ],
-                ),
+                child: isDesktop
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(width: 200, child: _buildPlayerSidebar(context)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildMainArea(context)),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildPlayerRow(context),
+                          const SizedBox(height: 8),
+                          Expanded(child: _buildMainArea(context)),
+                        ],
+                      ),
               ),
             ),
           ],
@@ -869,6 +878,61 @@ class _RoomScreenState extends State<RoomScreen> {
             );
           }),
         ],
+      ),
+    );
+  }
+
+  /// 모바일에서는 플레이어 목록을 좌측 세로 사이드바 대신 상단 가로 스크롤 스트립으로 보여준다.
+  Widget _buildPlayerRow(BuildContext context) {
+    return Container(
+      height: 78,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _allPlayers.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        itemBuilder: (context, index) => _buildPlayerChip(context, index),
+      ),
+    );
+  }
+
+  Widget _buildPlayerChip(BuildContext context, int index) {
+    final player = _allPlayers[index];
+    final isCurrentTurn = _phase == _Phase.describing &&
+        _currentTurnIndex < _turnOrder.length &&
+        _turnOrder[_currentTurnIndex] == player.id;
+    return GestureDetector(
+      onTap: player.id == 'me' ? () => _toggleReady('me') : null,
+      child: Container(
+        width: 60,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : null,
+          border: isCurrentTurn ? Border.all(color: AppColors.primary) : null,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            player.isBot
+                ? const Icon(Icons.smart_toy, size: 24, color: AppColors.mutedForeground)
+                : UserAvatar(avatarIndex: index, radius: 16),
+            const SizedBox(height: 4),
+            Text(
+              player.nickname,
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+            if (_phase == _Phase.waiting)
+              Text(
+                player.isReady ? '준비' : '대기',
+                style: TextStyle(fontSize: 8, color: player.isReady ? AppColors.success : AppColors.mutedForeground),
+              )
+            else if (player.isHost)
+              const Text('🦊', style: TextStyle(fontSize: 10)),
+          ],
+        ),
       ),
     );
   }
