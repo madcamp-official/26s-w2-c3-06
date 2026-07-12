@@ -808,8 +808,12 @@ class _RoomScreenState extends State<RoomScreen> {
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _buildPlayerRow(context),
-                          const SizedBox(height: 8),
+                          // 게임이 시작되면(대기 상태가 아니면) 상단 플레이어 스트립은 숨기고
+                          // 채팅/설명 영역에 공간을 더 준다. 현재 차례 안내는 본문 상단에 남아있다.
+                          if (isWaiting) ...[
+                            _buildPlayerRow(context),
+                            const SizedBox(height: 8),
+                          ],
                           Expanded(child: _buildMainArea(context)),
                         ],
                       ),
@@ -906,28 +910,40 @@ class _RoomScreenState extends State<RoomScreen> {
       onTap: player.id == 'me' ? () => _toggleReady('me') : null,
       child: Container(
         width: 60,
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : null,
-          border: isCurrentTurn ? Border.all(color: AppColors.primary) : null,
+          color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.1) : null,
+          border: isCurrentTurn ? Border.all(color: AppColors.primary.withValues(alpha: 0.33)) : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             player.isBot
-                ? const Icon(Icons.smart_toy, size: 24, color: AppColors.mutedForeground)
+                ? Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border, width: 1.5)),
+                    child: const Icon(Icons.smart_toy, size: 18, color: AppColors.mutedForeground),
+                  )
                 : UserAvatar(avatarIndex: index, radius: 16),
-            const SizedBox(height: 4),
-            Text(
-              player.nickname,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+            const SizedBox(height: 3),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 44),
+              child: Text(
+                player.nickname,
+                style: PixelFont.body(fontSize: 10, color: AppColors.foreground),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
             ),
             if (_phase == _Phase.waiting)
               Text(
-                player.isReady ? '준비' : '대기',
-                style: TextStyle(fontSize: 8, color: player.isReady ? AppColors.success : AppColors.mutedForeground),
+                player.isReady ? '✓준비' : '대기',
+                style: PixelFont.body(
+                  fontSize: 9,
+                  color: player.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText,
+                ),
               )
             else if (player.isHost)
               const Text('🦊', style: TextStyle(fontSize: 10)),
