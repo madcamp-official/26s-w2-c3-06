@@ -981,6 +981,8 @@ class _RoomScreenState extends State<RoomScreen> {
           ),
         ),
         const SizedBox(height: 8),
+        _buildBottomBar(context),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -989,7 +991,7 @@ class _RoomScreenState extends State<RoomScreen> {
                 child: AppTextField(
                   controller: _chatController,
                   hintText: _canChat
-                      ? (_phase == _Phase.describing ? '설명을 입력하세요...' : '채팅 메시지 입력...')
+                      ? (_phase == _Phase.describing ? '설명을 입력하세요...' : '대기방 채팅...')
                       : (_phase == _Phase.describing ? '지금은 당신의 차례가 아닙니다' : '지금은 채팅할 수 없습니다'),
                   onSubmitted: (_) => _sendMessage(),
                 ),
@@ -999,8 +1001,6 @@ class _RoomScreenState extends State<RoomScreen> {
             IconButton(onPressed: _canChat ? _sendMessage : null, icon: const Icon(Icons.send)),
           ],
         ),
-        const SizedBox(height: 8),
-        _buildBottomBar(context),
       ],
     );
   }
@@ -1039,87 +1039,137 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   Widget _buildWaitingBar(BuildContext context) {
-    final readyCount = _allPlayers.where((p) => p.isReady).length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final me = _humanPlayers.firstWhere((p) => p.id == 'me');
+    return Row(
       children: [
-        Text(
-          widget.isHost ? 'CATEGORY (방장만 변경 가능)' : 'CATEGORY',
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            ..._availableCategories.map((category) {
-              final selected = category == _selectedCategory;
-              return GestureDetector(
-                onTap: () => _selectCategory(category),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected ? AppColors.primary : AppColors.secondary,
-                    border: Border.all(color: selected ? AppColors.primaryBorder : AppColors.border),
-                  ),
-                  child: Text(
-                    category,
-                    style: TextStyle(fontSize: 12, color: selected ? Colors.white : AppColors.foreground, fontWeight: FontWeight.bold),
-                  ),
+        GestureDetector(
+          onTap: widget.isHost ? _openCategoryPicker : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '카테고리: $_selectedCategory',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
                 ),
-              );
-            }),
-            if (widget.isHost)
+                if (widget.isHost) ...[
+                  const SizedBox(width: 2),
+                  const Icon(Icons.expand_more, size: 14, color: AppColors.mutedForeground),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: widget.isHost ? () => _changeBotCount(-1) : null,
+                icon: const Icon(Icons.remove, size: 16),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
               SizedBox(
-                width: 120,
-                child: AppTextField(
-                  controller: _customCategoryController,
-                  hintText: '직접 입력...',
-                  onSubmitted: (_) => _addCustomCategory(),
-                ),
+                width: 18,
+                child: Text('$_botCount', textAlign: TextAlign.center, style: PixelFont.body(fontSize: 12)),
               ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            const Text('AI 플레이어 봇', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            IconButton(
-              onPressed: widget.isHost ? () => _changeBotCount(-1) : null,
-              icon: const Icon(Icons.remove_circle_outline),
-            ),
-            Text('$_botCount', style: Theme.of(context).textTheme.titleMedium),
-            IconButton(
-              onPressed: widget.isHost ? () => _changeBotCount(1) : null,
-              icon: const Icon(Icons.add_circle_outline),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$readyCount/${_allPlayers.length} 명 준비 완료',
-                style: TextStyle(fontSize: 12, color: AppColors.mutedForeground),
+              IconButton(
+                onPressed: widget.isHost ? () => _changeBotCount(1) : null,
+                icon: const Icon(Icons.add, size: 16),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
-            ),
-            if (widget.isHost)
-              AppButton(label: '시작하기', fullWidth: false, onPressed: _canStartGame ? _startGame : null)
-            else
-              AppButton(
-                label: _humanPlayers.firstWhere((p) => p.id == 'me').isReady ? '준비 완료' : '준비하기',
-                fullWidth: false,
-                variant: _humanPlayers.firstWhere((p) => p.id == 'me').isReady
-                    ? AppButtonVariant.primary
-                    : AppButtonVariant.outlined,
-                onPressed: () => _toggleReady('me'),
-              ),
-          ],
+            ],
+          ),
         ),
+        const Spacer(),
+        if (widget.isHost)
+          AppButton(label: '▶ 시작', fullWidth: false, onPressed: _canStartGame ? _startGame : null)
+        else
+          AppButton(
+            label: me.isReady ? '✓준비 완료' : '준비하기',
+            fullWidth: false,
+            variant: me.isReady ? AppButtonVariant.primary : AppButtonVariant.outlined,
+            onPressed: () => _toggleReady('me'),
+          ),
       ],
+    );
+  }
+
+  /// 카테고리는 목록을 항상 펼쳐두지 않고, 이 버튼을 눌러야 세부 선택지가 담긴
+  /// 하단 시트가 열린다(디자인 시안 기준).
+  Future<void> _openCategoryPicker() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  Text('카테고리 선택', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _availableCategories.map((category) {
+                      final selected = category == _selectedCategory;
+                      return GestureDetector(
+                        onTap: () {
+                          _selectCategory(category);
+                          setSheetState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: selected ? AppColors.primary : AppColors.secondary,
+                            border: Border.all(color: selected ? AppColors.primaryBorder : AppColors.border),
+                          ),
+                          child: Text(
+                            category,
+                            style: PixelFont.body(
+                              fontSize: 12,
+                              color: selected ? Colors.white : AppColors.foreground,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    controller: _customCategoryController,
+                    hintText: '카테고리 직접 입력...',
+                    onSubmitted: (_) {
+                      _addCustomCategory();
+                      setSheetState(() {});
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
