@@ -5,6 +5,7 @@ import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/pixel_box.dart';
 import '../../widgets/pixel_dialog.dart';
 import '../../widgets/responsive_center.dart';
 import '../lobby/lobby_screen.dart';
@@ -205,14 +206,9 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
         ),
-        Container(
+        PixelBox(
           margin: const EdgeInsets.only(top: 24),
           padding: const EdgeInsets.only(top: 28, left: 28, right: 28, bottom: 32),
-          decoration: const BoxDecoration(
-            color: AppColors.card,
-            border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
-            boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
-          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -294,18 +290,14 @@ class _GoogleAuthButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onPressed,
-      child: Container(
+      child: PixelBox(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        decoration: const BoxDecoration(
-          color: AppColors.secondary,
-          border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
-          boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
-        ),
+        color: AppColors.secondary,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('G', style: PixelFont.title(fontSize: 18, color: const Color(0xFF4285F4))),
+            Text('G', style: PixelFont.title(fontSize: 18, color: AppColors.google)),
             const SizedBox(width: 10),
             Text('Google로 계속하기', style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
           ],

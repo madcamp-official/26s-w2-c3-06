@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/pixel_font.dart';
 
 import '../theme/app_colors.dart';
+import 'pixel_box.dart';
 
 enum AppButtonVariant { primary, outlined }
 
@@ -50,16 +51,12 @@ class AppButton extends StatelessWidget {
 
     final button = Opacity(
       opacity: enabled ? 1 : 0.5,
-      child: Container(
+      child: PixelBox(
         width: fullWidth ? double.infinity : null,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          border: Border.all(color: borderColor, width: 3),
-          boxShadow: enabled
-              ? const [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)]
-              : null,
-        ),
+        color: backgroundColor,
+        border: Border.all(color: borderColor, width: 3),
+        shadowOffset: enabled ? const Offset(2, 2) : null,
         alignment: Alignment.center,
         child: child,
       ),

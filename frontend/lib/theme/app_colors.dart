@@ -27,6 +27,9 @@ class AppColors {
   /// 알림 배지(친구 요청 수 등) 전용 빨강 (Figma 코드 export 기준).
   static const notificationBadge = Color(0xFFFF4444);
 
+  /// Google 브랜드 컬러(로그인 버튼의 "G" 로고).
+  static const google = Color(0xFF4285F4);
+
   // 기존 코드 곳곳에서 쓰는 이름들 — 위 토큰에 대응.
   static const surface = Color(0xFFFFFEF5);
   static const textPrimary = Color(0xFF1A0A00);
