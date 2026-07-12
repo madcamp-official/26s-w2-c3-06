@@ -123,13 +123,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
         child: SingleChildScrollView(
           child: ResponsiveCenter(
             maxWidth: 440,
-            child: Container(
+            child: Card(
+              child: Padding(
               padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -183,7 +179,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         color: password.isEmpty
                             ? AppColors.textSecondary
                             : (_isPasswordValid(password)
-                                ? AppColors.secondary
+                                ? AppColors.success
                                 : AppColors.error),
                       ),
                     ),
@@ -202,7 +198,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         confirm == password ? '비밀번호가 일치합니다' : '비밀번호가 일치하지 않습니다',
                         style: TextStyle(
                           fontSize: 12,
-                          color: confirm == password ? AppColors.secondary : AppColors.error,
+                          color: confirm == password ? AppColors.success : AppColors.error,
                         ),
                       ),
                     ),
@@ -212,6 +208,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     onPressed: _canSubmit ? _handleSignUp : null,
                   ),
                 ],
+              ),
               ),
             ),
           ),
@@ -276,14 +273,14 @@ class _CheckableField extends StatelessWidget {
                 Icon(
                   available! ? Icons.check_circle : Icons.cancel,
                   size: 14,
-                  color: available! ? AppColors.secondary : AppColors.error,
+                  color: available! ? AppColors.success : AppColors.error,
                 ),
                 const SizedBox(width: 4),
                 Text(
                   available! ? '사용 가능합니다' : '이미 사용 중입니다',
                   style: TextStyle(
                     fontSize: 12,
-                    color: available! ? AppColors.secondary : AppColors.error,
+                    color: available! ? AppColors.success : AppColors.error,
                   ),
                 ),
               ],

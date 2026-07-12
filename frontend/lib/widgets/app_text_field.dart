@@ -11,6 +11,8 @@ class AppTextField extends StatelessWidget {
   final ValueChanged<String>? onSubmitted;
   final ValueChanged<String>? onChanged;
   final bool obscureText;
+  final Widget? suffixIcon;
+  final Widget? prefixIcon;
 
   const AppTextField({
     super.key,
@@ -23,6 +25,8 @@ class AppTextField extends StatelessWidget {
     this.onSubmitted,
     this.onChanged,
     this.obscureText = false,
+    this.suffixIcon,
+    this.prefixIcon,
   });
 
   @override
@@ -39,6 +43,8 @@ class AppTextField extends StatelessWidget {
         labelText: label,
         hintText: hintText,
         counterText: '',
+        suffixIcon: suffixIcon,
+        prefixIcon: prefixIcon,
       ),
     );
   }

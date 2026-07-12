@@ -1,23 +1,26 @@
 import 'package:flutter/material.dart';
 
-class AvatarOption {
-  final Color color;
-  final IconData icon;
+import '../theme/app_colors.dart';
 
-  const AvatarOption({required this.color, required this.icon});
+class AvatarOption {
+  final String emoji;
+
+  const AvatarOption({required this.emoji});
 }
 
-/// 실제 이미지 업로드 대신 사용하는 프로필 사진 프리셋 목록.
+/// 실제 이미지 업로드 대신 사용하는 프로필 사진 프리셋 목록(디자인의 동물 이모지 아이콘 타일).
 const avatarOptions = <AvatarOption>[
-  AvatarOption(color: Color(0xFF6C5CE7), icon: Icons.pets),
-  AvatarOption(color: Color(0xFF00B894), icon: Icons.emoji_nature),
-  AvatarOption(color: Color(0xFFE17055), icon: Icons.local_fire_department),
-  AvatarOption(color: Color(0xFF0984E3), icon: Icons.rocket_launch),
-  AvatarOption(color: Color(0xFFFDCB6E), icon: Icons.star),
-  AvatarOption(color: Color(0xFFE84393), icon: Icons.favorite),
+  AvatarOption(emoji: '🦊'),
+  AvatarOption(emoji: '🐱'),
+  AvatarOption(emoji: '🐸'),
+  AvatarOption(emoji: '🦋'),
+  AvatarOption(emoji: '⭐'),
+  AvatarOption(emoji: '🐰'),
+  AvatarOption(emoji: '🌈'),
+  AvatarOption(emoji: '🍀'),
 ];
 
-/// 공통 프로필 아바타. [avatarIndex]에 해당하는 프리셋 색상/아이콘으로 렌더링한다.
+/// 공통 프로필 아바타. 디자인상 원형이 아니라 앰버 테두리의 둥근 사각 "아이콘 타일" 스타일.
 class UserAvatar extends StatelessWidget {
   final int avatarIndex;
   final double radius;
@@ -27,10 +30,17 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final option = avatarOptions[avatarIndex % avatarOptions.length];
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: option.color,
-      child: Icon(option.icon, color: Colors.white, size: radius),
+    final size = radius * 2;
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.accent,
+        border: Border.all(color: AppColors.border, width: size > 32 ? 2 : 1.5),
+        borderRadius: BorderRadius.circular(size * 0.16),
+      ),
+      child: Text(option.emoji, style: TextStyle(fontSize: radius)),
     );
   }
 }

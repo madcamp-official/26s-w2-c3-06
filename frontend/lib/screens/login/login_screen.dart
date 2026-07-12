@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import '../../theme/pixel_font.dart';
 
 import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/pixel_dialog.dart';
 import '../../widgets/responsive_center.dart';
 import '../lobby/lobby_screen.dart';
 import 'signup_screen.dart';
@@ -19,6 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _showAuthOptions = false;
+  bool _showPassword = false;
 
   @override
   void dispose() {
@@ -35,27 +38,59 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleGuestContinue() async {
     final nicknameController = TextEditingController();
-    final nickname = await showDialog<String>(
+    final nickname = await showPixelDialog<String>(
       context: context,
+      barrierDismissible: true,
+      maxWidth: 300,
+      padding: const EdgeInsets.all(24),
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('게스트 닉네임'),
-          content: AppTextField(
-            controller: nicknameController,
-            label: '닉네임',
-            hintText: '사용할 닉네임을 입력하세요',
-            onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(nicknameController.text.trim()),
-              child: const Text('입장'),
-            ),
-          ],
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            final canStart = nicknameController.text.trim().isNotEmpty;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('👤 게스트 플레이', style: PixelFont.title(fontSize: 10, color: AppColors.primary)),
+                const SizedBox(height: 14),
+                Text(
+                  '사용할 닉네임을 입력하세요',
+                  style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: nicknameController,
+                  hintText: '닉네임 (최대 8자)',
+                  maxLength: 8,
+                  onChanged: (_) => setDialogState(() {}),
+                  onSubmitted: (value) {
+                    final trimmed = value.trim();
+                    if (trimmed.isEmpty) return;
+                    Navigator.of(dialogContext).pop(trimmed);
+                  },
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AppButton(
+                        label: '취소',
+                        variant: AppButtonVariant.outlined,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AppButton(
+                        label: '시작 ▶',
+                        onPressed: canStart ? () => Navigator.of(dialogContext).pop(nicknameController.text.trim()) : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -79,69 +114,73 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleGoogleAuth() {
-    UserSession.signInAsMember(nickname: 'Google 사용자');
+    UserSession.signInAsMember(nickname: 'Google 사용자', provider: AuthProvider.google);
     _enterApp();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          const _DecorBlob(alignment: Alignment.topLeft, color: AppColors.decorBlobPurple),
-          const _DecorBlob(alignment: Alignment.bottomRight, color: AppColors.decorBlobPeach),
-          SafeArea(
-            child: SingleChildScrollView(
-              child: ResponsiveCenter(
-                maxWidth: 400,
-                child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
-              ),
-            ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: ResponsiveCenter(
+            maxWidth: 400,
+            child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
           ),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildInitial(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(height: 96),
-        Center(
-          child: Container(
-            width: 88,
-            height: 88,
-            decoration: const BoxDecoration(
-              color: AppColors.primary,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.theater_comedy, size: 40, color: Colors.white),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          '라이어게임',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
+        const Text('🤖', textAlign: TextAlign.center, style: TextStyle(fontSize: 72, height: 1)),
         const SizedBox(height: 8),
         Text(
-          'AI가 개입하는 라이어 게임에 오신 것을 환영합니다',
+          'AI LIAR',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          style: PixelFont.title(fontSize: 18, color: AppColors.primary, letterSpacing: 2),
         ),
-        const SizedBox(height: 40),
-        AppButton(
-          label: '이메일로 시작하기',
-          onPressed: () => setState(() => _showAuthOptions = true),
+        Text(
+          'GAME',
+          textAlign: TextAlign.center,
+          style: PixelFont.title(fontSize: 18, color: AppColors.foreground, letterSpacing: 2),
         ),
         const SizedBox(height: 16),
-        Center(
-          child: TextButton(
-            onPressed: _handleGuestContinue,
-            child: const Text('게스트로 계속하기'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(
+            '🕵️ AI가 제시어를 만들고, 우리가 라이어를 찾는\n실시간 소셜 파티게임',
+            textAlign: TextAlign.center,
+            style: PixelFont.body(
+              fontSize: 13,
+              height: 1.7,
+              color: AppColors.mutedForeground,
+            ).copyWith(fontFamilyFallback: const ['Noto Sans KR']),
           ),
+        ),
+        const SizedBox(height: 36),
+        AppButton(
+          label: '🔑 로그인 / 회원가입',
+          onPressed: () => setState(() => _showAuthOptions = true),
+        ),
+        const SizedBox(height: 12),
+        AppButton(
+          label: '👤 게스트로 플레이',
+          variant: AppButtonVariant.outlined,
+          onPressed: _handleGuestContinue,
+        ),
+        const SizedBox(height: 24),
+        Text(
+          '© 2025 AI Liar Game',
+          textAlign: TextAlign.center,
+          style: PixelFont.body(
+            fontSize: 11,
+            color: AppColors.mutedForeground,
+          ).copyWith(fontFamilyFallback: const ['Noto Sans KR']),
         ),
       ],
     );
@@ -152,91 +191,96 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 24),
-        IconButton(
-          onPressed: () => setState(() => _showAuthOptions = false),
-          icon: const Icon(Icons.arrow_back),
+        GestureDetector(
+          onTap: () => setState(() => _showAuthOptions = false),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_back, size: 14, color: AppColors.mutedForeground),
+              const SizedBox(width: 6),
+              Text(
+                '홈으로',
+                style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 8),
         Container(
-          padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+          margin: const EdgeInsets.only(top: 24),
+          padding: const EdgeInsets.only(top: 28, left: 28, right: 28, bottom: 32),
+          decoration: const BoxDecoration(
+            color: AppColors.card,
+            border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
+            boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Text('라이어게임', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-              ),
-              const SizedBox(height: 4),
-              Center(
-                child: Text(
-                  '로그인하고 게임을 시작하세요',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
-                ),
+              Text('LOGIN', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+              const SizedBox(height: 6),
+              Text(
+                '계속하려면 로그인하세요',
+                style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground),
               ),
               const SizedBox(height: 24),
               _GoogleAuthButton(onPressed: _handleGoogleAuth),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('또는', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
-                  ),
-                  const Expanded(child: Divider()),
-                ],
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Row(
+                  children: [
+                    Expanded(child: Container(height: 2, color: AppColors.border.withValues(alpha: 0.33))),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        '또는 이메일로',
+                        style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                      ),
+                    ),
+                    Expanded(child: Container(height: 2, color: AppColors.border.withValues(alpha: 0.33))),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
               AppTextField(
                 controller: _emailController,
-                label: '이메일',
-                hintText: 'you@example.com',
+                hintText: '이메일 주소',
                 keyboardType: TextInputType.emailAddress,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               AppTextField(
                 controller: _passwordController,
-                label: '비밀번호',
-                obscureText: true,
+                hintText: '비밀번호',
+                obscureText: !_showPassword,
+                suffixIcon: IconButton(
+                  icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility, size: 18),
+                  onPressed: () => setState(() => _showPassword = !_showPassword),
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
               AppButton(label: '로그인', onPressed: _handleEmailLogin),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Center(
-                child: TextButton(
-                  onPressed: _handleSignUp,
-                  child: const Text('계정이 없으신가요? 회원가입'),
+                child: GestureDetector(
+                  onTap: _handleSignUp,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '계정이 없으신가요? ',
+                          style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+                        ),
+                        TextSpan(
+                          text: '회원가입',
+                          style: PixelFont.body(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 메인/로그인 화면 배경에 깔리는 흐릿한 장식용 원.
-class _DecorBlob extends StatelessWidget {
-  final AlignmentGeometry alignment;
-  final Color color;
-
-  const _DecorBlob({required this.alignment, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: alignment,
-      child: Container(
-        width: 220,
-        height: 220,
-        margin: const EdgeInsets.all(-60),
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      ),
     );
   }
 }
@@ -248,25 +292,22 @@ class _GoogleAuthButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.black87,
-          side: BorderSide(color: Colors.grey.shade300),
-          padding: const EdgeInsets.symmetric(vertical: 14),
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: const BoxDecoration(
+          color: AppColors.secondary,
+          border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
+          boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircleAvatar(
-              radius: 10,
-              backgroundColor: Color(0xFF4285F4),
-              child: Text('G', style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
+            Text('G', style: PixelFont.title(fontSize: 18, color: const Color(0xFF4285F4))),
             const SizedBox(width: 10),
-            const Text('Google로 로그인 / 회원가입'),
+            Text('Google로 계속하기', style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
           ],
         ),
       ),

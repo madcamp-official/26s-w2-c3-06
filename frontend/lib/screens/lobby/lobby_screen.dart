@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/pixel_font.dart';
 
 import '../../mock/mock_data.dart';
 import '../../models/room_summary.dart';
@@ -6,16 +7,11 @@ import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
-import '../../widgets/responsive_center.dart';
-import '../../widgets/section_card.dart';
+import '../../widgets/pixel_dialog.dart';
 import '../../widgets/user_avatar.dart';
+import '../friends/friends_screen.dart';
 import '../profile/profile_screen.dart';
 import '../room/room_screen.dart';
-
-/// 로비 상단에 표시할 내 전적 요약(백엔드 연동 전까지 쓰는 더미 값).
-const _mockLevel = 5;
-const _mockWinRate = 0.62;
-const _mockTotalGames = 24;
 
 class LobbyScreen extends StatefulWidget {
   const LobbyScreen({super.key});
@@ -25,24 +21,19 @@ class LobbyScreen extends StatefulWidget {
 }
 
 class _LobbyScreenState extends State<LobbyScreen> {
-  final _codeController = TextEditingController();
-  List<RoomSummary> _publicRooms = List.of(mockPublicRooms);
-  bool _isRefreshing = false;
+  final _searchController = TextEditingController();
+  final List<RoomSummary> _publicRooms = List.of(mockPublicRooms);
 
   @override
   void dispose() {
-    _codeController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleRefresh() async {
-    setState(() => _isRefreshing = true);
-    await Future.delayed(const Duration(milliseconds: 400));
-    if (!mounted) return;
-    setState(() {
-      _publicRooms = List.of(mockPublicRooms);
-      _isRefreshing = false;
-    });
+  List<RoomSummary> get _filteredRooms {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return _publicRooms;
+    return _publicRooms.where((r) => r.title.contains(query) || r.category.contains(query)).toList();
   }
 
   void _openRoom({required String code, required bool isHost}) {
@@ -58,213 +49,339 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _openRoom(code: '8421', isHost: true);
   }
 
-  void _handleJoinByCode() {
-    final code = _codeController.text.trim();
-    if (code.length != 4) return;
+  Future<void> _handleJoinByCode() async {
+    final controller = TextEditingController();
+    final code = await showPixelDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      maxWidth: 320,
+      builder: (dialogContext) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('🔑 코드 입장', style: PixelFont.title(fontSize: 11, color: AppColors.primary)),
+            const SizedBox(height: 16),
+            AppTextField(
+              controller: controller,
+              hintText: '4자리 코드',
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              onSubmitted: (v) => Navigator.of(dialogContext).pop(v.trim()),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: '취소',
+                    variant: AppButtonVariant.outlined,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AppButton(
+                    label: '입장',
+                    onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (code == null || code.length != 4) return;
+    if (!mounted) return;
     _openRoom(code: code, isHost: false);
   }
 
+  Future<void> _openFriends() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendsScreen()));
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Future<void> _openProfile() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ProfileScreen()),
-    );
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
     if (!mounted) return;
     setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('라이어게임'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: GestureDetector(
-              onTap: _openProfile,
-              child: UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 18),
-            ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-        child: ResponsiveCenter(
-          maxWidth: 960,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 720;
-              final roomList = _buildRoomListPanel(context);
-              final statsPanel = _buildStatsPanel(context);
-              if (!isWide) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [statsPanel, const SizedBox(height: 16), roomList],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 2, child: roomList),
-                  const SizedBox(width: 16),
-                  SizedBox(width: 280, child: statsPanel),
-                ],
-              );
-            },
-          ),
-        ),
-        ),
-      ),
-    );
-  }
+    final pendingRequests = mockFriendRequests.length;
 
-  Widget _buildStatsPanel(BuildContext context) {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 24),
-              const SizedBox(width: 12),
-              Expanded(
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            _Header(
+              pendingRequests: pendingRequests,
+              onFriends: _openFriends,
+              onProfile: _openProfile,
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(UserSession.nickname, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        'Lv.$_mockLevel',
-                        style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.bold),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('LOBBY', style: PixelFont.title(fontSize: 12, color: AppColors.foreground)),
+                        ),
+                        _HeaderPixelButton(
+                          label: '코드 입장',
+                          icon: Icons.vpn_key_outlined,
+                          isPrimary: false,
+                          onTap: _handleJoinByCode,
+                        ),
+                        const SizedBox(width: 7),
+                        _HeaderPixelButton(
+                          label: '방 만들기',
+                          icon: Icons.add,
+                          isPrimary: true,
+                          onTap: _handleCreateRoom,
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      controller: _searchController,
+                      hintText: '방 이름 / 카테고리 검색',
+                      prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.mutedForeground),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    ..._filteredRooms.map((room) => _PublicRoomTile(
+                          room: room,
+                          onTap: room.inProgress ? null : () => _openRoom(code: room.code, isHost: false),
+                        )),
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(14),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    children: [
-                      Text('${(_mockWinRate * 100).round()}%', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text('승률', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-                Container(width: 1, height: 32, color: Colors.black.withValues(alpha: 0.08)),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Text('$_mockTotalGames', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 2),
-                      Text('총 게임', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  final int pendingRequests;
+  final VoidCallback onFriends;
+  final VoidCallback onProfile;
+
+  const _Header({required this.pendingRequests, required this.onFriends, required this.onProfile});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 54,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: const BoxDecoration(
+        color: AppColors.accent,
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 3)),
+        boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(0, 3), blurRadius: 0)],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text('🤖 AI LIAR GAME', style: PixelFont.title(fontSize: 11, color: AppColors.foreground)),
           ),
-          const SizedBox(height: 16),
-          AppButton(label: '방 만들기', icon: Icons.add, onPressed: _handleCreateRoom),
-          const SizedBox(height: 12),
-          Text('코드로 입장', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: AppTextField(
-                  controller: _codeController,
-                  hintText: '4자리 코드',
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                ),
-              ),
-              const SizedBox(width: 8),
-              AppButton(label: '입장', fullWidth: false, onPressed: _handleJoinByCode),
-            ],
+          _IconBox(
+            onTap: onFriends,
+            badgeCount: pendingRequests,
+            child: const Icon(Icons.people_outline, size: 18, color: AppColors.foreground),
+          ),
+          const SizedBox(width: 8),
+          _IconBox(
+            onTap: onProfile,
+            child: UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 12),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildRoomListPanel(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text('공개방 목록', style: Theme.of(context).textTheme.titleLarge),
+class _IconBox extends StatelessWidget {
+  final VoidCallback onTap;
+  final Widget child;
+  final int badgeCount;
+
+  const _IconBox({required this.onTap, required this.child, this.badgeCount = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppColors.secondary,
+              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 2)),
+              boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
             ),
-            IconButton(
-              onPressed: _isRefreshing ? null : _handleRefresh,
-              icon: _isRefreshing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
+            child: child,
+          ),
+          if (badgeCount > 0)
+            Positioned(
+              right: -6,
+              top: -6,
+              child: Container(
+                width: 16,
+                height: 16,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.notificationBadge,
+                  border: Border.all(color: AppColors.background, width: 2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$badgeCount',
+                  style: PixelFont.body(fontSize: 9, color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// LOBBY 헤더 줄의 컴팩트한 픽셀 버튼("코드 입장"/"방 만들기") — 일반 AppButton보다 작은 패딩.
+class _HeaderPixelButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool isPrimary;
+  final VoidCallback onTap;
+
+  const _HeaderPixelButton({required this.label, required this.icon, required this.isPrimary, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isPrimary ? AppColors.primary : AppColors.secondary,
+          border: Border.all(color: isPrimary ? AppColors.primaryBorder : AppColors.border, width: 3),
+          boxShadow: const [BoxShadow(color: AppColors.hardShadow, offset: Offset(2, 2), blurRadius: 0)],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: isPrimary ? Colors.white : AppColors.foreground),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: PixelFont.body(fontSize: 12, color: isPrimary ? Colors.white : AppColors.foreground),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _publicRooms.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final room = _publicRooms[index];
-            return _PublicRoomTile(
-              room: room,
-              colorIndex: index,
-              onTap: () => _openRoom(code: room.code, isHost: false),
-            );
-          },
-        ),
-      ],
+      ),
     );
   }
 }
 
 class _PublicRoomTile extends StatelessWidget {
   final RoomSummary room;
-  final int colorIndex;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
-  const _PublicRoomTile({required this.room, required this.colorIndex, required this.onTap});
+  const _PublicRoomTile({required this.room, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final isFull = room.playerCount >= room.maxPlayers;
-    return Card(
-      child: ListTile(
-        leading: UserAvatar(avatarIndex: colorIndex, radius: 20),
-        title: Text(room.title),
-        subtitle: Text('방장 ${room.hostNickname} · ${room.playerCount}/${room.maxPlayers}명'),
-        trailing: FilledButton(
-          onPressed: isFull ? null : onTap,
-          child: Text(isFull ? '가득 참' : '입장'),
+    final disabled = onTap == null || isFull;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Opacity(
+        opacity: disabled ? 0.6 : 1,
+        child: GestureDetector(
+          onTap: disabled ? null : onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: const BoxDecoration(
+              color: AppColors.card,
+              border: Border.fromBorderSide(BorderSide(color: AppColors.border, width: 3)),
+              boxShadow: [BoxShadow(color: AppColors.hardShadow, offset: Offset(4, 4), blurRadius: 0)],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '${room.emoji} ${room.title}',
+                            style: PixelFont.body(fontSize: 14, color: AppColors.foreground),
+                          ),
+                          const SizedBox(width: 7),
+                          _Tag(text: room.category, color: AppColors.secondary, textColor: AppColors.mutedForeground),
+                          if (room.inProgress) ...[
+                            const SizedBox(width: 6),
+                            const _Tag(text: '🔴 진행중', color: AppColors.destructive, textColor: Colors.white),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(Icons.person, size: 10, color: AppColors.mutedForeground),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${room.playerCount}/${room.maxPlayers}',
+                            style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '방장: ${room.hostNickname}',
+                            style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (!disabled) const Icon(Icons.chevron_right, size: 16, color: AppColors.mutedForeground),
+              ],
+            ),
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  final String text;
+  final Color color;
+  final Color textColor;
+
+  const _Tag({required this.text, required this.color, required this.textColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      decoration: BoxDecoration(color: color, border: Border.all(color: AppColors.border)),
+      child: Text(text, style: PixelFont.body(fontSize: 11, color: textColor)),
     );
   }
 }
