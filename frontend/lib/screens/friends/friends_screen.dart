@@ -6,6 +6,7 @@ import '../../api/backend_api.dart';
 import '../../services/user_session.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
@@ -47,7 +48,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
   }
 
   void _snack(String msg) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    if (mounted) showAppAlert(context, msg);
   }
 
   Future<void> _handleAddFriend() async {

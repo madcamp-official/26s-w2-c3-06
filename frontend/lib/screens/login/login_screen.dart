@@ -9,6 +9,7 @@ import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/pixel_box.dart';
@@ -68,13 +69,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await action();
     } on FirebaseAuthException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('인증 실패: ${e.message ?? e.code}')),
-        );
+        showAppAlert(context, '인증 실패: ${e.message ?? e.code}');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('오류: $e')));
+        showAppAlert(context, '오류: $e');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -150,9 +149,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final available = await BackendApi.instance.isNicknameAvailable(nickname);
       if (!available) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이미 사용 중인 닉네임입니다.')),
-          );
+          showAppAlert(context, '이미 사용 중인 닉네임입니다.');
         }
         return;
       }
@@ -167,9 +164,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       } on BackendApiException catch (e) {
         await AuthService.instance.signOut();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 등록에 실패했습니다.')),
-          );
+          showAppAlert(context, e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 등록에 실패했습니다.');
         }
         return;
       }
@@ -181,9 +176,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('이메일과 비밀번호를 입력하세요.')),
-      );
+      showAppAlert(context, '이메일과 비밀번호를 입력하세요.');
       return;
     }
     _runAuth(() async {

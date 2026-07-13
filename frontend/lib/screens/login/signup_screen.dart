@@ -6,6 +6,7 @@ import '../../api/backend_api.dart';
 import '../../mock/mock_data.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
@@ -106,9 +107,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         _isCheckingNickname = false;
         _nicknameAvailable = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('닉네임 확인 중 오류가 발생했습니다.')),
-      );
+      showAppAlert(context, '닉네임 확인 중 오류가 발생했습니다.');
     }
   }
 
@@ -144,13 +143,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('가입 실패: ${e.message ?? e.code}')),
-        );
+        showAppAlert(context, '가입 실패: ${e.message ?? e.code}');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('오류: $e')));
+        showAppAlert(context, '오류: $e');
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
