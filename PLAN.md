@@ -342,11 +342,11 @@ interface LiarGameLLM {
 
 ## 프론트-백엔드 연결 정합성
 
-> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 아래 `frontend-2` 기준 세부 항목도 동일 계약이라 그대로 유효하다.
+> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 아래 세부 항목은 `frontend-2` 레이아웃 기준이라 **계약(이벤트·필드)은 그대로 유효하지만 파일 경로는 다르다** — 통합 브랜치에는 `screens/room/panels/*.dart`가 별도로 없고, 방 화면이 `screens/room/room_screen.dart` 한 파일로 합쳐져 페이즈별 패널을 내부에서 분기한다.
 
 `frontend-2` 브랜치가 이 문서의 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 아래와 같이 정리됐다.
 
-- **네트워킹/상태 의존성**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod` 추가. `services/socket_service.dart`(소켓 송수신 전담), `services/auth_service.dart`(Firebase Auth), `state/room_provider.dart`(Riverpod, 방/게임 상태) 신설. 기존 `services/user_session.dart`(static 전역)는 `services/room_session_store.dart`로 대체.
+- **네트워킹/상태 의존성**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod` 추가. `services/socket_service.dart`(소켓 송수신 전담), `services/auth_service.dart`(Firebase Auth), `state/room_provider.dart`(Riverpod, 방/게임 상태) 신설. 활성 방 코드 저장용으로 `services/room_session_store.dart`(SharedPreferences)를 추가했고, 기존 `services/user_session.dart`(닉네임 등 static 전역)는 그대로 유지된다(둘은 역할이 달라 대체 관계가 아님).
 - **단일 `RoomScreen` + 페이즈 패널**: `screens/room/room_screen.dart` 하나로 통일. 채팅 리스트는 고정하고 하단만 `screens/room/panels/{waiting,describing,voting,liar_guess,result_card}.dart`로 교체해, 게임 채팅과 방 채팅이 하나의 피드로 유지된다.
 - **`ChatMessage` 모델**: `models/chat_message.dart`가 계약(`{ id, senderId, type, text, timestamp }`)과 동일. `senderId`는 uid 또는 `'ai'`/`'system'` 특수값.
 - **투표/판정 서버 소유**: `panels/voting_panel.dart`는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
@@ -373,7 +373,7 @@ interface LiarGameLLM {
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
 - **점수·레벨 튜닝**: 승 +20/패 −10, 100점당 1레벨로 확정해 구현함(데이터 모델 섹션 참조). 배점·구간 폭은 플레이 데이터를 보고 추후 조정 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
-- **점수·레벨 프론트 표시 (미연결)**: 백엔드가 `GET /api/users/me`로 `score`·`level`을 이미 내려주고 프론트 `UserStats` 모델도 두 필드를 파싱하지만, 이를 화면에 그리는 UI는 아직 없다(프로필 화면이 사진·닉네임 편집 전용). 프로필/로비에 레벨 배지·점수 진행바를 붙이는 작업은 프론트에서 후속으로 진행한다. 레벨 내 진행도는 `현재 레벨 시작점 = (level-1)×100`, `다음 레벨까지 = score − (level-1)×100 / 100`으로 계산.
+- **점수·레벨 프론트 표시 (일부 연결)**: 백엔드가 `GET /api/users/me`로 `score`·`level`을 내려주고, 로비 전적 카드는 이미 `Lv.{level} ({score} XP)` 형태로 표시한다(`lobby_screen.dart`). 남은 것은 프로필 화면 쪽 — 현재 프로필은 사진·닉네임 편집 전용이라 레벨 배지·점수 진행바가 없다. 진행바를 붙일 때 레벨 내 진행도는 `현재 레벨 시작점 = (level-1)×100`, `다음 레벨까지 = score − (level-1)×100 / 100`으로 계산.
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`liar-game-8ff55.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
