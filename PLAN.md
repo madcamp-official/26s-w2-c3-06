@@ -232,7 +232,9 @@ enum FriendshipStatus {
 
 분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
 
-**레벨**: 별도 컬럼을 두지 않고 `count(plays)`(전체 게임수)에서 파생한다 — 승패와 무관하게 참여 자체로 오르는 구간제 레벨(예: 게임수 구간에 따라 Lv.1/2/3…). 정확한 구간표는 추후 확정.
+**점수·레벨**: 별도 컬럼을 두지 않고 `plays`의 승/패 집계에서 파생한다(전적과 동일하게 `GamePlay`가 source of truth라 배점을 바꾸면 과거 기록까지 일관되게 재계산됨).
+- 점수 = `max(0, count(won = true) × 20 − count(won = false) × 10)` — 승리 +20, 패배 −10, 하한 0(음수 없음)
+- 레벨 = `floor(점수 / 100) + 1` — 100점당 한 구간(순승 5회당 약 1레벨). 참여 횟수가 아니라 점수(실력)에 연동된다.
 
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
@@ -296,7 +298,7 @@ enum FriendshipStatus {
 - `PUT /api/users/me` `{ nickname }` → 204 — 회원가입/닉네임 변경 직후 로컬 DB에 즉시 반영. Firebase ID 토큰의 name 클레임이 `updateDisplayName` 직후 바로 갱신되지 않을 수 있어, 프론트가 닉네임 확정 시 명시적으로 호출해 친구 요청 등이 가입 직후에도 바로 동작하게 한다. 닉네임 중복이면 409
 - `GET /api/users/me/profile` — 로그인 시 업로드한 프로필 사진을 복원하기 위한 조회. 응답 `{ nickname, avatarUrl }`
 - `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
-- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, level }` (승률은 0~1 float, 분모 0이면 `null`. `level`은 `count(plays)`에서 파생되는 정수, 정확한 구간표는 TODO 참고)
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, score, level }` (승률은 0~1 float, 분모 0이면 `null`. `score`는 승/패 기반 파생 정수(승 +20/패 −10, 하한 0), `level`은 `floor(score/100)+1`. 자세한 배점은 "DB 스키마"의 점수·레벨 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
@@ -364,7 +366,7 @@ interface LiarGameLLM {
 
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
-- **레벨 구간표**: 게임수 기반 레벨을 도입하기로 확정했으나(데이터 모델 섹션 참조), 구체적인 구간(몇 판당 레벨업)은 아직 미정.
+- **점수·레벨 튜닝**: 승 +20/패 −10, 100점당 1레벨로 확정해 구현함(데이터 모델 섹션 참조). 배점·구간 폭은 플레이 데이터를 보고 추후 조정 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`liar-game-8ff55.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
