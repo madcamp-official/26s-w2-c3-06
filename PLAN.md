@@ -158,7 +158,7 @@ interface RoomState {
   visibility: 'public' | 'private';
   maxPlayers: number;        // 방장이 방 생성 시 지정. 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];
-  customCategories: string[]; // 방장이 이 방에서 직접 추가한 카테고리 이름. 방 종료 시 함께 소멸(영구 저장 안 함)
+  customCategories: string[]; // 이 방에서 실제 사용된 카테고리(방장 직접 입력 + AI 랜덤 생성분 모두, 중복 제거). 다음 게임 선택지로 재사용. 방 종료 시 함께 소멸(영구 저장 안 함)
   draftConfig: DraftGameConfig; // 방장이 게임 시작 전 고르고 있는 봇 수/카테고리 (실시간 공유용, game:draftConfig와 같은 모양)
   chatLog: ChatMessage[];    // 방 존재 동안 유지, 새 게임 시작 시에만 초기화
   currentGame: GameState | null;
@@ -251,17 +251,18 @@ enum FriendshipStatus {
 - `chat:send` `{ text }` — 언제든 자유 채팅
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
 - `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
-- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 추가된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열 — 프리셋에 없는 새 이름이면 서버가 해당 방의 `customCategories`에 추가해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함), (3) `null` — 이 경우 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
 - `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
 - `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
 
 **Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
+- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
 - `game:draftConfigUpdated` `{ category, aiBotCount }` — `game:draftConfig` 수신 시 방 전체 브로드캐스트, 게임 시작(`game:configure`) 시 `{ category: null, aiBotCount: 0 }`로 리셋
+- `room:customCategoriesUpdated` `{ customCategories }` (`string[]`) — 새 게임 시작 시 이번 카테고리(방장 입력·AI 랜덤 포함)가 방의 재사용 목록에 새로 추가됐을 때만 방 전체에 브로드캐스트. 클라이언트는 다음 게임 카테고리 칩 목록을 이 값으로 갱신
 - `room:publicList` `{ rooms: [{roomCode, playerCount, maxPlayers, inProgress}] }` — `inProgress`는 해당 방에 진행 중인 게임이 있는지(로비 목록에 "게임 중" 표시용)
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
-- `room:rejoined` `{ roomCode, hostId, visibility, players, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
+- `room:rejoined` `{ roomCode, hostId, visibility, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
@@ -376,7 +377,7 @@ interface LiarGameLLM {
 12. 호스트 연결 종료 시 방 정리 및 공개방 목록에서도 제거되는지 확인
 13. 참가자(사람+봇 합산)가 3명 미만이거나 전원 준비 완료 전에는 `game:configure`가 `room:error`로 거부되는지 확인
 14. 투표로 실제 라이어가 아닌 사람이 지목됐을 때, 역전승 단계 없이 바로 `winner: 'liar'`로 게임이 종료되는지 확인
-15. 방장이 프리셋에 없는 카테고리 이름을 자유 입력했을 때 해당 방에서 다음 게임부터 칩으로 재사용되는지, 방 종료 후에는 사라지는지 확인
+15. 방장이 자유 입력한 카테고리든 "AI 랜덤 생성"으로 확정된 카테고리든, 해당 방에서 다음 게임부터 칩으로 재사용되는지(`room:customCategoriesUpdated` 수신), 중복 없이 쌓이는지, 방 종료 후에는 사라지는지 확인
 16. `backend`→`frontend` 병합 후 클린 체크아웃에서 두 디렉터리가 충돌 없이 공존하며 각자 정상 실행되는지 확인
 
 ## 배포 및 DB 운영
