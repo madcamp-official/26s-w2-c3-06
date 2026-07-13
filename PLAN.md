@@ -308,9 +308,9 @@ Lv.20 이후에도 같은 규칙으로 계속 증가한다. 다음 레벨까지 
 - `turn:started` `{ playerId, timeLimitSec }`
 - `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
 - `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
-- `round:resolved` (chat:message type:'system'으로도 브로드캐스트) `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행
+- `round:resolved` `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행. 지목된 사람·라이어 여부·실제/라이어 제시어·역전승 결과는 채팅에 작은 텍스트로 흘리지 않고, 클라이언트가 이 이벤트와 `round:finalResult`를 합쳐 큰 알림창으로 한 번에 보여준다(chat:message로는 더 이상 별도 브로드캐스트하지 않음)
 - `liar:guessPrompt` `{ timeLimitSec }` — `wasLiar`가 `true`일 때만 발생, 지목된 사람의 소켓에만
-- `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens' }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect: null`. 정답 판정은 서버가 LLM(`judgeLiarGuess`)에게 위임해 유사 표현·오타·한글/영어 표기 차이를 허용
+- `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens', liarGuess: string | null }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect`/`liarGuess` 모두 `null`. 정답 판정은 서버가 우선 편집 거리 기반 유사 일치를 결정적으로 체크하고(오타 관대하게 허용), 통과 못 하면 LLM(`judgeLiarGuess`)에게 의미 판단을 맡긴다(번역·동의어 등은 LLM이 판단)
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
 - `room:closed` — 호스트가 방을 나가면(재접속 유예 시간 만료 포함) 방이 폭파되며 전송. 호스트가 아닌 인원의 퇴장은 방을 유지한 채 `room:playerListUpdated`만 브로드캐스트
 - `room:invited` `{ roomCode, title, emoji, fromUid, fromNickname }` — 친구가 나를 방으로 초대했을 때(`friend:invite`) 온라인인 내 소켓에 전송. 클라이언트는 알림을 띄우고 수락 시 해당 `roomCode`로 입장
@@ -359,7 +359,7 @@ interface LiarGameLLM {
 - `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건). 자신이 지금 '라이어게임' 참가자로 플레이 중이라는 프레이밍을 프롬프트 서두에 명시. 단어 자체나 그 단어를 바로 연상시키는 결정적 특징은 직접 말하지 않게 하고, 대신 "이 단어를 잘 안다"는 여유·확신이 은근히 묻어나는 간접적·개인적인 힌트로 설명하도록 지시(라이어가 아니라는 인상을 슬쩍 풍기는 효과). 응답은 반드시 반말.
 - `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 근거 없이 의심하는 드립을 던지는 코멘트를 생성. 실제 라이어가 누구인지·진짜/가짜 제시어가 무엇인지는 `TurnCommentContext` 자체에 그 필드가 없어 구조적으로 이 프롬프트에 입력될 수 없음 — 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. 말투는 "초등학생이 단체 채팅방에서 떠드는" 유치하고 산만한 톤(반말, "ㅋㅋㅋ", "ㅇㅈ?" 등)으로 짓궂게 약올리되, 실제 욕설·혐오·인신공격은 금지. **별도 system 프롬프트**로 "참가자 전원이 동의한 게임 내 코미디 캐릭터 연기"임을 먼저 명시해, 모델이 이를 실제 기만 요청으로 오인해 거부하는 것을 방지한다(과거 "다른 플레이어를 의도적으로 헷갈리게 만들라"는 문구만으로는 Claude가 "정보를 꾸며내 속이라는 요청"으로 해석해 거부한 사례가 있었음). 응답이 거절 문구처럼 보이거나(영文/한글 거절 패턴) 비정상적으로 길면 `wrapper.ts`의 `assertNotRefusal`이 에러로 처리해, 거절 텍스트가 그대로 게임 채팅에 노출되지 않고 조용히 코멘트가 생략되게 한다.
 - `explainWord` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
-- `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정.
+- `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정. **LLM 판정만으로는 사소한 오타조차 오답 처리되는 경우가 있어**(예: "펜싱"을 "팬싱"으로 표기), `wrapper.ts`가 LLM을 호출하기 전에 `textMatch.ts`의 편집 거리 기반 결정적 체크(`isFuzzyMatch`)를 먼저 통과시킨다 — 짧은 단어는 편집 거리 1까지, 긴 단어는 길이의 20%까지 오타로 인정하고 통과하면 LLM 호출 없이 바로 정답 처리, 통과 못 하면(번역·동의어 등 표기가 많이 다른 경우) 기존처럼 LLM에게 맡긴다. LLM 호출 자체가 실패했을 때의 폴백도 완전 일치 대신 이 유사 일치로 처리.
 
 ## 백엔드 구현 현황 (backend 브랜치)
 
