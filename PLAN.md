@@ -190,15 +190,13 @@ model User {
 }
 
 // 사람 참가자 1명이 게임 1판을 마칠 때마다 1행 기록 (봇은 Firebase uid가 없으므로 기록 안 함).
-// 전적 4종은 모두 이 테이블 집계로 파생한다 — 별도 카운터를 두지 않아 드리프트가 없고, 추후 카테고리별·기간별 통계도 확장 가능.
+// 전적 4종은 모두 이 테이블 집계로 파생한다 — 별도 카운터를 두지 않아 드리프트가 없다.
 model GamePlay {
-  id       String   @id @default(cuid())
-  userId   String
-  user     User     @relation(fields: [userId], references: [uid], onDelete: Cascade)
-  wasLiar  Boolean                           // 이 게임에서 라이어였는지
-  won      Boolean                           // 이 유저가 속한 팀이 최종 승리했는지
-  category String
-  playedAt DateTime @default(now())
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [uid], onDelete: Cascade)
+  wasLiar Boolean                           // 이 게임에서 라이어였는지
+  won     Boolean                           // 이 유저가 속한 팀이 최종 승리했는지
 
   @@index([userId])
 }
