@@ -4,6 +4,7 @@ import {
   wordPairPrompt,
   botTurnPrompt,
   turnCommentPrompt,
+  turnCommentSystemPrompt,
   explainWordPrompt,
   judgeLiarGuessPrompt,
 } from './prompts';
@@ -22,10 +23,11 @@ export interface LiarGameLLM {
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 
-async function completeText(prompt: string, maxTokens: number): Promise<string> {
+async function completeText(prompt: string, maxTokens: number, system?: string): Promise<string> {
   const res = await getAnthropic().messages.create({
     model: MODEL,
     max_tokens: maxTokens,
+    ...(system ? { system } : {}),
     messages: [{ role: 'user', content: prompt }],
   });
   return res.content
@@ -33,6 +35,28 @@ async function completeText(prompt: string, maxTokens: number): Promise<string> 
     .map((block) => block.text)
     .join('')
     .trim();
+}
+
+// 프롬프트를 아무리 다듬어도 모델이 드물게 거절 응답을 내놓을 수 있다. 그 텍스트를 그대로
+// 게임 채팅에 "AI 코멘트"·"봇의 설명"인 것처럼 흘려보내면 안 되므로, 거절처럼 보이는 응답은
+// 여기서 걸러 에러로 처리한다 — 호출부(gameEngine)가 이미 실패 시 "코멘트 생략"으로 조용히
+// 넘어가도록 되어 있어, 플레이어에게는 그냥 이번 턴에 코멘트가 없는 것처럼만 보인다.
+const REFUSAL_PATTERNS = [
+  /i can.?t help/i,
+  /i cannot/i,
+  /i.?m (not able|unable) to/i,
+  /against my/i,
+  /i.?m sorry, but/i,
+  /죄송하지만/,
+  /도와드릴 수 없/,
+  /도와드리기 (어렵|힘들)/,
+  /응할 수 없/,
+];
+
+function assertNotRefusal(text: string, maxExpectedLength: number): void {
+  if (text.length > maxExpectedLength || REFUSAL_PATTERNS.some((re) => re.test(text))) {
+    throw new Error(`LLM 응답이 거절/이상 응답으로 보여 사용하지 않음: ${text.slice(0, 120)}`);
+  }
 }
 
 const realLLM: LiarGameLLM = {
@@ -45,11 +69,15 @@ const realLLM: LiarGameLLM = {
   },
 
   async generateBotTurn(ctx) {
-    return completeText(botTurnPrompt(ctx), 128);
+    const text = await completeText(botTurnPrompt(ctx), 128);
+    assertNotRefusal(text, 220);
+    return text;
   },
 
   async generateTurnComment(ctx) {
-    return completeText(turnCommentPrompt(ctx), 128);
+    const text = await completeText(turnCommentPrompt(ctx), 128, turnCommentSystemPrompt);
+    assertNotRefusal(text, 160);
+    return text;
   },
 
   async explainWord(word) {

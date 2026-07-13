@@ -30,7 +30,7 @@ export const mockLLM: LiarGameLLM = {
   },
 
   async generateTurnComment(ctx: TurnCommentContext) {
-    return `(mock) "${ctx.latestDescription.slice(0, 10)}..."는 좀 수상한데요?`;
+    return `(mock) 야 "${ctx.latestDescription.slice(0, 10)}..." 이거 완전 수상한데?ㅋㅋㅋ 노잼이야 ㅇㅈ?`;
   },
 
   async explainWord(word: string) {
