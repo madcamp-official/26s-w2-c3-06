@@ -611,10 +611,17 @@ class _RoomScreenState extends State<RoomScreen> {
   void _finishGame({required String winner, required String? liarGuess, required bool? liarGuessCorrect}) {
     final citizensWin = winner == 'citizens';
 
-    // PLAN.md의 GamePlay 1행 추가에 해당 — 이 판 결과를 내 전적에 반영한다(라이어/시민 승률·레벨).
+    // PLAN.md의 GamePlay 1행 추가에 해당 — 이 판 결과를 내 전적/XP에 반영한다(AI 봇은 대상 아님).
+    // liarGuessCorrect는 라이어의 역전승 시도가 실제로 있었을 때만 non-null이라, "역전승 성공"
+    // 보너스(+20 XP)는 내가 라이어이면서 그 시도가 성공했을 때만 붙는다.
     final meWasLiar = _liarId == 'me';
     final meWon = meWasLiar == !citizensWin;
-    UserSession.stats = UserSession.stats.recordGame(won: meWon, wasLiar: meWasLiar);
+    final meComebackSuccess = meWasLiar && liarGuessCorrect == true;
+    UserSession.stats = UserSession.stats.recordGame(
+      won: meWon,
+      wasLiar: meWasLiar,
+      liarComebackSuccess: meComebackSuccess,
+    );
 
     var countdown = 10;
 
