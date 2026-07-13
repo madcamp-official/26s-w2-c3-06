@@ -567,7 +567,7 @@ class _RoomScreenState extends State<RoomScreen> {
     final scores = <String, int>{
       for (final p in _participants) p.id: (p.id == _liarId) == !citizensWin ? 100 : -50,
     };
-    var countdown = citizensWin ? 3 : 2;
+    var countdown = 10;
 
     showPixelDialog(
       context: context,
