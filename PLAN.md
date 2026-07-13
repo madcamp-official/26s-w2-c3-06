@@ -107,7 +107,7 @@ interface Player {
   nickname: string;
   isBot: boolean;
   connected: boolean;      // disconnect 시 즉시 false, 유예 시간 내 room:rejoin하면 true로 복귀
-  isReady: boolean;        // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
+  isReady: boolean;        // 대기방 준비 상태. 봇과 방장은 참여 즉시 true로 고정(방장은 준비 토글 UI 자체가 없음)
 }
 // 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
@@ -332,6 +332,7 @@ Lv.20 이후에도 같은 규칙으로 계속 증가한다. 다음 레벨까지 
 - `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
 - `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, xp, level }` (승률은 0~1 float, 분모 0이면 `null`. `xp`는 누적 XP 정수값(단조증가, DB에 저장), `level`은 계산된 파생값(저장 안 함, 매번 누적 XP로부터 계산). 자세한 XP 획득 규칙과 레벨 계산식은 "DB 스키마"의 XP 및 레벨 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
+- `GET /api/users/:uid/profile` — 임의 uid의 닉네임/프로필 사진 조회(`/me/profile`의 타인 버전). 응답 `{ nickname, avatarUrl }`. 방 참가자 채팅·투표 후보 아바타에 실제 프로필 사진을 보여주는 데 쓴다(봇 id는 DB에 없어 `{ nickname: null, avatarUrl: null }`)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
@@ -380,10 +381,11 @@ interface LiarGameLLM {
 - **투표/판정 서버 소유**: 투표 페이즈 UI(room_screen.dart 내부)는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
 - **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, room_screen.dart는 역전승 프롬프트를 자신에게 온 경우에만 렌더링한다.
 - **`RoomSummary`**: `models/room_summary.dart`가 `room:publicList` 계약(`{ roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress }`)을 그대로 반영한다.
-- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영.
+- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영. 방장은 이 토글 자체를 보지 않는다(서버가 `isReady: true`로 고정해두므로 항상 준비된 것으로 취급) — 방장이 아닌 참가자 전원이 준비를 마치면 방장이 "게임 시작"을 눌러 시작한다.
+- **`friend:invite`/`room:invited`**: room_screen.dart 헤더 우측 상단에 방장 전용(게스트 제외) "친구 초대" 버튼을 두고, 누르면 접속 중인 친구 목록 다이얼로그를 띄운다. 목록의 "초대" 버튼이 `friend:invite`를 보내고, 상대는 로비에서 `room:invited` 수신 스낵바(+"입장" 액션)로 받는다.
 - **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
-- **`maxPlayers` 방 생성 UI**: `screens/lobby/lobby_screen.dart`에 슬라이더로 지정, `createRoom()`이 이 값을 emit.
+- **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
 - **`discussion:skip`**: room_screen.dart 토론 페이즈의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
 
