@@ -716,7 +716,7 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _returnToWaiting() {
     setState(() {
-      _addSystemMessage('----------------게임이 종료되었습니다.----------------');
+      _addSystemMessage('--------게임이 종료되었습니다.--------');
       _phase = _Phase.waiting;
       _myWord = null;
       _myWordExplanation = null;
@@ -1118,71 +1118,91 @@ class _RoomScreenState extends State<RoomScreen> {
 
   Widget _buildWaitingBar(BuildContext context) {
     final me = _humanPlayers.firstWhere((p) => p.id == 'me');
-    return Row(
-      children: [
-        Flexible(
-          child: GestureDetector(
-            onTap: widget.isHost ? _openCategoryPicker : null,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-              decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      '카테고리: $_selectedCategory',
-                      style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                  ),
-                  if (widget.isHost) ...[
-                    const SizedBox(width: 2),
-                    const Icon(Icons.expand_more, size: 14, color: AppColors.mutedForeground),
-                  ],
-                ],
-              ),
+    // 데스크탑(웹)은 마우스로 클릭하는 넓은 화면이라 모바일용 컴팩트 크기로는 너무 작다.
+    // 화면 폭에 따라 스테퍼/라벨/버튼 크기를 키운다.
+    final isDesktop = context.isDesktop;
+    final stepperSize = isDesktop ? 40.0 : 26.0;
+    final stepperIconSize = isDesktop ? 20.0 : 14.0;
+
+    final categoryBox = Container(
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: isDesktop ? 12 : 9),
+      decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '카테고리: $_selectedCategory',
+              style: PixelFont.body(fontSize: isDesktop ? 14 : 12, color: AppColors.foreground),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
+          if (widget.isHost) ...[
+            const SizedBox(width: 2),
+            Icon(Icons.expand_more, size: isDesktop ? 18 : 14, color: AppColors.mutedForeground),
+          ],
+        ],
+      ),
+    );
+
+    return Row(
+      children: [
+        // 남는 공간을 전부 카테고리 박스에 줘서(뒤 요소는 고정 크기) AI봇 스테퍼와
+        // 비슷한 높이로 커지고 글자도 잘리지 않게 한다. Spacer와 함께 쓰면 여유 공간을
+        // 반씩 나눠 가져 카테고리 글자가 잘리므로 여기서는 Spacer를 쓰지 않는다.
+        // 방장이 아니면 카테고리는 탭할 수 없는 단순 표시로만 보여준다.
+        Expanded(
+          child: widget.isHost ? GestureDetector(onTap: _openCategoryPicker, child: categoryBox) : categoryBox,
         ),
-        const SizedBox(width: 6),
-        Text('AI봇', style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
-        const SizedBox(width: 4),
-        Container(
-          decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: widget.isHost ? () => _changeBotCount(-1) : null,
-                icon: const Icon(Icons.remove, size: 14),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              ),
-              SizedBox(
-                width: 14,
-                child: Text('$_botCount', textAlign: TextAlign.center, style: PixelFont.body(fontSize: 11)),
-              ),
-              IconButton(
-                onPressed: widget.isHost ? () => _changeBotCount(1) : null,
-                icon: const Icon(Icons.add, size: 14),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              ),
-            ],
+        // AI봇 수 조절은 방장 전용 기능이라 방장이 아니면 아예 표시하지 않는다.
+        if (widget.isHost) ...[
+          SizedBox(width: isDesktop ? 10 : 6),
+          Text('AI봇', style: PixelFont.body(fontSize: isDesktop ? 13 : 10, color: AppColors.mutedForeground)),
+          SizedBox(width: isDesktop ? 6 : 4),
+          Container(
+            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: () => _changeBotCount(-1),
+                  icon: Icon(Icons.remove, size: stepperIconSize),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(minWidth: stepperSize, minHeight: stepperSize),
+                ),
+                SizedBox(
+                  width: isDesktop ? 22 : 14,
+                  child: Text(
+                    '$_botCount',
+                    textAlign: TextAlign.center,
+                    style: PixelFont.body(fontSize: isDesktop ? 15 : 11),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => _changeBotCount(1),
+                  icon: Icon(Icons.add, size: stepperIconSize),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(minWidth: stepperSize, minHeight: stepperSize),
+                ),
+              ],
+            ),
           ),
-        ),
-        const Spacer(),
+        ],
+        SizedBox(width: isDesktop ? 10 : 6),
         if (widget.isHost)
-          AppButton(label: '▶ 시작', fullWidth: false, dense: true, onPressed: _canStartGame ? _startGame : null)
+          AppButton(
+            label: '▶ 시작',
+            fullWidth: false,
+            dense: !isDesktop,
+            onPressed: _canStartGame ? _startGame : null,
+          )
         else
           AppButton(
             label: me.isReady ? '✓준비완료' : '준비하기',
             fullWidth: false,
-            dense: true,
+            dense: !isDesktop,
             variant: me.isReady ? AppButtonVariant.primary : AppButtonVariant.outlined,
             onPressed: () => _toggleReady('me'),
           ),
