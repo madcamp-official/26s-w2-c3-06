@@ -8,16 +8,12 @@ export interface Player {
   isReady: boolean; // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
 }
 
+// 한 게임 안의 "설명 한 바퀴". 설명 순서(playerOrder)는 게임 단위로 고정이고 투표는
+// 게임당 한 번뿐이므로, 순서·투표·판정 결과는 여기가 아니라 GameState에 둔다.
+// 라운드는 그 바퀴에 제출된 설명(turns)만 담는다.
 export interface Round {
   roundNumber: number;
-  playerOrder: string[];
   turns: { playerId: string; text: string }[];
-  votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
-  votedOutId?: string;
-  wasLiar?: boolean;
-  liarGuess?: string;
-  liarGuessCorrect?: boolean;
-  winner?: 'liar' | 'citizens';
 }
 
 export type GamePhase =
@@ -38,8 +34,17 @@ export interface GameState {
   participantIds: string[]; // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
   aiBotCount: number;
   phase: GamePhase;
+  playerOrder: string[]; // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
   usedWordsThisGame: string[];
-  rounds: Round[]; // MVP: 길이 1
+  rounds: Round[]; // 설명 라운드들. MVP: 길이 1
+
+  // 투표·판정은 게임당 한 번(모든 설명 라운드 종료 후). 라운드가 아니라 게임에 귀속된다.
+  votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
+  votedOutId?: string;
+  wasLiar?: boolean;
+  liarGuess?: string;
+  liarGuessCorrect?: boolean;
+  winner?: 'liar' | 'citizens';
 }
 
 export type ChatSenderKind = string | 'ai' | 'system';

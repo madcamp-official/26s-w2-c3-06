@@ -102,7 +102,7 @@ export async function startGame(
   const liarIds = [pickRandom(participantIds)]; // MVP: 1명 고정 (PLAN TODO: 추후 방장이 수 선택)
   const playerOrder = shuffle(participantIds);
 
-  const round: Round = { roundNumber: 1, playerOrder, turns: [], votes: {} };
+  const round: Round = { roundNumber: 1, turns: [] };
   const game: GameState = {
     gameNumber: room.gameHistory.length + 1,
     category,
@@ -112,8 +112,10 @@ export async function startGame(
     participantIds,
     aiBotCount: opts.aiBotCount,
     phase: 'setup',
+    playerOrder,
     usedWordsThisGame: [realWord, liarWord],
     rounds: [round],
+    votes: {},
   };
   room.currentGame = game;
   roomManager.resetChatLog(room);
@@ -173,7 +175,14 @@ export function toPublicGameState(room: RoomState, game: GameState) {
     realWord: revealed ? game.realWord : null,
     liarWord: revealed ? game.liarWord : null,
     liarId: revealed ? game.liarIds[0] : null,
-    rounds: game.rounds.map(({ votes: _votes, ...publicRound }) => publicRound),
+    // 설명 순서·투표 판정 결과는 게임 단위 필드. votes(개별 투표 내역)만 서버 전용이라 제외한다.
+    playerOrder: game.playerOrder,
+    votedOutId: game.votedOutId,
+    wasLiar: game.wasLiar,
+    liarGuess: game.liarGuess,
+    liarGuessCorrect: game.liarGuessCorrect,
+    winner: game.winner,
+    rounds: game.rounds, // Round에는 이제 turns만 있어 그대로 내보내도 비밀이 없다
   };
 }
 
@@ -196,8 +205,7 @@ export function resendYourWord(io: Server, room: RoomState, uid: string): void {
 export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'liarGuess') return;
-  const round = currentRound(game);
-  if (round.votedOutId !== uid) return;
+  if (game.votedOutId !== uid) return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (socketId) {
     io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
@@ -209,15 +217,14 @@ export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid:
 function startTurn(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
-  const round = currentRound(game);
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
 
-  if (idx >= round.playerOrder.length) {
+  if (idx >= game.playerOrder.length) {
     endDescribingPhase(io, room);
     return;
   }
 
-  const playerId = round.playerOrder[idx];
+  const playerId = game.playerOrder[idx];
   io.to(room.roomCode).emit('turn:started', { playerId, timeLimitSec: TURN_TIME_LIMIT_SEC });
 
   if (isBotId(playerId)) {
@@ -235,7 +242,7 @@ async function runBotTurn(io: Server, room: RoomState, botId: string): Promise<v
   const round = currentRound(game);
   // 다른 곳에서 이미 넘어갔으면(방 정리 등) 무시
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (round.playerOrder[idx] !== botId) return;
+  if (game.playerOrder[idx] !== botId) return;
 
   try {
     const assignedWord = game.liarIds.includes(botId) ? game.liarWord : game.realWord;
@@ -254,9 +261,8 @@ async function runBotTurn(io: Server, room: RoomState, botId: string): Promise<v
 function handleTurnTimeout(io: Server, room: RoomState, playerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
-  const round = currentRound(game);
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (round.playerOrder[idx] !== playerId) return;
+  if (game.playerOrder[idx] !== playerId) return;
   // PLAN 타이머 만료 규칙: 미제출은 그냥 못 하는 것으로 처리(빈 채로 다음 턴).
   advanceTurn(io, room);
 }
@@ -270,9 +276,8 @@ export async function submitDescription(
 ): Promise<void> {
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
-  const round = currentRound(game);
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (round.playerOrder[idx] !== uid) return;
+  if (game.playerOrder[idx] !== uid) return;
 
   const timer = turnTimers.get(room.roomCode);
   if (timer) clearTimeout(timer);
@@ -332,7 +337,7 @@ function advanceTurn(io: Server, room: RoomState): void {
   turnIndexByRoom.set(room.roomCode, idx);
   const game = room.currentGame;
   if (!game) return;
-  if (idx >= currentRound(game).playerOrder.length) {
+  if (idx >= game.playerOrder.length) {
     endDescribingPhase(io, room);
   } else {
     startTurn(io, room);
@@ -368,7 +373,7 @@ function startVoting(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
   game.phase = 'voting';
-  currentRound(game).votes = {};
+  game.votes = {};
 
   broadcastChat(io, room, 'system', 'system', '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.');
   io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC });
@@ -390,12 +395,11 @@ function startVoting(io: Server, room: RoomState): void {
 export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
-  const round = currentRound(game);
-  if (round.votes[voterId]) return; // 이미 투표함 (idempotent)
+  if (game.votes[voterId]) return; // 이미 투표함 (idempotent)
   if (!game.participantIds.includes(votedPlayerId)) return;
 
-  round.votes[voterId] = votedPlayerId;
-  const votesInCount = Object.keys(round.votes).length;
+  game.votes[voterId] = votedPlayerId;
+  const votesInCount = Object.keys(game.votes).length;
   const totalCount = game.participantIds.length;
   io.to(room.roomCode).emit('vote:progress', { votesInCount, totalCount });
 
@@ -411,10 +415,9 @@ function resolveVoting(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   phaseTimers.delete(room.roomCode);
-  const round = currentRound(game);
 
   const tally = new Map<string, number>();
-  for (const votedId of Object.values(round.votes)) {
+  for (const votedId of Object.values(game.votes)) {
     tally.set(votedId, (tally.get(votedId) ?? 0) + 1);
   }
 
@@ -431,8 +434,8 @@ function resolveVoting(io: Server, room: RoomState): void {
   }
   if (tied.length > 0) votedOutId = pickRandom(tied);
 
-  round.votedOutId = votedOutId;
-  round.wasLiar = votedOutId ? game.liarIds.includes(votedOutId) : false;
+  game.votedOutId = votedOutId;
+  game.wasLiar = votedOutId ? game.liarIds.includes(votedOutId) : false;
   game.phase = 'resolution';
 
   // MVP: 라이어 1명 고정(liarIds 길이 1). 시민이 잘못 지목되거나 아무도 지목되지 않은
@@ -443,7 +446,7 @@ function resolveVoting(io: Server, room: RoomState): void {
   let summary: string;
   if (!votedOutId) {
     summary = `투표가 충분히 모이지 않아 아무도 지목되지 않았습니다. 실제 라이어는 ${liarNickname}님이었습니다.`;
-  } else if (round.wasLiar) {
+  } else if (game.wasLiar) {
     summary = `${getParticipantNickname(room, votedOutId)}님이 최다 득표로 지목되었습니다. (라이어 O)`;
   } else {
     summary = `${getParticipantNickname(room, votedOutId)}님이 최다 득표로 지목되었지만 라이어가 아니었습니다. 실제 라이어는 ${liarNickname}님이었습니다.`;
@@ -452,16 +455,16 @@ function resolveVoting(io: Server, room: RoomState): void {
 
   io.to(room.roomCode).emit('round:resolved', {
     votedOutId,
-    wasLiar: round.wasLiar,
+    wasLiar: game.wasLiar,
     realWord: game.realWord,
     liarWord: game.liarWord,
     liarId,
   });
 
-  if (round.wasLiar && votedOutId) {
+  if (game.wasLiar && votedOutId) {
     startLiarGuess(io, room, votedOutId);
   } else {
-    round.winner = 'liar'; // 라이어가 지목되지 않음 → 라이어 승
+    game.winner = 'liar'; // 라이어가 지목되지 않음 → 라이어 승
     finalizeGame(io, room, { liarGuessCorrect: null, winner: 'liar' });
   }
 }
@@ -483,10 +486,10 @@ function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
   if (socketId) io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
 
   const timer = setTimeout(() => {
-    if (room.currentGame?.phase !== 'liarGuess') return;
-    const round = currentRound(room.currentGame);
-    round.liarGuessCorrect = false;
-    round.winner = 'citizens';
+    const g = room.currentGame;
+    if (!g || g.phase !== 'liarGuess') return;
+    g.liarGuessCorrect = false;
+    g.winner = 'citizens';
     finalizeGame(io, room, { liarGuessCorrect: false, winner: 'citizens' });
   }, LIAR_GUESS_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
@@ -502,8 +505,7 @@ export async function submitLiarGuess(
 ): Promise<void> {
   const game = room.currentGame;
   if (!game || game.phase !== 'liarGuess') return;
-  const round = currentRound(game);
-  if (round.votedOutId !== uid) return;
+  if (game.votedOutId !== uid) return;
 
   const timer = phaseTimers.get(room.roomCode);
   if (timer) clearTimeout(timer);
@@ -519,10 +521,10 @@ export async function submitLiarGuess(
   // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'liarGuess') return;
 
-  round.liarGuess = guess;
-  round.liarGuessCorrect = correct;
-  round.winner = correct ? 'liar' : 'citizens';
-  finalizeGame(io, room, { liarGuessCorrect: correct, winner: round.winner });
+  game.liarGuess = guess;
+  game.liarGuessCorrect = correct;
+  game.winner = correct ? 'liar' : 'citizens';
+  finalizeGame(io, room, { liarGuessCorrect: correct, winner: game.winner });
 }
 
 // ── 게임 종료 ──
