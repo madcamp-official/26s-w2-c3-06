@@ -210,7 +210,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         const Text('🤖', textAlign: TextAlign.center, style: TextStyle(fontSize: 72, height: 1)),
         const SizedBox(height: 8),
         Text(
-          'AI LIAR',
+          'L-AI-R',
           textAlign: TextAlign.center,
           style: PixelFont.title(fontSize: 18, color: AppColors.primary, letterSpacing: 2),
         ),
@@ -245,7 +245,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         const SizedBox(height: 24),
         Text(
-          '© 2026 AI Liar Game',
+          '© 2026 L-AI-R Game',
           textAlign: TextAlign.center,
           style: PixelFont.body(
             fontSize: 11,

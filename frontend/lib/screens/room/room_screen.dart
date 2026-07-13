@@ -91,6 +91,43 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Future<void> _leave() async {
     if (_leaving) return;
+    final isHost = ref.read(roomProvider).hostId == _myUid;
+    final confirmed = await showPixelDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      maxWidth: 320,
+      builder: (dialogContext) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('🚪 방 나가기', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+            const SizedBox(height: 12),
+            Text(
+              isHost ? '방장이 나가면 방이 사라집니다. 정말 나가시겠어요?' : '정말 이 방에서 나가시겠어요?',
+              style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: '취소',
+                    variant: AppButtonVariant.outlined,
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AppButton(label: '나가기', onPressed: () => Navigator.of(dialogContext).pop(true)),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || _leaving) return;
     _leaving = true;
     ref.read(roomProvider.notifier).leaveRoom();
     if (mounted) Navigator.of(context).pop();
@@ -406,18 +443,39 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               child: Text('게임 종료 — 새 게임을 시작할 수 있어요',
                   style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
             ),
-          // 참가자 준비 상태
+          // 참가자 준비 상태 — 아바타 + 닉네임 + 준비/대기 뱃지의 작은 세로형 카드(frontend 브랜치 스타일).
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: s.players
-                .map((p) => Chip(
-                      avatar: Icon(p.isReady ? Icons.check_circle : Icons.hourglass_empty,
-                          size: 14, color: p.isReady ? AppColors.success : AppColors.mutedForeground),
-                      label: Text('${p.nickname}${p.id == s.hostId ? ' 👑' : ''}',
-                          style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
-                    ))
-                .toList(),
+            spacing: 10,
+            runSpacing: 8,
+            children: s.players.map((p) {
+              final isHostPlayer = p.id == s.hostId;
+              return SizedBox(
+                width: 48,
+                child: Column(
+                  children: [
+                    UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 16, imageUrl: _avatarUrlFor(p.id)),
+                    const SizedBox(height: 2),
+                    Text(
+                      p.nickname,
+                      style: PixelFont.body(fontSize: 10, color: AppColors.foreground, height: 1.0),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    if (isHostPlayer)
+                      Text('👑 방장', style: PixelFont.body(fontSize: 9, height: 1.0, color: AppColors.primary))
+                    else
+                      Text(
+                        p.isReady ? '✓준비' : '대기',
+                        style: PixelFont.body(
+                          fontSize: 9,
+                          height: 1.0,
+                          color: p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText,
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }).toList(),
           ),
           const SizedBox(height: 8),
           // 방장은 서버가 참여 즉시 준비 완료로 고정해두므로(봇과 동일 규칙) 준비 토글을
@@ -699,7 +757,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           if (result != null) ...[
             const SizedBox(height: 6),
             Text(
-              result.winner == 'citizens' ? '🎉 시민 팀 승리!' : '😈 라이어 팀 승리!',
+              result.winner == 'citizens' ? '🐾 시민팀의 승리!' : '🦊 라이어의 승리!',
               style: PixelFont.title(fontSize: 13, color: AppColors.primary),
             ),
           ],

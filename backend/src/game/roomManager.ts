@@ -96,9 +96,7 @@ export function getUidBySocket(socketId: string): string | undefined {
   return socketIndex.get(socketId)?.uid;
 }
 
-// 로비 공개방 목록. 로비 카드 표시에 필요한 제목·이모지·방장 닉네임·현재 카테고리까지 노출.
-// category는 방장이 대기방에서 고르고 있는 draftConfig.category(null이면 AI 랜덤).
-export function listPublicRooms(): {
+export interface PublicRoomSummary {
   roomCode: string;
   title: string;
   emoji: string;
@@ -107,19 +105,27 @@ export function listPublicRooms(): {
   playerCount: number;
   maxPlayers: number;
   inProgress: boolean;
-}[] {
-  return [...rooms.values()]
-    .filter((r) => r.visibility === 'public')
-    .map((r) => ({
-      roomCode: r.roomCode,
-      title: r.title,
-      emoji: r.emoji,
-      hostNickname: r.players.find((p) => p.id === r.hostId)?.nickname ?? '',
-      category: r.draftConfig.category,
-      playerCount: r.players.length,
-      maxPlayers: r.maxPlayers,
-      inProgress: r.currentGame !== null,
-    }));
+}
+
+// 로비 카드 하나에 필요한 요약(제목·이모지·방장 닉네임·현재 카테고리 등). category는 방장이
+// 대기방에서 고르고 있는 draftConfig.category(null이면 AI 랜덤) — 목록 최초 조회뿐 아니라
+// 방장이 대기방에서 카테고리를 바꿀 때마다 이 모양 그대로 로비에 실시간 재전송된다.
+export function roomToPublicSummary(r: RoomState): PublicRoomSummary {
+  return {
+    roomCode: r.roomCode,
+    title: r.title,
+    emoji: r.emoji,
+    hostNickname: r.players.find((p) => p.id === r.hostId)?.nickname ?? '',
+    category: r.draftConfig.category,
+    playerCount: r.players.length,
+    maxPlayers: r.maxPlayers,
+    inProgress: r.currentGame !== null,
+  };
+}
+
+// 로비 공개방 목록.
+export function listPublicRooms(): PublicRoomSummary[] {
+  return [...rooms.values()].filter((r) => r.visibility === 'public').map(roomToPublicSummary);
 }
 
 const DEFAULT_ROOM_EMOJI = '🎮';

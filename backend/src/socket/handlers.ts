@@ -226,6 +226,9 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     const config = { category: payload.category, aiBotCount: Number(payload.aiBotCount) || 0 };
     roomManager.setDraftConfig(room, config);
     io.to(room.roomCode).emit('game:draftConfigUpdated', config);
+    // 공개방이면 로비에서 지금 어떤 카테고리가 선택 중인지 바로 보이도록, room:create/leave와
+    // 동일한 기존 패턴으로 로비를 보고 있는 모든 소켓에 최신 공개방 목록을 다시 보낸다.
+    broadcastPublicRoomsIfPublic(room.visibility);
   });
 
   // ── 게임 진행 ──
