@@ -7,8 +7,9 @@ import '../services/auth_service.dart';
 final authServiceProvider = Provider<AuthService>((ref) => AuthService.instance);
 
 /// 현재 Firebase 로그인 상태. null이면 로그인/게스트 세션 모두 없는 상태(메인 화면으로).
+/// userChanges를 써서 로그인 직후 displayName(닉네임)이 채워지는 것도 반영한다.
 final authStateProvider = StreamProvider<User?>((ref) {
-  return ref.watch(authServiceProvider).authStateChanges;
+  return ref.watch(authServiceProvider).userChanges;
 });
 
 /// 현재 유저가 게스트(익명)인지 여부. 로그인 안 된 상태에서는 false를 반환한다

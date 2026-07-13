@@ -57,14 +57,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final nickname = _nicknameController.text.trim();
     if (nickname.isEmpty) return;
     try {
-      // 닉네임 중복 확인 후 Firebase displayName + 로컬 DB 동기화(서버 @unique 제약).
-      final available = await BackendApi.instance.isNicknameAvailable(nickname);
-      if (!available) {
-        _snack('이미 사용 중인 닉네임입니다.');
-        return;
-      }
-      await AuthService.instance.updateNickname(nickname);
+      // 중복 판정은 syncNickname(PUT /me)의 권위 응답에 맡긴다 — 본인 uid를 제외해 자기
+      // 닉네임 유지가 가능하고 실제 중복이면 409를 준다. (공개 사전확인 엔드포인트는 self를
+      // 제외하지 못해 자기 닉네임도 '중복'으로 막을 수 있어 여기선 쓰지 않는다.)
+      // DB가 수락한 뒤에만 Firebase displayName을 바꿔 둘이 어긋나지 않게 한다.
       await BackendApi.instance.syncNickname(nickname);
+      await AuthService.instance.updateNickname(nickname);
       setState(() => UserSession.nickname = nickname);
       _snack('닉네임이 저장되었습니다.');
     } on BackendApiException catch (e) {
@@ -211,29 +209,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppButton(
-                        label: '사진 변경',
-                        icon: Icons.photo_library_outlined,
-                        variant: AppButtonVariant.outlined,
-                        fullWidth: false,
-                        onPressed: _handlePickPhoto,
-                      ),
-                      if (_profileImageBytes != null) ...[
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: _handleRemovePhoto,
-                          style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
-                          child: const Text('사진 삭제'),
-                        ),
-                      ],
-                    ],
+                // 사진 변경은 아바타 우하단 카메라 버튼으로 하고, 여기선 삭제만 노출한다.
+                if (_profileImageBytes != null) ...[
+                  const SizedBox(height: 12),
+                  Center(
+                    child: TextButton(
+                      onPressed: _handleRemovePhoto,
+                      style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
+                      child: const Text('사진 삭제'),
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 20),
                 _FieldSection(
                   label: 'NICKNAME',

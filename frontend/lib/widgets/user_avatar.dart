@@ -4,26 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
-class AvatarOption {
-  final String emoji;
-
-  const AvatarOption({required this.emoji});
-}
-
-/// 실제 프로필 사진이 없을 때 대신 보여주는 기본 아이콘 타일(디자인의 동물 이모지).
-const avatarOptions = <AvatarOption>[
-  AvatarOption(emoji: '🦊'),
-  AvatarOption(emoji: '🐱'),
-  AvatarOption(emoji: '🐸'),
-  AvatarOption(emoji: '🦋'),
-  AvatarOption(emoji: '⭐'),
-  AvatarOption(emoji: '🐰'),
-  AvatarOption(emoji: '🌈'),
-  AvatarOption(emoji: '🍀'),
-];
-
 /// 공통 프로필 아바타. 우선순위: [imageBytes](이번 세션 로컬 미리보기) > [imageUrl](서버 저장
-/// Firebase Storage 사진) > [avatarIndex] 기반 기본 아이콘 타일. 앰버 테두리의 둥근 사각형 스타일.
+/// Firebase Storage 사진) > 사진이 없으면 기본 프로필 아이콘(사람 실루엣). 앰버 테두리의
+/// 둥근 사각형 스타일. [avatarIndex]는 호환용으로 남겨둔 값(현재 표시에는 사용하지 않음).
 class UserAvatar extends StatelessWidget {
   final int avatarIndex;
   final double radius;
@@ -45,6 +28,7 @@ class UserAvatar extends StatelessWidget {
     final size = radius * 2;
     final borderRadius = BorderRadius.circular(size * 0.16);
     final Widget content;
+    final placeholder = Icon(Icons.person, size: size * 0.6, color: AppColors.mutedForeground);
     if (imageBytes != null) {
       content = Image.memory(imageBytes!, width: size, height: size, fit: BoxFit.cover);
     } else if (imageUrl != null && imageUrl!.isNotEmpty) {
@@ -53,11 +37,10 @@ class UserAvatar extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) =>
-            Text(avatarOptions[avatarIndex % avatarOptions.length].emoji, style: TextStyle(fontSize: radius)),
+        errorBuilder: (_, __, ___) => placeholder,
       );
     } else {
-      content = Text(avatarOptions[avatarIndex % avatarOptions.length].emoji, style: TextStyle(fontSize: radius));
+      content = placeholder;
     }
     return Container(
       width: size,

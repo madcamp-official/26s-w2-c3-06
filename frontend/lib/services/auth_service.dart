@@ -14,6 +14,11 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  /// 로그인 상태 변화뿐 아니라 프로필(닉네임 등) 변경까지 방출한다. `authStateChanges`는
+  /// 익명 로그인 직후 `updateDisplayName`으로 닉네임이 채워지는 걸 흘려보내지 않아, 게스트
+  /// 닉네임이 '플레이어'로 남는 문제가 있었다. `userChanges`는 그 갱신을 재방출한다.
+  Stream<User?> get userChanges => _auth.userChanges();
   User? get currentUser => _auth.currentUser;
 
   /// 현재 로그인된 유저의 Firebase ID 토큰. 소켓 handshake·REST Authorization 헤더에 사용.

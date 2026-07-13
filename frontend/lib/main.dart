@@ -80,6 +80,15 @@ class _AuthGateState extends ConsumerState<AuthGate> {
           _restoredForUser = false;
           return const LoginScreen();
         }
+        // 닉네임은 매 emit마다 최신화한다. 게스트 생성 직후엔 displayName이 아직 비어 있어
+        // '플레이어'로 잡혔다가, updateDisplayName이 끝나 userChanges가 재방출되면 실제
+        // 닉네임으로 교정된다(아바타/소켓 재설정은 하지 않는다).
+        final nickname =
+            (user.displayName?.trim().isNotEmpty ?? false) ? user.displayName!.trim() : '플레이어';
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          UserSession.nickname = nickname;
+          ref.read(nicknameProvider.notifier).set(nickname);
+        });
         if (!_restoredForUser) {
           _restoredForUser = true;
           WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSession(user));

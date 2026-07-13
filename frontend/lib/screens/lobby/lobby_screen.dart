@@ -309,7 +309,6 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
                 children: [
                   AppNavRail(
                     items: [
-                      const AppNavRailItem(icon: Icons.home_outlined, label: '로비', selected: true),
                       AppNavRailItem(
                         icon: Icons.people_outline,
                         label: '친구',
