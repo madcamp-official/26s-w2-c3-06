@@ -90,7 +90,7 @@ statsRouter.patch('/me/avatar', requireAuth, async (req: AuthedRequest, res) => 
     }
   }
 
-  await updateAvatarUrl(uid, avatarUrl ?? null);
+  await updateAvatarUrl(uid, avatarUrl ?? null, req.nickname, req.isAnonymous);
   res.status(204).end();
 });
 
