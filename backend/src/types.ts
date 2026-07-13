@@ -68,6 +68,8 @@ export interface DraftGameConfig {
 export interface RoomState {
   roomCode: string; // 4자리 숫자 문자열, 예: "4821"
   hostId: string;
+  title: string; // 방 제목. 방 생성 시 지정(미지정 시 "{방장}의 방")
+  emoji: string; // 로비 목록에 표시되는 방 이모지. 방 생성 시 지정(미지정 시 기본 이모지)
   visibility: 'public' | 'private';
   maxPlayers: number; // 방장이 방 생성 시 지정, 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];

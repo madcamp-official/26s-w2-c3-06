@@ -25,18 +25,28 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
 
   socket.on(
     'room:create',
-    (payload: { nickname: string; visibility: 'public' | 'private'; maxPlayers: number }) => {
+    (payload: {
+      nickname: string;
+      visibility: 'public' | 'private';
+      maxPlayers: number;
+      title?: string;
+      emoji?: string;
+    }) => {
       const room = roomManager.createRoom({
         socketId: socket.id,
         uid,
         nickname: payload.nickname,
         visibility: payload.visibility,
         maxPlayers: payload.maxPlayers,
+        title: payload.title,
+        emoji: payload.emoji,
       });
       socket.join(room.roomCode);
       socket.emit('room:created', {
         roomCode: room.roomCode,
         hostId: room.hostId,
+        title: room.title,
+        emoji: room.emoji,
         visibility: room.visibility,
         players: room.players,
         customCategories: room.customCategories,
@@ -69,6 +79,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     socket.emit('room:joined', {
       roomCode: room.roomCode,
       hostId: room.hostId,
+      title: room.title,
+      emoji: room.emoji,
       visibility: room.visibility,
       players: room.players,
       customCategories: room.customCategories,
@@ -101,6 +113,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     socket.emit('room:rejoined', {
       roomCode: room.roomCode,
       hostId: room.hostId,
+      title: room.title,
+      emoji: room.emoji,
       visibility: room.visibility,
       players: room.players,
       customCategories: room.customCategories,

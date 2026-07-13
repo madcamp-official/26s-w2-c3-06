@@ -96,9 +96,14 @@ export function getUidBySocket(socketId: string): string | undefined {
   return socketIndex.get(socketId)?.uid;
 }
 
-// 로비 공개방 목록. { roomCode, playerCount, maxPlayers, inProgress }를 노출.
+// 로비 공개방 목록. 로비 카드 표시에 필요한 제목·이모지·방장 닉네임·현재 카테고리까지 노출.
+// category는 방장이 대기방에서 고르고 있는 draftConfig.category(null이면 AI 랜덤).
 export function listPublicRooms(): {
   roomCode: string;
+  title: string;
+  emoji: string;
+  hostNickname: string;
+  category: string | null;
   playerCount: number;
   maxPlayers: number;
   inProgress: boolean;
@@ -107,11 +112,17 @@ export function listPublicRooms(): {
     .filter((r) => r.visibility === 'public')
     .map((r) => ({
       roomCode: r.roomCode,
+      title: r.title,
+      emoji: r.emoji,
+      hostNickname: r.players.find((p) => p.id === r.hostId)?.nickname ?? '',
+      category: r.draftConfig.category,
       playerCount: r.players.length,
       maxPlayers: r.maxPlayers,
       inProgress: r.currentGame !== null,
     }));
 }
+
+const DEFAULT_ROOM_EMOJI = '🎮';
 
 export function createRoom(opts: {
   socketId: string;
@@ -119,6 +130,8 @@ export function createRoom(opts: {
   nickname: string;
   visibility: 'public' | 'private';
   maxPlayers: number;
+  title?: string;
+  emoji?: string;
 }): RoomState {
   const roomCode = generateRoomCode();
   const host: Player = {
@@ -131,6 +144,8 @@ export function createRoom(opts: {
   const room: RoomState = {
     roomCode,
     hostId: opts.uid,
+    title: opts.title?.trim() || `${opts.nickname}의 방`,
+    emoji: opts.emoji?.trim() || DEFAULT_ROOM_EMOJI,
     visibility: opts.visibility,
     maxPlayers: opts.maxPlayers,
     players: [host],
