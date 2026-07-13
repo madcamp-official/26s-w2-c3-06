@@ -455,17 +455,9 @@ function resolveVoting(io: Server, room: RoomState): void {
   // MVP: 라이어 1명 고정(liarIds 길이 1). 시민이 잘못 지목되거나 아무도 지목되지 않은
   // 경우엔 그 자리에서 바로 게임이 끝나(역전승 단계 없음) 실제 라이어가 누구였는지 알
   // 기회가 없으므로, wasLiar와 무관하게 항상 정체를 공개한다.
+  // 지목된 사람·라이어 여부·실제/라이어 제시어·역전승 결과는 채팅에 작은 텍스트로 흘리지
+  // 않고, 클라이언트가 round:resolved+round:finalResult를 합쳐 큰 알림창으로 보여준다.
   const liarId = game.liarIds[0];
-  const liarNickname = getParticipantNickname(room, liarId);
-  let summary: string;
-  if (!votedOutId) {
-    summary = `투표가 충분히 모이지 않아 아무도 지목되지 않았습니다. 실제 라이어는 ${liarNickname}님이었습니다.`;
-  } else if (game.wasLiar) {
-    summary = `${getParticipantNickname(room, votedOutId)}님이 최다 득표로 지목되었습니다. (라이어 O)`;
-  } else {
-    summary = `${getParticipantNickname(room, votedOutId)}님이 최다 득표로 지목되었지만 라이어가 아니었습니다. 실제 라이어는 ${liarNickname}님이었습니다.`;
-  }
-  broadcastChat(io, room, 'system', 'system', summary);
 
   io.to(room.roomCode).emit('round:resolved', {
     votedOutId,

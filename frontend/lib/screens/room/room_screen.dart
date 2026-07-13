@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/backend_api.dart';
 import '../../models/chat_message.dart';
 import '../../models/game_phase.dart';
+import '../../models/game_result.dart';
 import '../../models/player.dart';
+import '../../models/round_result.dart';
 import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
@@ -149,6 +151,55 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  /// 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)를 채팅 로그에
+  /// 묻히지 않도록 큰 알림창으로 한 번에 보여준다.
+  Future<void> _showResultDialog(GameResult r) async {
+    final citizensWin = r.citizensWin;
+    String accusedText;
+    if (r.accusedNickname == null) {
+      accusedText = '아무도 지목되지 않았어요';
+    } else {
+      accusedText = '${r.accusedNickname} (라이어 ${r.wasLiar ? '⭕ 맞음' : '❌ 아님'})';
+    }
+    String liarGuessText;
+    if (r.liarGuessCorrect == null) {
+      liarGuessText = '역전승 시도 없음';
+    } else if (r.liarGuessCorrect == true) {
+      liarGuessText = '✅ 성공 — 라이어 역전승!';
+    } else {
+      liarGuessText = '❌ 실패';
+    }
+
+    await showPixelDialog<void>(
+      context: context,
+      maxWidth: 380,
+      builder: (dialogContext) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Text(citizensWin ? '🐾' : '🦊', style: const TextStyle(fontSize: 48)),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
+              textAlign: TextAlign.center,
+              style: PixelFont.title(fontSize: 18, color: AppColors.primary),
+            ),
+            const SizedBox(height: 20),
+            _ResultRow(label: '지목된 사람', value: accusedText),
+            _ResultRow(label: '실제 제시어', value: r.realWord),
+            _ResultRow(label: '라이어 제시어', value: r.liarWord),
+            _ResultRow(label: '라이어 역전승', value: liarGuessText),
+            const SizedBox(height: 22),
+            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+          ],
+        );
+      },
+    );
+  }
+
   /// 방장 전용 "친구 초대" — 접속 중인 친구 목록을 보여주고, 탭하면 friend:invite를 보낸다.
   /// 상대가 온라인이면 room:invited를 받아 로비에서 알림+입장 버튼을 보게 된다.
   Future<void> _openInviteFriendsSheet() async {
@@ -290,6 +341,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       }
       if (next == GamePhase.ended && _submittingGuess) {
         setState(() => _submittingGuess = false);
+      }
+    });
+    // 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)가 다 갖춰지면
+    // 채팅으로 흘려보내지 않고 큰 알림창으로 한 번에 보여준다.
+    ref.listen<RoundFinalResult?>(roomProvider.select((v) => v.finalResult), (prev, next) {
+      if (prev == null && next != null) {
+        final result = ref.read(roomProvider).gameResult;
+        if (result != null) _showResultDialog(result);
       }
     });
     // 게임 시작·역전승 제출 실패(room:error) 시에도 로딩 표시를 내리고 이유를 보여준다.
@@ -922,6 +981,36 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               padding: const EdgeInsets.all(10),
               color: AppColors.primary,
               child: const Icon(Icons.send, size: 18, color: AppColors.primaryForeground),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 최종 결과 알림창의 "라벨: 값" 한 줄.
+class _ResultRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ResultRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label, style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
             ),
           ),
         ],
