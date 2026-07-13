@@ -88,8 +88,8 @@ export async function startGame(
 
   // 모든 제시어에 AI가 텍스트 설명을 미리 만들어 함께 준다(난이도 무관). real/liar 딱 2개뿐이라 한 번씩만 생성.
   const [realExplanation, liarExplanation] = await Promise.all([
-    llm.explainWordIfUnfamiliar(realWord).catch(() => null),
-    llm.explainWordIfUnfamiliar(liarWord).catch(() => null),
+    llm.explainWord(realWord).catch(() => null),
+    llm.explainWord(liarWord).catch(() => null),
   ]);
 
   const bots: BotInfo[] = Array.from({ length: opts.aiBotCount }, (_, i) => ({

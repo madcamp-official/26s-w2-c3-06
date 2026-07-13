@@ -33,7 +33,7 @@ export const mockLLM: LiarGameLLM = {
     return `(mock) "${ctx.latestDescription.slice(0, 10)}..."는 좀 수상한데요?`;
   },
 
-  async explainWordIfUnfamiliar(word: string) {
+  async explainWord(word: string) {
     // 난이도 무관 항상 설명을 생성하는 실제 동작에 맞춰, mock도 결정적 설명 문자열을 반환.
     return `(mock) "${word}"에 대한 짧은 설명입니다.`;
   },

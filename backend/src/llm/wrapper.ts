@@ -18,7 +18,7 @@ export interface LiarGameLLM {
   ): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWordIfUnfamiliar(word: string): Promise<string | null>; // 난이도 무관 항상 설명 텍스트 생성(생성 실패 시에만 null)
+  explainWord(word: string): Promise<string | null>; // 난이도 무관 항상 설명 텍스트 생성(생성 실패 시에만 null)
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 
@@ -52,7 +52,7 @@ const realLLM: LiarGameLLM = {
     return completeText(turnCommentPrompt(ctx), 128);
   },
 
-  async explainWordIfUnfamiliar(word) {
+  async explainWord(word) {
     const raw = await completeText(explainWordPrompt(word), 200);
     return raw.trim().length > 0 ? raw.trim() : null;
   },
