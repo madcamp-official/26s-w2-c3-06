@@ -379,6 +379,8 @@ interface LiarGameLLM {
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
 - **Firebase Auth 승인된 도메인(authorized domains) 추가**: Google 웹 로그인은 Firebase 콘솔의 Authentication → Settings → Authorized domains에 등록된 도메인에서만 동작한다. 배포 도메인이 확정되면 그 도메인을 추가해야 한다(미등록 시 웹에서 Google 로그인 팝업이 `auth/unauthorized-domain`으로 실패). `localhost`는 기본 등록되어 로컬 개발엔 문제없음.
 - **웹 빌드에 백엔드 URL 주입**: `BackendConfig`가 `--dart-define=BACKEND_URL`로 주소를 주입받고 기본값은 `http://localhost:3000`이다. 배포 시 `flutter build web --dart-define=BACKEND_URL=https://<배포도메인>`으로 빌드하지 않으면 배포된 웹이 localhost로 붙어 소켓/REST가 실패한다.
+- **Firebase Auth 제공자 활성화**: Firebase 콘솔 Authentication에서 **익명 / 이메일·비밀번호 / Google** 로그인을 켜야 각 로그인 경로가 동작한다(로그인 화면의 세 버튼에 대응). Storage Rules(`avatars/{uid}` 본인만 쓰기)는 이미 설정돼 있으나 배포 전 재확인 권장.
+- **백엔드 운영 환경변수**: (1) **Firebase Admin 서비스 계정 키** — 없으면 소켓/REST의 토큰 검증을 건너뛰는 dev fallback로 동작하므로(누구나 임의 uid로 접속 가능) 운영 배포 전 반드시 주입해야 한다. (2) **`ANTHROPIC_API_KEY`** — 없으면 제시어/봇/훈수가 고정 mock LLM으로 대체되니, 실제 게임 품질이 필요하면 주입한다.
 
 ## 검증 계획
 
