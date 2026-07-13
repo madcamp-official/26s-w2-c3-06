@@ -39,6 +39,7 @@ class SocketService {
   final _roundFinalResultCtrl = StreamController<RoundFinalResult>.broadcast();
   final _gameEndedCtrl = StreamController<void>.broadcast();
   final _connectErrorCtrl = StreamController<String>.broadcast();
+  final _disconnectedCtrl = StreamController<void>.broadcast();
 
   Stream<RoomSnapshot> get onRoomCreated => _roomCreatedCtrl.stream;
   Stream<RoomSnapshot> get onRoomJoined => _roomJoinedCtrl.stream;
@@ -62,6 +63,9 @@ class SocketService {
   Stream<RoundFinalResult> get onRoundFinalResult => _roundFinalResultCtrl.stream;
   Stream<void> get onGameEnded => _gameEndedCtrl.stream;
   Stream<String> get onConnectError => _connectErrorCtrl.stream;
+  /// 예기치 않게 연결이 끊겼을 때만 발생(우리가 새로 연결하려고 직접 끊은 경우는 제외 —
+  /// connect() 참고: 콜백이 잡고 있던 소켓이 더 이상 _socket이 아니면 무시한다).
+  Stream<void> get onDisconnected => _disconnectedCtrl.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -81,6 +85,12 @@ class SocketService {
 
     socket.onConnectError((data) => _connectErrorCtrl.add(data?.toString() ?? 'connect_error'));
     socket.onError((data) => _connectErrorCtrl.add(data?.toString() ?? 'error'));
+    // 우리가 connect()/disconnect()로 직접 끊은 경우엔 그사이 _socket이 null이거나 새
+    // 소켓으로 이미 바뀌어 있으므로, 이 클로저가 잡고 있는 socket과 다르면 무시한다.
+    socket.onDisconnect((_) {
+      if (_socket != socket) return;
+      _disconnectedCtrl.add(null);
+    });
 
     socket.on('room:created', (data) => _roomCreatedCtrl.add(RoomSnapshot.fromJson(_map(data))));
     socket.on('room:joined', (data) => _roomJoinedCtrl.add(RoomSnapshot.fromJson(_map(data))));
@@ -243,6 +253,7 @@ class SocketService {
     _roundFinalResultCtrl.close();
     _gameEndedCtrl.close();
     _connectErrorCtrl.close();
+    _disconnectedCtrl.close();
   }
 }
 

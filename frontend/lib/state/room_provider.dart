@@ -543,6 +543,12 @@ final roomInviteProvider = StreamProvider<RoomInvite>((ref) {
   return SocketService.instance.onRoomInvited;
 });
 
+/// 예기치 않은 소켓 연결 끊김(네트워크 문제 등) — 방 화면이 구독해 즉시 로비로 나가면서
+/// 알림창을 띄우는 데 쓴다. 우리가 직접 재연결하려고 끊은 경우는 SocketService에서 걸러진다.
+final socketDisconnectedProvider = StreamProvider<void>((ref) {
+  return SocketService.instance.onDisconnected;
+});
+
 /// 앱 시작 시(새로고침 포함) 저장된 활성 방 코드가 있는지 확인 — AuthGate가 로비 대신
 /// 방으로 바로 복귀를 시도할지 판단하는 데 쓴다.
 final savedRoomCodeProvider = FutureProvider<String?>((ref) {
