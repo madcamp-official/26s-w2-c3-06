@@ -128,7 +128,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
                       ),
                     ),
                     IconButton(
-                      onPressed: maxPlayers < 12 ? () => setDialogState(() => maxPlayers++) : null,
+                      onPressed: () => setDialogState(() => maxPlayers++),
                       icon: const Icon(Icons.add_circle_outline),
                     ),
                   ],

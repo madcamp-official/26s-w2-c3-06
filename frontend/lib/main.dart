@@ -10,6 +10,7 @@ import 'screens/login/login_screen.dart';
 import 'screens/room/room_screen.dart';
 import 'services/auth_service.dart';
 import 'services/room_session_store.dart';
+import 'services/socket_service.dart';
 import 'services/user_session.dart';
 import 'state/auth_provider.dart';
 import 'state/room_provider.dart';
@@ -125,9 +126,26 @@ class _HomeGateState extends ConsumerState<_HomeGate> {
       waited += 150;
     }
     if (!mounted || !ref.read(roomProvider).socketConnected) return;
+    // 이 대기 중에 사용자가 이미 로비에서 직접 방을 만들었거나 들어갔으면(roomCode가 이미
+    // 채워짐), 오래된 저장 코드로 재입장을 시도해 그 상태를 덮어쓰지 않고 조용히 포기한다.
+    if (ref.read(roomProvider).roomCode != null) return;
+
+    // 재입장의 성공/실패를 실제로 기다린 뒤에만 화면을 전환한다. 이전엔 결과를 기다리지 않고
+    // 곧바로 RoomScreen을 push했는데, room:error(예: 이미 삭제된 방) 응답을 아무도 구독하지
+    // 않아 실패해도 빈 상태의 RoomScreen에 그대로 갇히는 문제가 있었다.
+    final socket = SocketService.instance;
+    final resultFuture = Future.any<bool>([
+      socket.onRoomRejoined.first.then((_) => true),
+      socket.onRoomError.first.then((_) => false),
+    ]).timeout(const Duration(seconds: 8), onTimeout: () => false);
     ref.read(roomProvider.notifier).rejoinRoom(roomCode: code);
+    final result = await resultFuture;
+
+    if (!result) {
+      await RoomSessionStore.instance.clear();
+      return;
+    }
     if (!mounted) return;
-    // 재입장 성공(roomCode 채워짐)/실패(room:error)는 RoomScreen과 방 이벤트가 처리한다.
     Navigator.of(context).push(MaterialPageRoute(
       settings: const RouteSettings(name: 'room'),
       builder: (_) => const RoomScreen(),

@@ -190,7 +190,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       itemCount: s.chatLog.length,
       itemBuilder: (_, i) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: ChatBubble(message: _displayMessage(s.chatLog[i], s)),
+        child: ChatBubble(message: _displayMessage(s.chatLog[i], s), myUid: _myUid),
       ),
     );
   }

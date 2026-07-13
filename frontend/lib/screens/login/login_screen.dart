@@ -173,7 +173,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _handleGoogleAuth() {
     _runAuth(() async {
-      await AuthService.instance.signInOrLinkWithGoogle();
+      final user = await AuthService.instance.signInOrLinkWithGoogle();
+      // 이메일/게스트 가입과 동일하게, 로컬 DB User 행을 여기서 즉시 만들어 둔다. 이렇게 하지
+      // 않으면 requireAuth의 토큰 클레임 폴백에만 의존하게 되는데, 그 클레임은 갱신이 늦을 수
+      // 있어(캐시된 토큰) 첫 REST 요청까지 로컬 DB에 프로필이 없는 공백이 생길 수 있다.
+      final nickname = user.displayName?.trim();
+      if (nickname != null && nickname.isNotEmpty) {
+        try {
+          await BackendApi.instance.syncNickname(nickname);
+        } catch (_) {
+          // 실패해도 로그인 자체는 막지 않는다 — requireAuth 폴백이 뒤이어 채워준다.
+        }
+      }
     });
   }
 
@@ -234,7 +245,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         const SizedBox(height: 24),
         Text(
-          '© 2025 AI Liar Game',
+          '© 2026 AI Liar Game',
           textAlign: TextAlign.center,
           style: PixelFont.body(
             fontSize: 11,

@@ -10,7 +10,10 @@ import 'user_avatar.dart';
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
 
-  const ChatBubble({super.key, required this.message});
+  /// 현재 로그인한 유저의 uid. 내 메시지를 오른쪽 정렬로 표시하는 데 쓴다.
+  final String? myUid;
+
+  const ChatBubble({super.key, required this.message, this.myUid});
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +89,9 @@ class ChatBubble extends StatelessWidget {
   }
 
   Widget _buildPlayerBubble(BuildContext context) {
-    final isMine = message.senderId == 'me';
+    // senderId는 서버가 실어 보내는 실제 uid('ai'/'system' 제외)라, 리터럴 'me'와는 절대
+    // 같을 수 없어 내 메시지가 항상 왼쪽으로 뜨던 버그가 있었다. 실제 내 uid와 비교한다.
+    final isMine = myUid != null && message.senderId == myUid;
 
     final avatar = UserAvatar(
       avatarIndex: message.avatarIndex,
