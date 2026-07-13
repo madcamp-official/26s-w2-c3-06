@@ -6,6 +6,8 @@ import '../../theme/pixel_font.dart';
 import '../../api/backend_api.dart';
 import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
+import '../../services/user_session.dart';
+import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
@@ -155,6 +157,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return;
       }
       await AuthService.instance.signInAsGuest(nickname);
+      // AuthGate가 Firebase의 후속 emit(updateDisplayName 반영)을 기다리는 동안 '플레이어'
+      // 같은 임시값이 잠깐 보이지 않도록, 입력받은 닉네임을 여기서 바로 반영해둔다.
+      UserSession.nickname = nickname;
+      ref.read(nicknameProvider.notifier).set(nickname);
       // 익명 계정 생성 후 로컬 DB에 닉네임을 즉시 예약 — 서버 @unique 제약으로 권위 검증(409면 중복).
       try {
         await BackendApi.instance.syncNickname(nickname);

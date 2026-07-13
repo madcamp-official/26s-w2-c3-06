@@ -51,8 +51,12 @@ class _AuthGateState extends ConsumerState<AuthGate> {
 
   /// 로그인된 세션을 앱 상태에 반영: 닉네임/아바타 복원, 소켓 연결(ID 토큰 handshake).
   Future<void> _restoreSession(User user) async {
-    final nickname =
-        (user.displayName?.trim().isNotEmpty ?? false) ? user.displayName!.trim() : '플레이어';
+    // Firebase의 익명 로그인은 signInAnonymously() 직후 displayName이 아직 비어있는 상태로
+    // 한 번 emit되고, updateDisplayName()+reload()가 끝난 뒤 다시 emit된다. 이 첫 emit에서
+    // 무작정 '플레이어'로 덮어쓰면 실제 닉네임이 반영되기 전까지 잠깐 오표시된다 — 이미
+    // 알고 있는 값(직접 입력 흐름에서 미리 세팅해둔 UserSession.nickname)이 있으면 그걸 쓴다.
+    final displayName = user.displayName?.trim();
+    final nickname = (displayName != null && displayName.isNotEmpty) ? displayName : UserSession.nickname;
     if (user.isAnonymous) {
       UserSession.signInAsGuest(nickname);
     } else {
@@ -81,15 +85,17 @@ class _AuthGateState extends ConsumerState<AuthGate> {
           _restoredForUser = false;
           return const LoginScreen();
         }
-        // 닉네임은 매 emit마다 최신화한다. 게스트 생성 직후엔 displayName이 아직 비어 있어
-        // '플레이어'로 잡혔다가, updateDisplayName이 끝나 userChanges가 재방출되면 실제
-        // 닉네임으로 교정된다(아바타/소켓 재설정은 하지 않는다).
-        final nickname =
-            (user.displayName?.trim().isNotEmpty ?? false) ? user.displayName!.trim() : '플레이어';
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          UserSession.nickname = nickname;
-          ref.read(nicknameProvider.notifier).set(nickname);
-        });
+        // 닉네임은 매 emit마다 최신화한다(아바타/소켓 재설정은 하지 않음). 게스트 생성 직후엔
+        // displayName이 아직 비어 있는 emit이 먼저 오고, updateDisplayName이 끝나 재emit되면
+        // 그때 실제 닉네임이 온다 — 빈 값으로 오는 emit은 무시해 이미 알고 있는(직접 입력
+        // 흐름에서 미리 세팅해둔) 닉네임을 '플레이어'로 덮어쓰지 않는다.
+        final displayName = user.displayName?.trim();
+        if (displayName != null && displayName.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            UserSession.nickname = displayName;
+            ref.read(nicknameProvider.notifier).set(displayName);
+          });
+        }
         if (!_restoredForUser) {
           _restoredForUser = true;
           WidgetsBinding.instance.addPostFrameCallback((_) => _restoreSession(user));
