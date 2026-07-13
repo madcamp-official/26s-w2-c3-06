@@ -39,6 +39,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _aiRandom = false;
   bool _leaving = false;
   int _lastChatLen = 0;
+  bool _hostDraftSeeded = false;
 
   String? get _myUid => AuthService.instance.currentUser?.uid;
 
@@ -112,6 +113,22 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     }
 
     final isHost = myUid != null && s.hostId == myUid;
+
+    // 방장 대기방 컨트롤(봇 수·카테고리 칩)을 서버 draft 값으로 최초 1회 시드한다
+    // (재입장/복귀 시 서버가 들고 있던 값을 로컬 입력에 반영). 자유 입력 카테고리는 칩 밖이라 텍스트 필드로.
+    if (isHost && !_hostDraftSeeded && s.hostId != null) {
+      _hostDraftSeeded = true;
+      _botCount = s.draftAiBotCount;
+      final cat = s.draftCategory;
+      if (cat == null) {
+        _aiRandom = false;
+        _selectedChip = null;
+      } else if (_presetCategories.contains(cat) || s.customCategories.contains(cat)) {
+        _selectedChip = cat;
+      } else {
+        _customCategoryController.text = cat;
+      }
+    }
 
     return PopScope(
       canPop: false,
