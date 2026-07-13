@@ -1,7 +1,12 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
+import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
+import '../../state/auth_provider.dart';
+import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
@@ -11,18 +16,19 @@ import '../../widgets/responsive_center.dart';
 import '../lobby/lobby_screen.dart';
 import 'signup_screen.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _showAuthOptions = false;
   bool _showPassword = false;
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -35,6 +41,43 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const LobbyScreen()),
     );
+  }
+
+  /// 로그인/가입 성공 직후 공통 처리: 닉네임 확정, 소켓 연결(ID 토큰 handshake), 로비 진입.
+  /// 전적(UserStats)은 로비/프로필 화면이 백엔드에서 직접 조회하므로 여기서 다루지 않는다.
+  Future<void> _afterAuth(User user, {required bool isGuest}) async {
+    final nickname = (user.displayName?.trim().isNotEmpty ?? false) ? user.displayName!.trim() : '플레이어';
+    if (isGuest) {
+      UserSession.signInAsGuest(nickname);
+    } else {
+      UserSession.signInAsMember(nickname: nickname);
+    }
+    ref.read(nicknameProvider.notifier).set(nickname);
+    final token = await AuthService.instance.getIdToken();
+    if (token != null) ref.read(roomProvider.notifier).connect(token);
+    if (!mounted) return;
+    _enterApp();
+  }
+
+  /// 인증 액션 공통 래퍼 — 중복 탭 방지, 에러 시 스낵바 표시.
+  Future<void> _runAuth(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('인증 실패: ${e.message ?? e.code}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('오류: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _handleGuestContinue() async {
@@ -101,13 +144,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (nickname == null || nickname.isEmpty) return;
     if (!mounted) return;
-    UserSession.signInAsGuest(nickname);
-    _enterApp();
+    await _runAuth(() async {
+      final user = await AuthService.instance.signInAsGuest(nickname);
+      await _afterAuth(user, isGuest: true);
+    });
   }
 
   void _handleEmailLogin() {
-    UserSession.signInAsMember(nickname: '이메일 사용자');
-    _enterApp();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이메일과 비밀번호를 입력하세요.')),
+      );
+      return;
+    }
+    _runAuth(() async {
+      final user = await AuthService.instance.signInWithEmail(email: email, password: password);
+      await _afterAuth(user, isGuest: false);
+    });
   }
 
   void _handleSignUp() {
@@ -117,8 +172,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleGoogleAuth() {
-    UserSession.signInAsMember(nickname: 'Google 사용자', provider: AuthProvider.google);
-    _enterApp();
+    _runAuth(() async {
+      final user = await AuthService.instance.signInOrLinkWithGoogle();
+      await _afterAuth(user, isGuest: false);
+    });
   }
 
   @override

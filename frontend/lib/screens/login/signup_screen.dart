@@ -1,7 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/backend_api.dart';
 import '../../mock/mock_data.dart';
+import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
+import '../../state/auth_provider.dart';
+import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
@@ -17,14 +23,15 @@ bool _isPasswordValid(String password) {
       _specialCharPattern.hasMatch(password);
 }
 
-class SignUpScreen extends StatefulWidget {
+class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
 
   @override
-  State<SignUpScreen> createState() => _SignUpScreenState();
+  ConsumerState<SignUpScreen> createState() => _SignUpScreenState();
 }
 
-class _SignUpScreenState extends State<SignUpScreen> {
+class _SignUpScreenState extends ConsumerState<SignUpScreen> {
+  bool _submitting = false;
   final _emailController = TextEditingController();
   final _nicknameController = TextEditingController();
   final _userIdController = TextEditingController();
@@ -48,6 +55,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     super.dispose();
   }
 
+  // [MOCK] 백엔드에 이메일 사전 중복확인 엔드포인트가 없다(가입 시 Firebase가 email-already-in-use로
+  // 처리). 형식 확인 + mock 목록 대조만 하며, 최종 판정은 _handleSignUp의 가입 시도에서 이뤄진다.
   Future<void> _checkEmail() async {
     final value = _emailController.text.trim();
     if (value.isEmpty) return;
@@ -55,7 +64,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _isCheckingEmail = true;
       _emailAvailable = null;
     });
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     final taken = mockTakenEmails.any((e) => e.toLowerCase() == value.toLowerCase());
     setState(() {
@@ -64,6 +73,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     });
   }
 
+  // 닉네임 중복확인 — 백엔드 GET /api/users/nickname-availability 실연동.
   Future<void> _checkNickname() async {
     final value = _nicknameController.text.trim();
     if (value.isEmpty) return;
@@ -71,15 +81,27 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _isCheckingNickname = true;
       _nicknameAvailable = null;
     });
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    final taken = mockTakenNicknames.any((n) => n == value);
-    setState(() {
-      _isCheckingNickname = false;
-      _nicknameAvailable = !taken;
-    });
+    try {
+      final available = await BackendApi.instance.isNicknameAvailable(value);
+      if (!mounted) return;
+      setState(() {
+        _isCheckingNickname = false;
+        _nicknameAvailable = available;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingNickname = false;
+        _nicknameAvailable = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('닉네임 확인 중 오류가 발생했습니다.')),
+      );
+    }
   }
 
+  // [MOCK] 백엔드는 별도 아이디(userId) 개념이 없다(인증은 이메일+비밀번호, 표시명은 닉네임).
+  // 이 필드/중복확인은 UI 데모용 mock이며 서버로 전송되지 않는다.
   Future<void> _checkUserId() async {
     final value = _userIdController.text.trim();
     if (value.isEmpty) return;
@@ -87,7 +109,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       _isCheckingUserId = true;
       _userIdAvailable = null;
     });
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     final taken = mockTakenUserIds.any((id) => id.toLowerCase() == value.toLowerCase());
     setState(() {
@@ -97,19 +119,49 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   bool get _canSubmit =>
+      !_submitting &&
       _emailAvailable == true &&
       _nicknameAvailable == true &&
       _userIdAvailable == true &&
       _isPasswordValid(_passwordController.text) &&
       _confirmController.text == _passwordController.text;
 
-  void _handleSignUp() {
+  Future<void> _handleSignUp() async {
     if (!_canSubmit) return;
-    UserSession.signInAsMember(nickname: _nicknameController.text.trim());
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LobbyScreen()),
-      (route) => false,
-    );
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final nickname = _nicknameController.text.trim();
+    setState(() => _submitting = true);
+    try {
+      await AuthService.instance.signUpOrLinkWithEmail(
+        email: email,
+        password: password,
+        nickname: nickname,
+      );
+      // 가입 직후 로컬 DB에 닉네임 즉시 반영(친구 요청 등이 바로 동작하도록).
+      await BackendApi.instance.syncNickname(nickname);
+      UserSession.signInAsMember(nickname: nickname);
+      ref.read(nicknameProvider.notifier).set(nickname);
+      final token = await AuthService.instance.getIdToken();
+      if (token != null) ref.read(roomProvider.notifier).connect(token);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LobbyScreen()),
+        (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('가입 실패: ${e.message ?? e.code}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('오류: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
