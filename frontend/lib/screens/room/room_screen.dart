@@ -610,9 +610,6 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _finishGame({required String winner, required String? liarGuess, required bool? liarGuessCorrect}) {
     final citizensWin = winner == 'citizens';
-    final scores = <String, int>{
-      for (final p in _participants) p.id: (p.id == _liarId) == !citizensWin ? 100 : -50,
-    };
 
     // PLAN.md의 GamePlay 1행 추가에 해당 — 이 판 결과를 내 전적에 반영한다(라이어/시민 승률·레벨).
     final meWasLiar = _liarId == 'me';
@@ -703,14 +700,14 @@ class _RoomScreenState extends State<RoomScreen> {
                     runSpacing: 8,
                     alignment: WrapAlignment.center,
                     children: _participants.map((p) {
-                      final delta = scores[p.id]!;
-                      final positive = delta > 0;
+                      // PLAN.md 전적 모델은 점수가 아니라 승/패 bool만 기록한다(GamePlay.won).
+                      final won = (p.id == _liarId) == !citizensWin;
                       return Container(
                         width: 84,
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         decoration: BoxDecoration(
-                          color: positive ? AppColors.success.withValues(alpha: 0.15) : AppColors.destructive.withValues(alpha: 0.15),
-                          border: Border.all(color: positive ? AppColors.success : AppColors.destructive),
+                          color: won ? AppColors.success.withValues(alpha: 0.15) : AppColors.destructive.withValues(alpha: 0.15),
+                          border: Border.all(color: won ? AppColors.success : AppColors.destructive),
                         ),
                         child: Column(
                           children: [
@@ -718,11 +715,11 @@ class _RoomScreenState extends State<RoomScreen> {
                             const SizedBox(height: 4),
                             Text(p.nickname, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
                             Text(
-                              positive ? '+$delta' : '$delta',
+                              won ? '승' : '패',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: positive ? AppColors.success : AppColors.destructive,
+                                color: won ? AppColors.success : AppColors.destructive,
                               ),
                             ),
                           ],
