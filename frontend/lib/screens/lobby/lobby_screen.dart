@@ -11,6 +11,7 @@ import '../../state/auth_provider.dart';
 import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/breakpoints.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_nav_rail.dart';
 import '../../widgets/app_text_field.dart';
@@ -102,9 +103,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
     final error = await _awaitJoinResult();
     if (!mounted) return;
     if (error != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error)));
+      showAppAlert(context, error);
       return;
     }
     _enterRoom();
@@ -332,20 +331,52 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
     final pendingRequests = ref.watch(pendingFriendRequestCountProvider).value ?? 0;
     final isDesktop = context.isDesktop;
 
-    // 친구가 방으로 초대하면(room:invited) 스낵바로 알리고, "입장"을 누르면 해당 방으로 들어간다.
+    // 친구가 방으로 초대하면(room:invited) 알림창으로 알리고, "입장"을 누르면 해당 방으로 들어간다.
     ref.listen(roomInviteProvider, (prev, next) {
       final invite = next.value;
       if (invite == null || !mounted) return;
       final label = invite.title.isEmpty ? '${invite.roomCode}번 방' : invite.title;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text('${invite.fromNickname}님이 ${invite.emoji} $label(으)로 초대했어요'),
-            duration: const Duration(seconds: 8),
-            action: SnackBarAction(label: '입장', onPressed: () => _joinAndEnter(invite.roomCode)),
-          ),
-        );
+      showPixelDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        maxWidth: 320,
+        builder: (dialogContext) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('📨 초대 도착', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+              const SizedBox(height: 12),
+              Text(
+                '${invite.fromNickname}님이 ${invite.emoji} $label(으)로 초대했어요',
+                style: PixelFont.body(fontSize: 13, color: AppColors.foreground),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '닫기',
+                      variant: AppButtonVariant.outlined,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AppButton(
+                      label: '입장',
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop();
+                        _joinAndEnter(invite.roomCode);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      );
     });
 
     return Scaffold(
@@ -384,7 +415,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _StatsCard(),
+          _StatsCard(),
           const SizedBox(height: 12),
           Row(
             children: [

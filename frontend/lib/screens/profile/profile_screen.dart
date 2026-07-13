@@ -3,13 +3,16 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
+import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
@@ -18,14 +21,14 @@ import '../login/login_screen.dart';
 
 /// 프로필 사진/닉네임을 수정하는 화면.
 /// 게스트는 닉네임/사진만 바꿀 수 있고, 대신 계정을 만들 수 있는 진입점을 제공한다.
-class ProfileScreen extends StatefulWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   late final TextEditingController _nicknameController;
   late int _avatarIndex;
   Uint8List? _profileImageBytes;
@@ -55,7 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _snack(String msg) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    if (mounted) showAppAlert(context, msg);
   }
 
   Future<void> _handleSaveNickname() async {
@@ -89,6 +92,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _backToRoot();
   }
 
+  /// 게스트 로그아웃은 회원 로그아웃과 같은 signOut()이지만, 익명 계정은 같은 uid로
+  /// 다시 로그인할 방법이 없어(연결할 자격 증명이 없음) 사실상 지금 프로필/전적에
+  /// 다시 접근할 수 없게 되는 되돌릴 수 없는 조작이다 — 확인 없이 바로 진행하면 안 된다.
+  Future<void> _handleGuestLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          icon: const Icon(Icons.warning_amber_rounded, color: AppColors.destructive, size: 36),
+          title: const Text('게스트 로그아웃하시겠어요?'),
+          content: const Text('게스트 계정은 로그아웃하면 같은 계정으로 다시 로그인할 수 없어요. 지금까지의 프로필과 전적을 계속 쓰려면 먼저 회원가입으로 전환하는 걸 권장해요.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.destructive),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('로그아웃'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    await _handleLogout();
+  }
+
   /// 게스트가 "로그인 / 회원가입"을 눌렀을 때. 로그아웃(세션 파괴) 없이 로그인 화면을
   /// 그대로 push한다 — 뒤로가기를 누르면 로그아웃 없이 원래 쓰던 게스트 계정으로 계속
   /// 이용할 수 있고, 실제로 로그인/가입을 완료해야만 그 계정으로 전환된다.
@@ -118,6 +150,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await storageRef.putData(bytes, SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'));
       final url = await storageRef.getDownloadURL();
       await BackendApi.instance.updateAvatarUrl(url);
+      // 로비 등 다른 화면의 아바타(avatarUrlProvider를 보는 위젯)가 새로고침 없이도
+      // 바로 갱신되도록 여기서 즉시 반영한다 — UserSession.profileImageBytes만으로는
+      // 부족하다(이 세션에서만 유효한 값이라 새로고침 시 사라짐).
+      ref.read(avatarUrlProvider.notifier).set(url);
       _snack('프로필 사진이 변경되었습니다.');
     } catch (e) {
       _snack('사진 업로드에 실패했습니다: $e');
@@ -130,6 +166,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _avatarUrl = null;
     });
     UserSession.profileImageBytes = null;
+    ref.read(avatarUrlProvider.notifier).set(null);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
@@ -241,10 +278,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 24),
                 if (isGuest) ...[
-                  Text('게스트로 이용 중입니다. 계정을 만들면 다음에도 같은 프로필로 로그인할 수 있어요.',
-                      style: TextStyle(color: AppColors.mutedForeground)),
+                  AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleGuestLogout),
                   const SizedBox(height: 12),
                   AppButton(label: '로그인 / 회원가입', onPressed: _handleGuestUpgrade),
+                  const SizedBox(height: 12),
+                  Text(
+                    '회원가입하면 지금 쓰던 프로필과 전적을 그대로 이어받아 정식 계정으로 전환할 수 있어요.',
+                    style: TextStyle(color: AppColors.mutedForeground),
+                  ),
                 ] else ...[
                   AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleLogout),
                   const SizedBox(height: 12),
