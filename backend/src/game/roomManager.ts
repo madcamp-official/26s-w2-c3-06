@@ -112,7 +112,6 @@ export function createRoom(opts: {
     id: opts.uid,
     nickname: opts.nickname,
     isBot: false,
-    isHost: true,
     connected: true,
     isReady: false,
   };
@@ -157,7 +156,6 @@ export function joinRoom(opts: {
     id: opts.uid,
     nickname: opts.nickname,
     isBot: false,
-    isHost: false,
     connected: true,
     isReady: false,
   };

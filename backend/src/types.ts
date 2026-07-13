@@ -4,7 +4,6 @@ export interface Player {
   id: string;
   nickname: string;
   isBot: boolean;
-  isHost: boolean;
   connected: boolean;
   isReady: boolean; // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
 }
