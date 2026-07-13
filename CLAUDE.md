@@ -1,6 +1,6 @@
 # Document Management
 
-`CLAUDE.md`, `README.md`, `PLAN.md`, `.claude/agents/` 서브에이전트, 루트 `.gitignore` 등 공유 문서/설정은 `dev` 브랜치에서만 관리한다. 다른 브랜치(`main`, `backend` 등)에는 커밋하지 않는다.
+`CLAUDE.md`, `README.md`, `PLAN.md`, `.claude/agents/` 서브에이전트, 루트 `.gitignore` 등 공유 문서/설정은 `dev` 브랜치에서 관리한다.
 
 # Git Commit Convention
 
@@ -22,14 +22,13 @@
 
 `dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
 
-`backend`와 `frontend` 브랜치 간에는 직접 merge하지 않는다. 각각의 작업은 `backend` → `dev` PR, `frontend` → `dev` PR로 `dev`를 거쳐 통합한다.
+`backend`와 `frontend` 브랜치 간에는 직접 merge하지 않는다.
+
+- `milleion`(백엔드 담당)은 2026-07-13부터 `backend` 브랜치 대신 `dev`에서 직접 작업한다(`backend`는 그 시점 상태로 병합·보존되어 더 이상 갱신하지 않음). 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
+- `ireyhye`(프론트엔드 담당)는 계속 `frontend` 브랜치에서 작업하고, `frontend` → `dev` PR로 `dev`에 통합한다.
 
 # Branch Sync
 
-작업 중 어떤 브랜치에서든 로컬이 `origin/<branch>`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin <branch>`로 로컬을 최신화한다.
+작업 중 로컬이 `origin/<branch>`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin <branch>`로 로컬을 최신화한다. `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.
 
-`dev`를 merge하기 전에는 항상 위 확인을 먼저 수행한다.
-
-`dev`가 변경될 때마다 — 직접 커밋한 경우든, 위 pull로 인해 로컬 `dev`가 갱신된 경우든 — git user identity(`git config user.name`)에 따라 branch를 선택하여 merge하고 push한다:
-- `milleion`인 경우: `dev`를 `backend`에만 merge한 후 push
-- `ireyhye`인 경우: `dev`를 `frontend`에만 merge한 후 push
+`ireyhye`가 작업한 `frontend`가 PR로 `dev`에 들어와 로컬 `dev`가 갱신된 경우, `milleion`은 그 변경을 반영하기 위해 다시 `git pull origin dev`로 최신화하면 된다(별도 병합 대상 브랜치 없음).
