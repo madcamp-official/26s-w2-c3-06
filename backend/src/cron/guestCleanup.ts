@@ -3,11 +3,11 @@ import { prisma } from '../db/client';
 import { admin, initFirebaseAdmin, isFirebaseReady } from '../firebase/admin';
 
 // PLAN "게스트 정리(cleanup)": 별도 Cloud Functions 없이 백엔드 프로세스 내에서 node-cron으로
-// 매일 1회, 마지막 활동(lastActive)이 30일 이상 지난 익명 계정을 Firebase Auth + 로컬 DB에서 함께 삭제.
-const INACTIVE_DAYS = 30;
+// 6시간마다, 마지막 활동(lastActive)이 6시간 이상 지난 익명 계정을 Firebase Auth + 로컬 DB에서 함께 삭제.
+const INACTIVE_HOURS = 6;
 
 export async function runGuestCleanup(): Promise<void> {
-  const cutoff = new Date(Date.now() - INACTIVE_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - INACTIVE_HOURS * 60 * 60 * 1000);
   const staleGuests = await prisma.user.findMany({
     where: { isAnonymous: true, lastActive: { lt: cutoff } },
     select: { uid: true },
@@ -34,9 +34,9 @@ export async function runGuestCleanup(): Promise<void> {
 }
 
 export function startGuestCleanupCron(): void {
-  // 매일 04:00에 1회 실행.
-  cron.schedule('0 4 * * *', () => {
+  // 6시간마다(00/06/12/18시) 1회 실행.
+  cron.schedule('0 */6 * * *', () => {
     runGuestCleanup().catch((err) => console.error('[cron] guestCleanup 실행 실패', err));
   });
-  console.log('[cron] guestCleanup 스케줄 등록 완료 (매일 04:00)');
+  console.log('[cron] guestCleanup 스케줄 등록 완료 (6시간마다)');
 }
