@@ -36,6 +36,7 @@ const _minParticipants = 3;
 
 class _RoomScreenState extends ConsumerState<RoomScreen> {
   final _chatController = TextEditingController();
+  final _chatFocusNode = FocusNode();
   final _scrollController = ScrollController();
   final _customCategoryController = TextEditingController();
 
@@ -46,6 +47,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _leaving = false;
   int _lastChatLen = 0;
   bool _hostDraftSeeded = false;
+
+  // AI 응답을 기다리는 동안(게임 시작·라이어 역전승 판정) 버튼이 눌렸고 처리 중임을
+  // 명확히 보여주기 위한 로딩 플래그. 서버가 다음 페이즈로 넘기거나 room:error를
+  // 보내면 리셋한다(phase/roomError 리스너 참고).
+  bool _startingGame = false;
+  bool _submittingGuess = false;
 
   // 투표 탭에 아무 시각적 피드백이 없어 "버튼이 안 눌린다"고 느껴지던 문제 — 내가 누른
   // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
@@ -74,6 +81,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   @override
   void dispose() {
     _chatController.dispose();
+    _chatFocusNode.dispose();
     _scrollController.dispose();
     _customCategoryController.dispose();
     super.dispose();
@@ -132,7 +140,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (confirmed != true || _leaving) return;
     _leaving = true;
     ref.read(roomProvider.notifier).leaveRoom();
-    if (mounted) Navigator.of(context).pop();
+    _returnToLobby();
+  }
+
+  /// 로비(첫 라우트)까지 확실히 돌아간다 — 열려 있는 다이얼로그/바텀시트가 있어도
+  /// 일반 pop() 한 번으로는 그 위젯만 닫힐 수 있어 popUntil로 처리한다.
+  void _returnToLobby() {
+    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   /// 방장 전용 "친구 초대" — 접속 중인 친구 목록을 보여주고, 탭하면 friend:invite를 보낸다.
@@ -234,6 +248,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       notifier.sendChat(text);
     }
     _chatController.clear();
+    // 엔터로 전송한 뒤에도 계속 이어서 칠 수 있도록 입력창 포커스를 다시 잡아준다
+    // (웹에서는 onSubmitted 처리 중 포커스가 풀리는 경우가 있어 명시적으로 복원).
+    _chatFocusNode.requestFocus();
   }
 
   // ── 방장 드래프트 반영 ──
@@ -246,6 +263,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   void _startGame() {
     final custom = _customCategoryController.text.trim();
     final category = _aiRandom ? null : (custom.isNotEmpty ? custom : _selectedChip);
+    setState(() => _startingGame = true);
     ref.read(roomProvider.notifier).configureGame(category: category, aiBotCount: _botCount);
   }
 
@@ -255,16 +273,37 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final myUid = _myUid;
 
     // 방이 닫혔거나(방장 퇴장) 우리가 나간 경우 roomCode가 사라진다 → 로비로 복귀.
+    // 다이얼로그 등이 떠 있어도 확실히 로비까지 돌아가도록 popUntil로 맨 처음 라우트까지 닫는다.
     ref.listen<String?>(roomProvider.select((v) => v.roomCode), (prev, next) {
-      if (prev != null && next == null && mounted && !_leaving) {
-        Navigator.of(context).pop();
+      if (prev != null && next == null && !_leaving) {
+        _returnToLobby();
       }
     });
     // 새 투표 페이즈가 시작될 때마다 이전 라운드의 선택 표시를 지운다.
+    // 게임이 실제로 시작/종료되면 "게임 시작"/"제출" 버튼의 로딩 표시도 함께 내린다.
     ref.listen<GamePhase>(roomProvider.select((v) => v.phase), (prev, next) {
       if (next == GamePhase.voting && prev != GamePhase.voting) {
         setState(() => _myVote = null);
       }
+      if (next == GamePhase.describing && _startingGame) {
+        setState(() => _startingGame = false);
+      }
+      if (next == GamePhase.ended && _submittingGuess) {
+        setState(() => _submittingGuess = false);
+      }
+    });
+    // 게임 시작·역전승 제출 실패(room:error) 시에도 로딩 표시를 내리고 이유를 보여준다.
+    ref.listen<AsyncValue<String>>(roomErrorProvider, (prev, next) {
+      next.whenData((message) {
+        if (!mounted) return;
+        setState(() {
+          _startingGame = false;
+          _submittingGuess = false;
+        });
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
+      });
     });
 
     if (s.chatLog.length != _lastChatLen) {
@@ -588,7 +627,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             const SizedBox(height: 6),
-            AppButton(label: '게임 시작 ▶', onPressed: canStart ? _startGame : null),
+            AppButton(
+              label: '게임 시작 ▶',
+              loading: _startingGame,
+              onPressed: canStart && !_startingGame ? _startGame : null,
+            ),
           ] else ...[
             const SizedBox(height: 8),
             Text('방장이 게임을 시작하길 기다리는 중...',
@@ -841,10 +884,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           AppButton(
             label: '제출',
             dense: true,
-            onPressed: () {
-              final g = guessController.text.trim();
-              if (g.isNotEmpty) ref.read(roomProvider.notifier).guessWord(g);
-            },
+            loading: _submittingGuess,
+            onPressed: _submittingGuess
+                ? null
+                : () {
+                    final g = guessController.text.trim();
+                    if (g.isEmpty) return;
+                    setState(() => _submittingGuess = true);
+                    ref.read(roomProvider.notifier).guessWord(g);
+                  },
           ),
         ],
       ),
@@ -862,6 +910,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           Expanded(
             child: AppTextField(
               controller: _chatController,
+              focusNode: _chatFocusNode,
               hintText: hint,
               onSubmitted: (_) => _sendChatOrDescription(s),
             ),
