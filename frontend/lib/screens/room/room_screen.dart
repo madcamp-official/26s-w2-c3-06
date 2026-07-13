@@ -1000,13 +1000,16 @@ class _RoomScreenState extends State<RoomScreen> {
             // 친구 초대는 방장 전용 기능이고, 게스트는 친구 기능 자체를 쓸 수 없어 버튼을
             // 표시하지 않는다.
             if (_canInviteFriends)
-              IconButton(
-                tooltip: '친구 초대',
+              TextButton.icon(
                 onPressed: _openInviteFriendsSheet,
-                icon: const Icon(Icons.group_add, size: 18),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: const Icon(Icons.group_add, size: 16, color: AppColors.foreground),
+                label: Text('초대', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             IconButton(
               tooltip: '방 나가기',
