@@ -377,6 +377,8 @@ interface LiarGameLLM {
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`liar-game-8ff55.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
+- **Firebase Auth 승인된 도메인(authorized domains) 추가**: Google 웹 로그인은 Firebase 콘솔의 Authentication → Settings → Authorized domains에 등록된 도메인에서만 동작한다. 배포 도메인이 확정되면 그 도메인을 추가해야 한다(미등록 시 웹에서 Google 로그인 팝업이 `auth/unauthorized-domain`으로 실패). `localhost`는 기본 등록되어 로컬 개발엔 문제없음.
+- **웹 빌드에 백엔드 URL 주입**: `BackendConfig`가 `--dart-define=BACKEND_URL`로 주소를 주입받고 기본값은 `http://localhost:3000`이다. 배포 시 `flutter build web --dart-define=BACKEND_URL=https://<배포도메인>`으로 빌드하지 않으면 배포된 웹이 localhost로 붙어 소켓/REST가 실패한다.
 
 ## 검증 계획
 
