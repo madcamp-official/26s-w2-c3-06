@@ -77,9 +77,13 @@ export async function startGame(
   const usedWords = room.gameHistory.flatMap((g) => [g.realWord, g.liarWord]);
   const { category, realWord, liarWord } = await llm.generateWordPair(opts.category, usedWords);
 
-  // 방장이 프리셋에 없는 카테고리를 직접 입력했으면 이 방의 재사용 목록에 추가한다.
-  if (opts.category && opts.category.trim()) {
-    roomManager.addCustomCategory(room, opts.category.trim());
+  // 이번 게임에 실제로 사용된 카테고리를 이 방의 재사용 목록에 추가한다(중복 제거).
+  // 방장이 직접 입력한 것뿐 아니라 AI가 랜덤 생성한 카테고리(opts.category === null)도 포함한다.
+  // 새로 추가됐다면 다음 게임 선택지에 바로 뜨도록 방 전체에 갱신된 목록을 브로드캐스트한다.
+  if (roomManager.addCustomCategory(room, category)) {
+    io.to(room.roomCode).emit('room:customCategoriesUpdated', {
+      customCategories: room.customCategories,
+    });
   }
 
   // 낯선 단어면 AI가 텍스트 설명을 함께 준다. real/liar 단어 딱 2개뿐이므로 한 번씩만 판단.

@@ -39,6 +39,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         hostId: room.hostId,
         visibility: room.visibility,
         players: room.players,
+        customCategories: room.customCategories,
         draftConfig: room.draftConfig,
       });
       broadcastPublicRoomsIfPublic(room.visibility);
@@ -70,6 +71,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       hostId: room.hostId,
       visibility: room.visibility,
       players: room.players,
+      customCategories: room.customCategories,
       draftConfig: room.draftConfig,
     });
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
@@ -101,6 +103,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       hostId: room.hostId,
       visibility: room.visibility,
       players: room.players,
+      customCategories: room.customCategories,
       chatLog: room.chatLog,
       currentGame: room.currentGame ? gameEngine.toPublicGameState(room, room.currentGame) : null,
       draftConfig: room.draftConfig,

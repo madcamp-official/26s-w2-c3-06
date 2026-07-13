@@ -178,11 +178,15 @@ export function setDraftConfig(room: RoomState, config: DraftGameConfig): void {
   room.draftConfig = config;
 }
 
-// 방장이 프리셋에 없는 카테고리를 자유 입력하면 이 방의 재사용 목록에 추가한다(중복 방지).
-export function addCustomCategory(room: RoomState, category: string): void {
-  if (!room.customCategories.includes(category)) {
-    room.customCategories.push(category);
+// 이번 게임에 실제로 사용된 카테고리를 이 방의 재사용 목록에 추가한다(중복 방지).
+// 방장이 직접 입력한 것뿐 아니라 AI가 랜덤 생성한 카테고리도 대상. 새로 추가됐으면 true.
+export function addCustomCategory(room: RoomState, category: string): boolean {
+  const trimmed = category.trim();
+  if (!trimmed || room.customCategories.includes(trimmed)) {
+    return false;
   }
+  room.customCategories.push(trimmed);
+  return true;
 }
 
 // 방장이 나가면(퇴장/유예 만료) 승계하지 않고 방 자체를 닫는다.
