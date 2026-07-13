@@ -289,15 +289,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ] else ...[
                   AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleLogout),
                   const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(border: Border.all(color: AppColors.destructive, width: 2)),
-                    child: TextButton(
-                      onPressed: _handleDeleteAccount,
-                      style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
-                      child: const Text('계정 탈퇴'),
-                    ),
+                  AppButton(
+                    label: '계정 탈퇴',
+                    variant: AppButtonVariant.outlined,
+                    accentColor: AppColors.destructive,
+                    onPressed: _handleDeleteAccount,
                   ),
                 ],
                 const SizedBox(height: 24),

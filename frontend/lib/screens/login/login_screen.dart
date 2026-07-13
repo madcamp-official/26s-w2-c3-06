@@ -250,19 +250,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           textAlign: TextAlign.center,
           style: PixelFont.title(fontSize: 18, color: AppColors.foreground, letterSpacing: 2),
         ),
-        const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(
-            '🕵️ AI가 제시어를 만들고, 우리가 라이어를 찾는\n실시간 소셜 파티게임',
-            textAlign: TextAlign.center,
-            style: PixelFont.body(
-              fontSize: 13,
-              height: 1.7,
-              color: AppColors.mutedForeground,
-            ).copyWith(fontFamilyFallback: const ['Noto Sans KR']),
-          ),
-        ),
         const SizedBox(height: 36),
         AppButton(
           label: '🔑 로그인 / 회원가입',

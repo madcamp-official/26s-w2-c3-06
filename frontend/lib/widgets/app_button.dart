@@ -22,6 +22,10 @@ class AppButton extends StatelessWidget {
   /// 서버 왕복이 오래 걸리는 액션에서 "눌렸고 처리 중"임을 명확히 보여주기 위함.
   final bool loading;
 
+  /// variant 기본 색상 대신 쓸 강조색(예: 계정 탈퇴의 destructive 빨강).
+  /// 테두리·글자색에 함께 적용되고 배경은 그대로 outlined 스타일(secondary)을 유지한다.
+  final Color? accentColor;
+
   const AppButton({
     super.key,
     required this.label,
@@ -31,14 +35,15 @@ class AppButton extends StatelessWidget {
     this.fullWidth = true,
     this.dense = false,
     this.loading = false,
+    this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final isPrimary = variant == AppButtonVariant.primary;
     final backgroundColor = isPrimary ? AppColors.primary : AppColors.secondary;
-    final borderColor = isPrimary ? AppColors.primaryBorder : AppColors.border;
-    final textColor = isPrimary ? AppColors.primaryForeground : AppColors.foreground;
+    final borderColor = accentColor ?? (isPrimary ? AppColors.primaryBorder : AppColors.border);
+    final textColor = accentColor ?? (isPrimary ? AppColors.primaryForeground : AppColors.foreground);
     final enabled = onPressed != null && !loading;
 
     final textStyle = PixelFont.body(
