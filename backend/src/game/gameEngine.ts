@@ -5,7 +5,7 @@ import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
-import { awardExp } from '../db/userRepo';
+import { awardExp, computeExpAward } from '../db/userRepo';
 
 // 게임/라운드 상태 머신. PLAN "Socket.IO 이벤트 계약"의 페이즈 전이를 서버가 전적으로 소유:
 // 대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)
@@ -548,15 +548,44 @@ function finalizeGame(
   // (시도 자체가 없었으면 undefined → null).
   io.to(room.roomCode).emit('round:finalResult', { ...result, liarGuess: game.liarGuess ?? null });
 
-  const humanEntries = game.participantIds
-    .filter((id) => !isBotId(id))
-    .map((id) => ({
+  // 반복 플레이 악용 방지(PLAN): 정상 게임은 최소 3명 + 모든 참가자가 최소 한 번 이상 설명 제출.
+  // 무효 게임이면 repeatMatchMultiplier=0으로 전원 0 EXP가 된다(봇은 항상 자동 설명하므로,
+  // 사실상 사람이 자기 차례 설명을 한 번도 안 낸 경우에만 무효가 된다).
+  const submittedAll = (id: string): boolean =>
+    game.rounds.every((r) => r.turns.some((t) => t.playerId === id));
+  const gameValid =
+    game.participantIds.length >= 3 && game.participantIds.every((id) => submittedAll(id));
+
+  const winnerIsLiar = result.winner === 'liar';
+  const humanIds = game.participantIds.filter((id) => !isBotId(id));
+
+  const statEntries = humanIds.map((id) => ({
+    userId: id,
+    wasLiar: game.liarIds.includes(id),
+    won: winnerIsLiar ? game.liarIds.includes(id) : !game.liarIds.includes(id),
+  }));
+
+  const expEntries = humanIds.map((id) => {
+    const wasLiar = game.liarIds.includes(id);
+    const won = winnerIsLiar ? wasLiar : !wasLiar;
+    const votedFor = game.votes[id];
+    return {
       userId: id,
-      wasLiar: game.liarIds.includes(id),
-      won: result.winner === 'liar' ? game.liarIds.includes(id) : !game.liarIds.includes(id),
-    }));
-  recordGame(humanEntries).catch((err) => console.error('[gameEngine] GamePlay 기록 실패', err));
-  awardExp(humanEntries).catch((err) => console.error('[gameEngine] EXP 지급 실패', err));
+      exp: computeExpAward({
+        wasLiar,
+        won,
+        // 라이어가 지목된 뒤(votedOutId===id) 승리했다면 역전승(75), 아니면 기본 승리(60).
+        wasComebackWin: wasLiar && won && game.votedOutId === id,
+        votedForLiar: votedFor != null && game.liarIds.includes(votedFor),
+        submittedAllDescriptions: submittedAll(id),
+        voted: votedFor != null,
+        gameValid,
+      }),
+    };
+  });
+
+  recordGame(statEntries).catch((err) => console.error('[gameEngine] GamePlay 기록 실패', err));
+  awardExp(expEntries).catch((err) => console.error('[gameEngine] EXP 지급 실패', err));
 
   io.to(room.roomCode).emit('game:ended', {});
 

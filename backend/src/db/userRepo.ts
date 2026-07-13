@@ -117,26 +117,52 @@ function deriveLevel(exp: number): number {
   return level;
 }
 
-// 게임 1판이 정상 종료됐을 때(사람 참가자만) 지급하는 EXP. PLAN "경험치(EXP) 및 레벨 정책" 참고.
-// 방을 나가 승패 판정 자체가 안 난 경우는 이 함수가 아예 호출되지 않아 0 EXP가 자연스레 보장된다.
-// (주의: 아래 지급액은 구(舊) 정책 값이다. 역할·투표대상·참여도까지 반영하는 새 정책은 GamePlay에
-//  없는 필드(투표 대상 등)가 필요해 PLAN에서 별도 작업으로 남겨둔 상태 — 용어만 EXP로 통일했다.)
-function expForOutcome(wasLiar: boolean, won: boolean): number {
-  if (wasLiar) return won ? 110 : 60;
-  return won ? 100 : 60;
+// 한 게임 종료 시 플레이어 1명의 EXP를 계산하기 위한 입력. gameEngine이 finalize 시점의
+// 게임 상태(투표 내역·지목·역전승·설명 제출 여부)에서 채워 넘긴다. PLAN "경험치(EXP) 및
+// 레벨 정책" 표와 1:1 대응한다.
+export interface ExpAwardInput {
+  wasLiar: boolean; // 이 게임에서 라이어였는지
+  won: boolean; // 이 유저가 속한 팀이 최종 승리했는지
+  votedForLiar: boolean; // (시민용) 실제 라이어에게 투표했는지 — 라이어 본인에겐 무의미
+  wasComebackWin: boolean; // (라이어용) 지목된 뒤 진짜 제시어를 맞혀 역전승했는지
+  submittedAllDescriptions: boolean; // 자기 차례의 필수 설명을 모두 제출했는지
+  voted: boolean; // 투표를 완료했는지
+  gameValid: boolean; // 반복 플레이 악용 방지 통과(정상 게임)인지 — 무효면 전원 0 EXP
+}
+
+// PLAN "경험치 지급 정책" 표의 역할·게임결과·개인결과별 기본 EXP(baseExp).
+function baseExp(i: ExpAwardInput): number {
+  if (i.wasLiar) {
+    if (i.won) return i.wasComebackWin ? 75 : 60; // 지목 후 역전승 75 / 들키지 않고 승리 60
+    return 10; // 라이어 패배(제시어 추측 실패)
+  }
+  // 시민
+  if (i.won) return i.votedForLiar ? 45 : 30; // 승리 + 라이어 정확 지목 45 / 오지목 30
+  return i.votedForLiar ? 16 : 6; // 패배해도 라이어 지목 16 / 패배 + 오판 6
+}
+
+// 최종 EXP = max(0, floor(baseExp × 참여도 보정 × 반복플레이 보정)). PLAN 계산식과 동일.
+// - 참여도: 설명 제출 + 투표 완료 1.0, 투표 미완료 0.5, 설명 미제출 0
+// - 반복플레이: 정상 게임 1, 무효 게임 0
+export function computeExpAward(i: ExpAwardInput): number {
+  const participationMultiplier = !i.submittedAllDescriptions ? 0 : i.voted ? 1 : 0.5;
+  const repeatMatchMultiplier = i.gameValid ? 1 : 0;
+  return Math.max(0, Math.floor(baseExp(i) * participationMultiplier * repeatMatchMultiplier));
 }
 
 // finalizeGame이 recordGame과 함께 호출 — 한 게임당 유저별로 한 번만 불려 중복 지급을 막는다.
-export async function awardExp(
-  entries: { userId: string; wasLiar: boolean; won: boolean }[],
-): Promise<void> {
+// EXP는 이미 계산된 값(computeExpAward 결과)을 그대로 누적한다. 0 이하는 갱신을 건너뛴다
+// (경험치는 단조증가만 하므로 감소·무변경 업데이트는 불필요).
+export async function awardExp(entries: { userId: string; exp: number }[]): Promise<void> {
   await Promise.all(
-    entries.map((e) =>
-      prisma.user.update({
-        where: { uid: e.userId },
-        data: { exp: { increment: expForOutcome(e.wasLiar, e.won) } },
-      }),
-    ),
+    entries
+      .filter((e) => e.exp > 0)
+      .map((e) =>
+        prisma.user.update({
+          where: { uid: e.userId },
+          data: { exp: { increment: e.exp } },
+        }),
+      ),
   );
 }
 
