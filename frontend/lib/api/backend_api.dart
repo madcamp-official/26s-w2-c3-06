@@ -83,6 +83,14 @@ class BackendApi {
     return UserStats.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
+  /// 임의 uid의 닉네임/프로필 사진 조회(getMyProfile의 타인 버전). 채팅 아바타 등에서
+  /// 방 참가자의 실제 프로필 사진을 보여주기 위해 쓴다.
+  Future<UserProfile> getUserProfile(String uid) async {
+    final res = await http.get(_uri('/api/users/$uid/profile'), headers: await _authHeaders());
+    _checkOk(res);
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
   /// 회원탈퇴. 백엔드가 Firebase 계정 삭제까지 함께 처리하므로 프론트는 이 호출 하나면 끝난다
   /// (Firebase와 직접 통신하지 않음).
   Future<void> deleteMyAccount() async {

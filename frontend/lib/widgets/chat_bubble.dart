@@ -13,7 +13,10 @@ class ChatBubble extends StatelessWidget {
   /// 현재 로그인한 유저의 uid. 내 메시지를 오른쪽 정렬로 표시하는 데 쓴다.
   final String? myUid;
 
-  const ChatBubble({super.key, required this.message, this.myUid});
+  /// 발신자의 실제 프로필 사진 URL(서버 저장분). null이면 UserAvatar가 기본 아이콘을 보여준다.
+  final String? senderAvatarUrl;
+
+  const ChatBubble({super.key, required this.message, this.myUid, this.senderAvatarUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +100,7 @@ class ChatBubble extends StatelessWidget {
       avatarIndex: message.avatarIndex,
       radius: 13,
       imageBytes: isMine ? UserSession.profileImageBytes : null,
+      imageUrl: senderAvatarUrl,
     );
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

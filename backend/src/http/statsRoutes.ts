@@ -99,6 +99,14 @@ statsRouter.get('/:uid', requireAuth, async (req: AuthedRequest, res) => {
   res.json(stats);
 });
 
+// 방 참가자 등 임의 uid의 닉네임/프로필 사진 조회(/me/profile의 타인 버전). 채팅 아바타가
+// 실제 프로필 사진을 보여주려면 방 참가자별로 이 정보가 필요하다. 봇 id(bot-...)는 DB에
+// 없는 게 정상이라 조용히 { nickname: null, avatarUrl: null }을 반환한다.
+statsRouter.get('/:uid/profile', requireAuth, async (req: AuthedRequest, res) => {
+  const profile = await getUserProfile(req.params.uid as string);
+  res.json(profile ?? { nickname: null, avatarUrl: null });
+});
+
 // 회원탈퇴. 프론트는 이 엔드포인트 하나만 호출하면 된다 — Firebase Auth 계정 삭제는
 // firebase-admin(서버 권한)으로 처리해 "최근 로그인 필요" 재인증 제약을 우회한다.
 // 게스트 정리 cron(cron/guestCleanup.ts)과 동일한 삭제 패턴.

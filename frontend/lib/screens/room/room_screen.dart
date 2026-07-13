@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/backend_api.dart';
 import '../../models/chat_message.dart';
 import '../../models/game_phase.dart';
 import '../../models/player.dart';
 import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
+import '../../services/user_session.dart';
 import '../../state/room_provider.dart';
+import '../../widgets/pixel_dialog.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/pixel_font.dart';
 import '../../widgets/app_button.dart';
@@ -42,6 +45,28 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   int _lastChatLen = 0;
   bool _hostDraftSeeded = false;
 
+  // 투표 탭에 아무 시각적 피드백이 없어 "버튼이 안 눌린다"고 느껴지던 문제 — 내가 누른
+  // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
+  String? _myVote;
+
+  // 참가자 아바타(채팅·투표 후보 등)는 프리셋 이모지가 아니라 실제 프로필 사진을 보여준다.
+  // uid별로 한 번만 조회해 캐싱하고, 봇(id가 bot-로 시작)은 DB에 없는 게 정상이라 건너뛴다.
+  final Map<String, String?> _avatarUrlCache = {};
+  final Set<String> _avatarUrlFetching = {};
+
+  String? _avatarUrlFor(String uid) {
+    if (_avatarUrlCache.containsKey(uid)) return _avatarUrlCache[uid];
+    if (uid.startsWith('bot-') || _avatarUrlFetching.contains(uid)) return null;
+    _avatarUrlFetching.add(uid);
+    BackendApi.instance.getUserProfile(uid).then((profile) {
+      if (!mounted) return;
+      setState(() => _avatarUrlCache[uid] = profile.avatarUrl);
+    }).catchError((_) {
+      if (mounted) setState(() => _avatarUrlCache[uid] = null);
+    });
+    return null;
+  }
+
   String? get _myUid => AuthService.instance.currentUser?.uid;
 
   @override
@@ -69,6 +94,95 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     _leaving = true;
     ref.read(roomProvider.notifier).leaveRoom();
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// 방장 전용 "친구 초대" — 접속 중인 친구 목록을 보여주고, 탭하면 friend:invite를 보낸다.
+  /// 상대가 온라인이면 room:invited를 받아 로비에서 알림+입장 버튼을 보게 된다.
+  Future<void> _openInviteFriendsSheet() async {
+    List<FriendSummary> friends;
+    try {
+      friends = await BackendApi.instance.getFriends();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('친구 목록을 불러오지 못했습니다.')));
+      }
+      return;
+    }
+    final online = friends.where((f) => f.isOnline).toList();
+    if (!mounted) return;
+
+    await showPixelDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      maxWidth: 340,
+      builder: (dialogContext) {
+        final invited = <String>{};
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('👥 친구 초대', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+                const SizedBox(height: 6),
+                Text('접속 중인 친구만 초대할 수 있어요',
+                    style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                const SizedBox(height: 14),
+                if (online.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Text('지금 접속 중인 친구가 없어요',
+                        style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 280),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: online.map((f) {
+                          final done = invited.contains(f.uid);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                UserAvatar(avatarIndex: 0, radius: 16, imageUrl: f.avatarUrl),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(f.nickname,
+                                      style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
+                                ),
+                                AppButton(
+                                  label: done ? '초대됨' : '초대',
+                                  dense: true,
+                                  fullWidth: false,
+                                  variant: done ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                                  onPressed: done
+                                      ? null
+                                      : () {
+                                          ref.read(roomProvider.notifier).inviteFriend(f.uid);
+                                          setDialogState(() => invited.add(f.uid));
+                                        },
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                AppButton(
+                  label: '닫기',
+                  variant: AppButtonVariant.outlined,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _sendChatOrDescription(RoomViewState s) {
@@ -107,6 +221,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         Navigator.of(context).pop();
       }
     });
+    // 새 투표 페이즈가 시작될 때마다 이전 라운드의 선택 표시를 지운다.
+    ref.listen<GamePhase>(roomProvider.select((v) => v.phase), (prev, next) {
+      if (next == GamePhase.voting && prev != GamePhase.voting) {
+        setState(() => _myVote = null);
+      }
+    });
 
     if (s.chatLog.length != _lastChatLen) {
       _lastChatLen = s.chatLog.length;
@@ -141,7 +261,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         body: SafeArea(
           child: Column(
             children: [
-              _header(s),
+              _header(s, isHost),
               Expanded(child: _chatFeed(s)),
               _contextPanel(s, isHost),
               _inputBar(s),
@@ -152,7 +272,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
-  Widget _header(RoomViewState s) {
+  // 친구 초대는 방장이면서 회원(게스트가 아님)일 때만 가능하다 — 게스트는 친구 목록이
+  // 아이디 기반이라 애초에 친구 기능 자체를 쓸 수 없다(로비의 게스트 친구 제한과 동일 규칙).
+  bool get _canInviteFriends => !UserSession.isGuest;
+
+  Widget _header(RoomViewState s, bool isHost) {
     final emoji = (s.emoji?.isNotEmpty ?? false) ? s.emoji! : '🎮';
     final title = (s.title?.isNotEmpty ?? false) ? s.title! : '방 ${s.roomCode ?? ''}';
     return PixelBox(
@@ -174,6 +298,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
+          if (isHost && _canInviteFriends) ...[
+            HoverTap(
+              onTap: _openInviteFriendsSheet,
+              child: const Icon(Icons.person_add_alt_1, color: AppColors.mutedForeground),
+            ),
+            const SizedBox(width: 14),
+          ],
           HoverTap(
             onTap: _leave,
             child: const Icon(Icons.exit_to_app, color: AppColors.mutedForeground),
@@ -190,7 +321,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       itemCount: s.chatLog.length,
       itemBuilder: (_, i) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: ChatBubble(message: _displayMessage(s.chatLog[i], s), myUid: _myUid),
+        child: ChatBubble(
+          message: _displayMessage(s.chatLog[i], s),
+          myUid: _myUid,
+          senderAvatarUrl: () {
+            final m = s.chatLog[i];
+            if (m.isAi || m.isSystem) return null;
+            return _avatarUrlFor(m.senderId);
+          }(),
+        ),
       ),
     );
   }
@@ -281,7 +420,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 .toList(),
           ),
           const SizedBox(height: 8),
-          if (me != null)
+          // 방장은 서버가 참여 즉시 준비 완료로 고정해두므로(봇과 동일 규칙) 준비 토글을
+          // 보여주지 않는다. 방장이 아닌 참가자만 직접 준비 상태를 토글한다.
+          if (me != null && !isHost)
             AppButton(
               label: me.isReady ? '준비 완료 ✓' : '준비하기',
               variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
@@ -482,22 +623,48 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               child: Text('투표 ${s.votesInCount}/${s.totalVoteCount}',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             ),
+          if (_myVote != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('투표 완료! 다른 사람들을 기다리는 중...',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.primary)),
+            ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: candidates.map((p) {
-              return HoverTap(
-                onTap: () => ref.read(roomProvider.notifier).castVote(p.id),
-                child: PixelBox(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 10),
-                      const SizedBox(width: 6),
-                      Text(p.nickname, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
-                    ],
+              final selected = _myVote == p.id;
+              final voted = _myVote != null;
+              return Opacity(
+                opacity: voted && !selected ? 0.5 : 1,
+                child: HoverTap(
+                  onTap: voted
+                      ? null
+                      : () {
+                          setState(() => _myVote = p.id);
+                          ref.read(roomProvider.notifier).castVote(p.id);
+                        },
+                  child: PixelBox(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    color: selected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+                    border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        UserAvatar(
+                          avatarIndex: _avatarIndexFor(p.id, s),
+                          radius: 10,
+                          imageUrl: p.isBot ? null : _avatarUrlFor(p.id),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(p.nickname, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+                        if (selected) ...[
+                          const SizedBox(width: 4),
+                          const Icon(Icons.check_circle, size: 14, color: AppColors.primary),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
               );

@@ -76,6 +76,8 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
   Future<void> _handleCreateRoom() async {
     var isPublic = true;
     var maxPlayers = 8;
+    final defaultTitle = '${UserSession.nickname}의 방';
+    final titleController = TextEditingController(text: defaultTitle);
 
     final confirmed = await showPixelDialog<bool>(
       context: context,
@@ -89,6 +91,10 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('🚪 방 만들기', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+                const SizedBox(height: 16),
+                Text('방 이름', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                const SizedBox(height: 6),
+                AppTextField(controller: titleController, hintText: defaultTitle, maxLength: 20),
                 const SizedBox(height: 16),
                 Text('공개 설정', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
                 const SizedBox(height: 6),
@@ -159,6 +165,9 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
       },
     );
 
+    final title = titleController.text.trim();
+    titleController.dispose();
+
     if (confirmed != true) return;
     if (!mounted) return;
 
@@ -166,7 +175,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
           nickname: UserSession.nickname,
           visibility: isPublic ? 'public' : 'private',
           maxPlayers: maxPlayers,
-          title: '${UserSession.nickname}의 방',
+          title: title.isEmpty ? defaultTitle : title,
         );
     _enterRoom();
   }

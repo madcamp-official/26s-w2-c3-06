@@ -134,12 +134,15 @@ export function createRoom(opts: {
   emoji?: string;
 }): RoomState {
   const roomCode = generateRoomCode();
+  // 방장은 봇과 마찬가지로 참여 즉시 준비 완료로 고정한다 — 프론트가 방장에게는
+  // 준비 토글 UI 자체를 보여주지 않고 항상 준비된 것으로 취급하므로, 서버 상태도
+  // 이에 맞춰야 game:configure의 "전원 isReady" 조건이 정상적으로 충족된다.
   const host: Player = {
     id: opts.uid,
     nickname: opts.nickname,
     isBot: false,
     connected: true,
-    isReady: false,
+    isReady: true,
   };
   const room: RoomState = {
     roomCode,
