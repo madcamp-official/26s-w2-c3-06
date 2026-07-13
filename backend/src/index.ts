@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { socketAuthMiddleware } from './socket/middleware';
 import { registerSocketHandlers } from './socket/handlers';
+import * as presence from './socket/presence';
 import { statsRouter } from './http/statsRoutes';
 import { friendsRouter } from './http/friendsRoutes';
 import { startGuestCleanupCron } from './cron/guestCleanup';
@@ -63,10 +64,13 @@ io.on('connection', (socket) => {
   const uid = socket.data.uid as string | undefined;
   console.log(`[socket] connected: ${socket.id} (uid=${uid ?? 'unknown'})`);
 
+  if (uid) presence.setOnline(uid, socket.id);
+
   registerSocketHandlers(io, socket);
 
   socket.on('disconnect', (reason) => {
     console.log(`[socket] disconnected: ${socket.id} (${reason})`);
+    if (uid) presence.setOffline(uid, socket.id);
   });
 });
 

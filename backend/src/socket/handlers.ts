@@ -1,6 +1,7 @@
 import type { Server, Socket } from 'socket.io';
 import * as roomManager from '../game/roomManager';
 import * as gameEngine from '../game/gameEngine';
+import * as presence from './presence';
 import { broadcastChat } from '../game/chat';
 import { upsertUser } from '../db/userRepo';
 
@@ -92,6 +93,32 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     upsertUser({ uid, nickname: payload.nickname, isAnonymous }).catch((err) =>
       console.error('[handlers] upsertUser 실패', err),
     );
+  });
+
+  // 친구를 현재 방으로 초대한다. 초대자는 방에 있어야 하고, 대상이 접속(온라인) 중이면
+  // 그 소켓(들)에 room:invited를 보내 로비에서 바로 입장할 수 있게 한다. 대상이 오프라인이면
+  // 초대자에게 room:error로 알린다.
+  socket.on('friend:invite', (payload: { toUid: string }) => {
+    const room = currentRoom();
+    if (!room) {
+      socket.emit('room:error', { message: '방에 있는 동안에만 친구를 초대할 수 있습니다.' });
+      return;
+    }
+    const targetSockets = presence.socketIdsOf(payload.toUid);
+    if (targetSockets.length === 0) {
+      socket.emit('room:error', { message: '상대가 접속 중이 아닙니다.' });
+      return;
+    }
+    const fromNickname = room.players.find((p) => p.id === uid)?.nickname ?? '';
+    for (const sid of targetSockets) {
+      io.to(sid).emit('room:invited', {
+        roomCode: room.roomCode,
+        title: room.title,
+        emoji: room.emoji,
+        fromUid: uid,
+        fromNickname,
+      });
+    }
   });
 
   socket.on('room:leave', () => {

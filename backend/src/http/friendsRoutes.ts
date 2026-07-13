@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, type AuthedRequest } from './authMiddleware';
 import * as friendRepo from '../db/friendRepo';
+import * as presence from '../socket/presence';
 
 // PLAN "DB 스키마" 친구 기능(요청/수락/거절/목록) REST API.
 // Socket.IO 이벤트 계약에는 없는 프로필 조회용 REST 확장 — 실시간성이 필요 없는 CRUD라 REST로 구현.
@@ -57,7 +58,9 @@ friendsRouter.post('/requests/:id/decline', requireAuth, async (req: AuthedReque
 
 friendsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
   const friends = await friendRepo.listFriends(req.uid!);
-  res.json({ friends });
+  // 접속 여부(isOnline)를 현재 소켓 프레젠스 스냅샷으로 덧붙인다 — 방 초대 가능 여부/온라인 표시용.
+  const withPresence = friends.map((f) => ({ ...f, isOnline: presence.isOnline(f.uid) }));
+  res.json({ friends: withPresence });
 });
 
 friendsRouter.delete('/:uid', requireAuth, async (req: AuthedRequest, res) => {
