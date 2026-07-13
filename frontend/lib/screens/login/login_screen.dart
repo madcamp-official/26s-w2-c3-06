@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
+import '../../api/backend_api.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
 import '../../state/auth_provider.dart';
@@ -145,7 +146,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (nickname == null || nickname.isEmpty) return;
     if (!mounted) return;
     await _runAuth(() async {
+      // 닉네임 중복 사전 확인(공개 엔드포인트, 로그인 전에도 호출 가능).
+      final available = await BackendApi.instance.isNicknameAvailable(nickname);
+      if (!available) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('이미 사용 중인 닉네임입니다.')),
+          );
+        }
+        return;
+      }
       final user = await AuthService.instance.signInAsGuest(nickname);
+      // 익명 계정 생성 후 로컬 DB에 닉네임을 즉시 예약 — 서버 @unique 제약으로 권위 검증(409면 중복).
+      try {
+        await BackendApi.instance.syncNickname(nickname);
+      } on BackendApiException catch (e) {
+        await AuthService.instance.signOut();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 등록에 실패했습니다.')),
+          );
+        }
+        return;
+      }
       await _afterAuth(user, isGuest: true);
     });
   }
