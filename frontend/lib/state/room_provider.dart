@@ -37,6 +37,8 @@ GamePhase _phaseFromServerString(String raw) {
 class RoomViewState {
   final String? roomCode;
   final String? hostId;
+  final String? title;
+  final String? emoji;
   final String? visibility;
 
   /// 방 생성 시 호스트가 지정한 최대 인원. room:created/joined 응답엔 없어 호스트가
@@ -98,6 +100,8 @@ class RoomViewState {
   const RoomViewState({
     this.roomCode,
     this.hostId,
+    this.title,
+    this.emoji,
     this.visibility,
     this.maxPlayers,
     this.draftCategory,
@@ -157,6 +161,8 @@ class RoomViewState {
   RoomViewState copyWith({
     String? roomCode,
     String? hostId,
+    String? title,
+    String? emoji,
     String? visibility,
     int? maxPlayers,
     bool clearMaxPlayers = false,
@@ -193,6 +199,8 @@ class RoomViewState {
     return RoomViewState(
       roomCode: roomCode ?? this.roomCode,
       hostId: hostId ?? this.hostId,
+      title: title ?? this.title,
+      emoji: emoji ?? this.emoji,
       visibility: visibility ?? this.visibility,
       maxPlayers: clearMaxPlayers ? null : (maxPlayers ?? this.maxPlayers),
       draftCategory: clearDraftCategory ? null : (draftCategory ?? this.draftCategory),
@@ -348,6 +356,8 @@ class RoomNotifier extends Notifier<RoomViewState> {
     state = state.copyWith(
       roomCode: snapshot.roomCode,
       hostId: snapshot.hostId,
+      title: snapshot.title,
+      emoji: snapshot.emoji,
       visibility: snapshot.visibility,
       players: snapshot.players,
       phase: GamePhase.waiting,
@@ -370,6 +380,8 @@ class RoomNotifier extends Notifier<RoomViewState> {
       state = state.copyWith(
         roomCode: snapshot.roomCode,
         hostId: snapshot.hostId,
+        title: snapshot.title,
+        emoji: snapshot.emoji,
         visibility: snapshot.visibility,
         players: snapshot.players,
         participants: const [],
@@ -418,6 +430,8 @@ class RoomNotifier extends Notifier<RoomViewState> {
     state = state.copyWith(
       roomCode: snapshot.roomCode,
       hostId: snapshot.hostId,
+      title: snapshot.title,
+      emoji: snapshot.emoji,
       visibility: snapshot.visibility,
       players: snapshot.players,
       participants: game.participants,
@@ -454,10 +468,21 @@ class RoomNotifier extends Notifier<RoomViewState> {
     required String nickname,
     required String visibility,
     required int maxPlayers,
+    String? title,
+    String? emoji,
   }) {
     state = state.copyWith(maxPlayers: maxPlayers);
-    _socket.createRoom(nickname: nickname, visibility: visibility, maxPlayers: maxPlayers);
+    _socket.createRoom(
+      nickname: nickname,
+      visibility: visibility,
+      maxPlayers: maxPlayers,
+      title: title,
+      emoji: emoji,
+    );
   }
+
+  /// 현재 방으로 친구 초대(friend:invite). 대상이 온라인이면 room:invited를 받는다.
+  void inviteFriend(String toUid) => _socket.inviteFriend(toUid);
 
   void setReady(bool isReady) => _socket.setReady(isReady);
 

@@ -1,11 +1,11 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
-import '../../mock/mock_data.dart';
 import '../../models/room_summary.dart';
 import '../../services/user_session.dart';
+import '../../state/auth_provider.dart';
+import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/breakpoints.dart';
 import '../../widgets/app_button.dart';
@@ -20,16 +20,24 @@ import '../login/login_screen.dart';
 import '../profile/profile_screen.dart';
 import '../room/room_screen.dart';
 
-class LobbyScreen extends StatefulWidget {
+class LobbyScreen extends ConsumerStatefulWidget {
   const LobbyScreen({super.key});
 
   @override
-  State<LobbyScreen> createState() => _LobbyScreenState();
+  ConsumerState<LobbyScreen> createState() => _LobbyScreenState();
 }
 
-class _LobbyScreenState extends State<LobbyScreen> {
+class _LobbyScreenState extends ConsumerState<LobbyScreen> {
   final _searchController = TextEditingController();
-  final List<RoomSummary> _publicRooms = List.of(mockPublicRooms);
+
+  @override
+  void initState() {
+    super.initState();
+    // 진입 즉시 공개방 목록 요청(이후 서버가 room:publicList로 실시간 갱신).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(roomProvider.notifier).refreshPublicRooms();
+    });
+  }
 
   @override
   void dispose() {
@@ -37,52 +45,36 @@ class _LobbyScreenState extends State<LobbyScreen> {
     super.dispose();
   }
 
-  List<RoomSummary> get _filteredRooms {
+  List<RoomSummary> _filteredRooms(List<RoomSummary> rooms) {
     final query = _searchController.text.trim();
-    if (query.isEmpty) return _publicRooms;
-    return _publicRooms.where((r) => r.title.contains(query) || r.category.contains(query)).toList();
+    if (query.isEmpty) return rooms;
+    return rooms.where((r) => r.title.contains(query) || r.category.contains(query)).toList();
   }
 
-  Future<void> _openRoom({
-    required String code,
-    required bool isHost,
-    int maxPlayers = 8,
-    String? initialCategory,
-  }) async {
-    // RoomScreen은 방장이 나갈 때 true를 돌려준다(PLAN.md room:closed — 방장 퇴장 시 방이
-    // 통째로 사라짐). 그 경우 공개방 목록에서도 지워야 다른 사람이 사라진 방에 들어가려는
-    // 걸 막을 수 있다. 방장이 아닌 사람의 퇴장은 방이 유지되므로 목록도 그대로 둔다.
-    final roomClosed = await Navigator.of(context).push<bool>(
+  /// 방에 입장(RoomScreen으로 이동). RoomScreen은 roomProvider 상태를 읽어 방 화면을 그린다.
+  /// 돌아오면 전적/공개방 목록을 새로고침한다.
+  Future<void> _enterRoom() async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         settings: const RouteSettings(name: 'room'),
-        builder: (_) => RoomScreen(
-          roomCode: code,
-          isHost: isHost,
-          maxPlayers: maxPlayers,
-          initialCategory: initialCategory,
-        ),
+        builder: (_) => const RoomScreen(),
       ),
     );
     if (!mounted) return;
-    // 방에서 게임을 마치고 돌아오면 갱신된 전적(승률/레벨)이 로비에 바로 반영되도록 다시 그린다.
-    setState(() {
-      if (roomClosed == true) {
-        _publicRooms.removeWhere((r) => r.code == code);
-      }
-    });
+    ref.invalidate(myStatsProvider);
+    ref.read(roomProvider.notifier).refreshPublicRooms();
+    setState(() {});
   }
 
-  String _generateRoomCode() {
-    final random = Random();
-    return (1000 + random.nextInt(9000)).toString();
+  void _joinAndEnter(String code) {
+    ref.read(roomProvider.notifier).joinRoom(roomCode: code, nickname: UserSession.nickname);
+    _enterRoom();
   }
 
-  /// 방 만들기 다이얼로그 — 공개/비공개, 인원수, 카테고리를 미리 정한다
-  /// (PLAN.md `room:create` 계약 `{ nickname, visibility, maxPlayers }` + 카테고리 사전 선택).
+  /// 방 만들기 다이얼로그 — 공개/비공개, 인원수. 카테고리는 방 안 대기방에서 방장이 고른다.
   Future<void> _handleCreateRoom() async {
     var isPublic = true;
     var maxPlayers = 8;
-    var category = mockCategories.first;
 
     final confirmed = await showPixelDialog<bool>(
       context: context,
@@ -140,20 +132,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Text('카테고리', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: mockCategories.map((c) {
-                    return _ChoiceChip(
-                      label: c,
-                      selected: c == category,
-                      onTap: () => setDialogState(() => category = c),
-                    );
-                  }).toList(),
-                ),
+                const SizedBox(height: 8),
+                Text('카테고리는 방 안에서 방장이 고릅니다',
+                    style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
                 const SizedBox(height: 20),
                 Row(
                   children: [
@@ -180,23 +161,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
     if (confirmed != true) return;
     if (!mounted) return;
 
-    final code = _generateRoomCode();
-    if (isPublic) {
-      setState(() {
-        _publicRooms.insert(
-          0,
-          RoomSummary(
-            code: code,
-            title: '${UserSession.nickname}의 방',
-            category: category,
-            hostNickname: UserSession.nickname,
-            playerCount: 1,
-            maxPlayers: maxPlayers,
-          ),
+    ref.read(roomProvider.notifier).createRoom(
+          nickname: UserSession.nickname,
+          visibility: isPublic ? 'public' : 'private',
+          maxPlayers: maxPlayers,
+          title: '${UserSession.nickname}의 방',
         );
-      });
-    }
-    _openRoom(code: code, isHost: true, maxPlayers: maxPlayers, initialCategory: category);
+    _enterRoom();
   }
 
   Future<void> _handleJoinByCode() async {
@@ -246,7 +217,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     // 참조하게 되어 에러가 나므로(게스트 로그인 오류와 동일한 원인) 여기서 dispose하지 않는다.
     if (code == null || code.length != 4) return;
     if (!mounted) return;
-    _openRoom(code: code, isHost: false);
+    _joinAndEnter(code);
   }
 
   Future<void> _openFriends() async {
@@ -310,7 +281,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pendingRequests = mockFriendRequests.length;
+    final pendingRequests = ref.watch(pendingFriendRequestCountProvider).value ?? 0;
     final isDesktop = context.isDesktop;
 
     return Scaffold(
@@ -388,10 +359,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   /// 모바일은 세로 목록, 데스크탑은 넓은 화면을 활용해 카드가 여러 열로 흐르는 그리드로 표시한다.
   Widget _buildRoomList({required bool isDesktop}) {
-    final tiles = _filteredRooms
+    final rooms = ref.watch(roomProvider.select((s) => s.publicRooms));
+    final tiles = _filteredRooms(rooms)
         .map((room) => _PublicRoomTile(
               room: room,
-              onTap: room.inProgress ? null : () => _openRoom(code: room.code, isHost: false),
+              onTap: room.inProgress ? null : () => _joinAndEnter(room.code),
             ))
         .toList();
 
@@ -406,14 +378,24 @@ class _LobbyScreenState extends State<LobbyScreen> {
   }
 }
 
-/// 로비 상단의 내 전적 카드 — 프로필 사진·레벨·승률(PLAN.md "로비 — 내 승률·레벨·프로필 사진 표시").
-class _StatsCard extends StatelessWidget {
+/// 로비 상단의 내 전적 카드 — 레벨·승률(서버 파생 GET /api/users/me). PLAN.md "로비 전적 표시".
+class _StatsCard extends ConsumerWidget {
   const _StatsCard();
 
   @override
-  Widget build(BuildContext context) {
-    final stats = UserSession.stats;
-    final winRateText = stats.overallWinRate == null ? '기록 없음' : '승률 ${(stats.overallWinRate! * 100).round()}%';
+  Widget build(BuildContext context, WidgetRef ref) {
+    final nickname = ref.watch(nicknameProvider) ?? UserSession.nickname;
+    final statsAsync = ref.watch(myStatsProvider);
+
+    final String detail = statsAsync.when(
+      loading: () => '전적 불러오는 중...',
+      error: (_, __) => '전적을 불러오지 못했어요',
+      data: (stats) {
+        final winRateText =
+            stats.overallWinRate == null ? '기록 없음' : '승률 ${(stats.overallWinRate! * 100).round()}%';
+        return 'Lv.${stats.level} (${stats.score} XP) · 전체 ${stats.totalGames}판 · $winRateText';
+      },
+    );
 
     return PixelBox(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -426,14 +408,14 @@ class _StatsCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  UserSession.nickname,
+                  nickname,
                   style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Lv.${stats.level} (${stats.xp} XP) · 전체 ${stats.totalGames}판 · $winRateText',
+                  detail,
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,

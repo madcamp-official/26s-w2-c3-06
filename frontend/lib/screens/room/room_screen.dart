@@ -1,1596 +1,599 @@
-import 'dart:async';
-import 'dart:math';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../mock/mock_data.dart';
 import '../../models/chat_message.dart';
+import '../../models/game_phase.dart';
 import '../../models/player.dart';
-import '../../services/user_session.dart';
+import '../../services/auth_service.dart';
+import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/pixel_font.dart';
-import '../../utils/breakpoints.dart';
 import '../../widgets/app_button.dart';
-import '../../widgets/app_nav_rail.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
-import '../../widgets/pixel_dialog.dart';
-import '../../widgets/responsive_center.dart';
+import '../../widgets/countdown_text.dart';
+import '../../widgets/pixel_box.dart';
 import '../../widgets/user_avatar.dart';
 
-/// 대기 → 설명 → (전원 설명 완료) → 투표 → 결과 → (역전승 시도) → 종료(대기로 복귀)까지
-/// 하나의 화면(단일 채팅 피드 + 하단 컨텍스트 패널)으로 표현한다.
-enum _Phase { waiting, describing, allDone, voting, liarGuessWait }
-
-const _turnSeconds = 30;
-
-class RoomScreen extends StatefulWidget {
-  final String roomCode;
-  final bool isHost;
-
-  /// 방장이 방 만들기 다이얼로그에서 지정한 최대 인원(사람+봇 합산, PLAN.md `maxPlayers`).
-  /// 코드로 입장하는 경우(방장이 아님)엔 알 수 없으니 host 쪽 기본값으로 둔다.
-  final int maxPlayers;
-
-  /// 방장이 방 만들기 다이얼로그에서 미리 골라둔 카테고리. 없으면 기본 카테고리를 쓴다.
-  final String? initialCategory;
-
-  const RoomScreen({
-    super.key,
-    required this.roomCode,
-    this.isHost = false,
-    this.maxPlayers = 8,
-    this.initialCategory,
-  });
+/// 대기 → 설명 → 토론 → 투표 → 결과 → (역전승) → 종료(대기 복귀)를 하나의 화면으로 표현한다.
+/// 모든 페이즈 전이·타이머·판정은 서버가 소유하고(PLAN "Socket.IO 이벤트 계약"), 이 화면은
+/// roomProvider가 반영한 상태를 그리고 사용자 액션을 소켓으로 위임만 한다(로컬 시뮬레이션 없음).
+class RoomScreen extends ConsumerStatefulWidget {
+  const RoomScreen({super.key});
 
   @override
-  State<RoomScreen> createState() => _RoomScreenState();
+  ConsumerState<RoomScreen> createState() => _RoomScreenState();
 }
 
-class _RoomScreenState extends State<RoomScreen> {
-  final _random = Random();
-  final _scrollController = ScrollController();
+const _presetCategories = <String>['음식', '동물', '영화', '스포츠', '직업', '나라'];
+const _minParticipants = 3;
 
-  late List<Player> _humanPlayers;
-  final List<ChatMessage> _messages = [];
+class _RoomScreenState extends ConsumerState<RoomScreen> {
   final _chatController = TextEditingController();
+  final _scrollController = ScrollController();
   final _customCategoryController = TextEditingController();
 
+  // 방장 대기방 드래프트(로컬 입력 → game:draftConfig로 서버에 실시간 공유).
   int _botCount = 0;
-  String? _selectedCategory;
-  final List<String> _customCategories = [];
-  final Set<String> _usedWordPairs = {};
+  String? _selectedChip;
+  bool _aiRandom = false;
+  bool _leaving = false;
+  int _lastChatLen = 0;
 
-  /// 응답 대기 중인 친구 초대(닉네임 기준). 방장 전용 "친구 초대" 기능에서만 쓴다.
-  final Set<String> _pendingFriendInvites = {};
-
-  _Phase _phase = _Phase.waiting;
-
-  List<Player> _participants = [];
-  List<String> _turnOrder = [];
-  int _currentTurnIndex = 0;
-  String? _realWord;
-  String? _liarWord;
-  String? _liarId;
-  final Map<String, String> _votes = {};
-  String? _votedOutId;
-
-  /// 이번 라운드에 나에게 배정된 제시어. "AI 설명보기" 버튼의 대상이 된다(PLAN.md `explainWordIfUnfamiliar`).
-  String? _myWord;
-  String? _myWordExplanation;
-  bool _isExplainingWord = false;
-
-  Timer? _tickTimer;
-  int _secondsLeft = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _humanPlayers = List.of(buildMockPlayers(selfIsHost: widget.isHost));
-    _selectedCategory = widget.initialCategory ?? mockCategories.first;
-    final other = _humanPlayers.firstWhere((p) => p.id != 'me');
-    _addSystemMessage('🎉 방에 입장했습니다!');
-    _addChatMessage(other.id, '다들 준비됐어요? 😄');
-    _addAiFlavorMessage('오늘 라이어가 누구일지 저만 알고 있답니다 👀');
-  }
+  String? get _myUid => AuthService.instance.currentUser?.uid;
 
   @override
   void dispose() {
-    _tickTimer?.cancel();
-    _scrollController.dispose();
     _chatController.dispose();
+    _scrollController.dispose();
     _customCategoryController.dispose();
     super.dispose();
   }
 
-  // ─── 참가자 ───────────────────────────────────────────────
-
-  List<Player> get _bots => List.generate(
-        _botCount,
-        (index) => Player(id: 'bot${index + 1}', nickname: 'AI 봇 ${index + 1}', isBot: true, isReady: true),
-      );
-
-  List<Player> get _allPlayers => [..._humanPlayers, ..._bots];
-
-  int _avatarIndexFor(String id) {
-    final pool = _participants.isNotEmpty ? _participants : _allPlayers;
-    final index = pool.indexWhere((p) => p.id == id);
-    return index == -1 ? 0 : index;
-  }
-
-  String _nicknameFor(String id) {
-    if (id == 'ai') return 'AI';
-    if (id == 'system') return '시스템';
-    final pool = _participants.isNotEmpty ? _participants : _allPlayers;
-    return pool.firstWhere((p) => p.id == id, orElse: () => Player(id: id, nickname: id)).nickname;
-  }
-
-  void _toggleReady(String playerId) {
-    if (_phase != _Phase.waiting) return;
-    final index = _humanPlayers.indexWhere((p) => p.id == playerId);
-    if (index == -1) return;
-    setState(() {
-      _humanPlayers[index] = _humanPlayers[index].copyWith(isReady: !_humanPlayers[index].isReady);
-    });
-  }
-
-  void _changeBotCount(int delta) {
-    if (_phase != _Phase.waiting) return;
-    // PLAN.md: 봇 수 자체엔 시스템상 상한이 없고, 사람+봇 합이 방 만들기 때 정한 maxPlayers를
-    // 넘을 수 없다는 것만 제약이다.
-    final maxBots = (widget.maxPlayers - _humanPlayers.length).clamp(0, widget.maxPlayers);
-    setState(() => _botCount = (_botCount + delta).clamp(0, maxBots));
-  }
-
-  // ─── 카테고리 설정 ─────────────────────────────────────────
-
-  List<String> get _availableCategories => [...mockCategories, ..._customCategories];
-
-  void _selectCategory(String category) {
-    if (!widget.isHost || _phase != _Phase.waiting) return;
-    setState(() => _selectedCategory = category);
-  }
-
-  void _addCustomCategory() {
-    final name = _customCategoryController.text.trim();
-    if (name.isEmpty || _availableCategories.contains(name)) return;
-    setState(() {
-      _customCategories.add(name);
-      _selectedCategory = name;
-      _customCategoryController.clear();
-    });
-  }
-
-  // ─── 시작 조건 ────────────────────────────────────────────
-
-  bool get _canStartGame =>
-      widget.isHost &&
-      _allPlayers.length >= 3 &&
-      _allPlayers.every((p) => p.isReady) &&
-      _selectedCategory != null;
-
-  /// 친구 초대는 방장이면서 회원(게스트가 아님)일 때만 가능하다 — 게스트는 친구 목록이
-  /// 아이디 기반이라 애초에 친구 기능 자체를 쓸 수 없다(로비의 게스트 친구 제한과 동일 규칙).
-  bool get _canInviteFriends => widget.isHost && !UserSession.isGuest;
-
-  // ─── 채팅 ────────────────────────────────────────────────
-
-  void _scrollToBottom() {
+  void _autoScroll() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
-  void _addSystemMessage(String text, {bool highlight = false}) {
-    _messages.add(ChatMessage(
-      id: 'sys-${_messages.length}-${DateTime.now().microsecondsSinceEpoch}',
-      senderId: 'system',
-      senderNickname: '시스템',
-      text: text,
-      type: ChatMessageType.system,
-      highlight: highlight,
-    ));
-    _scrollToBottom();
+  Future<void> _leave() async {
+    if (_leaving) return;
+    _leaving = true;
+    ref.read(roomProvider.notifier).leaveRoom();
+    if (mounted) Navigator.of(context).pop();
   }
 
-  void _addAiFlavorMessage(String text) {
-    _messages.add(ChatMessage(
-      id: 'ai-${_messages.length}-${DateTime.now().microsecondsSinceEpoch}',
-      senderId: 'ai',
-      senderNickname: 'AI',
-      text: text,
-      type: ChatMessageType.aiComment,
-    ));
-    _scrollToBottom();
-  }
-
-  void _addChatMessage(String senderId, String text, {ChatMessageType type = ChatMessageType.chat}) {
-    _messages.add(ChatMessage(
-      id: 'msg-${_messages.length}-${DateTime.now().microsecondsSinceEpoch}',
-      senderId: senderId,
-      senderNickname: _nicknameFor(senderId),
-      avatarIndex: _avatarIndexFor(senderId),
-      text: text,
-      type: type,
-    ));
-    _scrollToBottom();
-  }
-
-  bool get _isMyTurn =>
-      _currentTurnIndex < _turnOrder.length && _turnOrder[_currentTurnIndex] == 'me';
-
-  /// 설명 페이즈 중에는 현재 차례인 플레이어만 채팅(=설명)을 보낼 수 있다.
-  /// 그 외 페이즈(대기/전원설명완료)에서는 자유 채팅이 가능하다.
-  bool get _canChat {
-    switch (_phase) {
-      case _Phase.waiting:
-      case _Phase.allDone:
-        return true;
-      case _Phase.describing:
-        return _isMyTurn;
-      case _Phase.voting:
-      case _Phase.liarGuessWait:
-        return false;
-    }
-  }
-
-  void _sendMessage() {
+  void _sendChatOrDescription(RoomViewState s) {
     final text = _chatController.text.trim();
-    if (text.isEmpty || !_canChat) return;
-    _chatController.clear();
-    if (_phase == _Phase.describing) {
-      _submitTurnDescription('me', text);
+    if (text.isEmpty) return;
+    final notifier = ref.read(roomProvider.notifier);
+    if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
+      notifier.submitDescription(text);
     } else {
-      setState(() => _addChatMessage('me', text));
+      notifier.sendChat(text);
     }
+    _chatController.clear();
   }
 
-  // ─── 게임 시작 ────────────────────────────────────────────
+  // ── 방장 드래프트 반영 ──
+  void _pushDraft() {
+    final custom = _customCategoryController.text.trim();
+    final category = _aiRandom ? null : (custom.isNotEmpty ? custom : _selectedChip);
+    ref.read(roomProvider.notifier).updateDraftConfig(category: category, aiBotCount: _botCount);
+  }
 
   void _startGame() {
-    if (!_canStartGame) return;
-
-    // "랜덤생성"은 실제 카테고리가 아니라 "AI가 카테고리까지 생성"을 뜻한다(PLAN.md category: null 경로).
-    // 실제로 생성된 카테고리는 이 방의 카테고리 목록에 추가돼 이후엔 프리셋처럼 다시 고를 수 있다.
-    var category = _selectedCategory!;
-    final bool wasAiGenerated;
-    final List<(String, String)> pairPool;
-    if (category == kAiRandomCategory) {
-      final unusedCategories = mockAiGeneratedCategoryPool.keys.where((c) => !_availableCategories.contains(c)).toList();
-      final candidates = unusedCategories.isNotEmpty ? unusedCategories : mockAiGeneratedCategoryPool.keys.toList();
-      category = candidates[_random.nextInt(candidates.length)];
-      pairPool = mockAiGeneratedCategoryPool[category]!;
-      if (!_customCategories.contains(category)) {
-        _customCategories.add(category);
-      }
-      wasAiGenerated = true;
-    } else {
-      pairPool = mockWordPairsByCategory[category] ?? mockFallbackWordPairs;
-      wasAiGenerated = false;
-    }
-    final unused = pairPool.where((p) => !_usedWordPairs.contains('$category:${p.$1}')).toList();
-    final options = unused.isNotEmpty ? unused : pairPool;
-    final pair = options[_random.nextInt(options.length)];
-    _usedWordPairs.add('$category:${pair.$1}');
-
-    final participants = List.of(_allPlayers);
-    final liar = participants[_random.nextInt(participants.length)];
-    final order = participants.map((p) => p.id).toList()..shuffle(_random);
-
-    setState(() {
-      _messages.clear();
-      _participants = participants;
-      _realWord = pair.$1;
-      _liarWord = pair.$2;
-      _liarId = liar.id;
-      _turnOrder = order;
-      _currentTurnIndex = 0;
-      _votes.clear();
-      _votedOutId = null;
-      _phase = _Phase.describing;
-    });
-    // _messages.clear() 이후에 추가해야 안내 메시지가 지워지지 않는다.
-    if (wasAiGenerated) {
-      _addSystemMessage('🎲 AI가 카테고리를 생성했습니다: $category', highlight: true);
-    }
-    _addSystemMessage('🎮 게임이 시작되었습니다!', highlight: true);
-    final myWord = 'me' == liar.id ? pair.$2 : pair.$1;
-    setState(() {
-      _myWord = myWord;
-      _myWordExplanation = null;
-      _messages.add(ChatMessage(
-        id: 'myword',
-        senderId: 'system',
-        senderNickname: '시스템',
-        text: '🔑 당신의 제시어: $myWord',
-        type: ChatMessageType.system,
-      ));
-    });
-    _beginTurn();
+    final custom = _customCategoryController.text.trim();
+    final category = _aiRandom ? null : (custom.isNotEmpty ? custom : _selectedChip);
+    ref.read(roomProvider.notifier).configureGame(category: category, aiBotCount: _botCount);
   }
 
-  /// "AI 설명보기" 버튼. 낯선 제시어를 받았을 때 AI가 짧은 텍스트 설명을 생성해준다
-  /// (PLAN.md `explainWordIfUnfamiliar`, `round:yourWord` 대상). 라운드당 한 번만 호출한다.
-  Future<void> _explainMyWord() async {
-    if (_myWord == null || _isExplainingWord || _myWordExplanation != null) return;
-    setState(() => _isExplainingWord = true);
-    await Future.delayed(const Duration(milliseconds: 700));
-    if (!mounted) return;
-    setState(() {
-      _myWordExplanation = mockExplainWord(_myWord!);
-      _isExplainingWord = false;
-    });
-  }
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(roomProvider);
+    final myUid = _myUid;
 
-  // ─── 설명 페이즈 ──────────────────────────────────────────
-
-  void _beginTurn() {
-    if (_currentTurnIndex >= _turnOrder.length) {
-      _tickTimer?.cancel();
-      setState(() => _phase = _Phase.allDone);
-      _addSystemMessage('모든 플레이어가 설명했습니다. 투표를 해주세요', highlight: true);
-      // 전원 설명이 끝나면 잠시 후 투표창이 자동으로 열린다.
-      Timer(const Duration(milliseconds: 1200), () {
-        if (!mounted || _phase != _Phase.allDone) return;
-        _openVoteDialog();
-      });
-      return;
-    }
-    final playerId = _turnOrder[_currentTurnIndex];
-    setState(() => _secondsLeft = _turnSeconds);
-    _addSystemMessage('💬 ${_nicknameFor(playerId)}의 차례입니다.');
-    _startTick(onExpire: () => _submitTurnDescription(playerId, ''));
-
-    if (playerId != 'me') {
-      final delay = Duration(seconds: 1 + _random.nextInt(_turnSeconds - 2));
-      Timer(delay, () {
-        if (!mounted || _phase != _Phase.describing) return;
-        if (_currentTurnIndex >= _turnOrder.length || _turnOrder[_currentTurnIndex] != playerId) return;
-        _submitTurnDescription(playerId, _mockDescriptionFor(playerId));
-      });
-    }
-  }
-
-  String _mockDescriptionFor(String playerId) {
-    final word = playerId == _liarId ? _liarWord! : _realWord!;
-    return '이건 $word(이)랑 관련 있는 거예요.';
-  }
-
-  void _skipTurn() {
-    if (_currentTurnIndex >= _turnOrder.length) return;
-    _submitTurnDescription(_turnOrder[_currentTurnIndex], '');
-  }
-
-  void _submitTurnDescription(String playerId, String text) {
-    if (_phase != _Phase.describing) return;
-    if (_currentTurnIndex >= _turnOrder.length || _turnOrder[_currentTurnIndex] != playerId) return;
-    _tickTimer?.cancel();
-
-    final described = text.isNotEmpty;
-    setState(() {
-      if (described) {
-        _addChatMessage(playerId, text, type: ChatMessageType.turnDescription);
-      } else {
-        _addSystemMessage('${_nicknameFor(playerId)}님이 시간 안에 설명하지 못했습니다.');
+    // 방이 닫혔거나(방장 퇴장) 우리가 나간 경우 roomCode가 사라진다 → 로비로 복귀.
+    ref.listen<String?>(roomProvider.select((v) => v.roomCode), (prev, next) {
+      if (prev != null && next == null && mounted && !_leaving) {
+        Navigator.of(context).pop();
       }
     });
 
-    // AI 분탕 코멘트는 실제로 채팅(설명)을 친 경우에만 붙는다. 시간 초과로 건너뛴 턴에는 달지 않는다.
-    if (described) {
-      Timer(const Duration(milliseconds: 800), () {
-        if (!mounted || _phase != _Phase.describing) return;
-        setState(() {
-          final template = mockAiCommentTemplates[_random.nextInt(mockAiCommentTemplates.length)];
-          _addAiFlavorMessage(template.replaceAll('{nickname}', _nicknameFor(playerId)));
-        });
-        Timer(const Duration(milliseconds: 500), () {
-          if (!mounted || _phase != _Phase.describing) return;
-          setState(() => _currentTurnIndex++);
-          _beginTurn();
-        });
-      });
-    } else {
-      Timer(const Duration(milliseconds: 400), () {
-        if (!mounted || _phase != _Phase.describing) return;
-        setState(() => _currentTurnIndex++);
-        _beginTurn();
-      });
-    }
-  }
-
-  // ─── 투표 페이즈 ──────────────────────────────────────────
-
-  Future<void> _openVoteDialog() async {
-    setState(() {
-      _phase = _Phase.voting;
-      _votes.clear();
-    });
-    for (final p in _participants.where((p) => p.id != 'me')) {
-      final delay = Duration(seconds: 1 + _random.nextInt(4));
-      Timer(delay, () {
-        if (!mounted || _phase != _Phase.voting || _votes.containsKey(p.id)) return;
-        final candidates = _participants.where((c) => c.id != p.id).toList();
-        _votes[p.id] = candidates[_random.nextInt(candidates.length)].id;
-      });
+    if (s.chatLog.length != _lastChatLen) {
+      _lastChatLen = s.chatLog.length;
+      _autoScroll();
     }
 
-    final candidates = _participants.where((p) => p.id != 'me').toList();
-    String? selected;
+    final isHost = myUid != null && s.hostId == myUid;
 
-    await showPixelDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('💧 VOTE', style: PixelFont.title(fontSize: 16)),
-                const SizedBox(height: 12),
-                const Text('라이어를 지목하세요. 한 명만 선택할 수 있습니다.'),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: candidates.map((p) {
-                    final isSelected = selected == p.id;
-                    return GestureDetector(
-                      onTap: () => setDialogState(() => selected = p.id),
-                      child: Container(
-                        width: 84,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppColors.primary : AppColors.secondary,
-                          border: Border.all(color: isSelected ? AppColors.primaryBorder : AppColors.border, width: 2),
-                        ),
-                        child: Column(
-                          children: [
-                            UserAvatar(avatarIndex: _avatarIndexFor(p.id), radius: 20),
-                            const SizedBox(height: 6),
-                            Text(
-                              p.nickname,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isSelected ? Colors.white : AppColors.foreground,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppButton(
-                        label: '취소',
-                        variant: AppButtonVariant.outlined,
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: AppButton(
-                        label: '투표 확정',
-                        onPressed: selected == null
-                            ? null
-                            : () {
-                                _votes['me'] = selected!;
-                                Navigator.of(dialogContext).pop();
-                              },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
-        );
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
       },
-    );
-
-    if (!mounted) return;
-    if (!_votes.containsKey('me')) {
-      setState(() => _phase = _Phase.allDone);
-      return;
-    }
-    await Future.delayed(const Duration(milliseconds: 400));
-    if (!mounted) return;
-    _resolveVote();
-  }
-
-  void _resolveVote() {
-    final tally = <String, int>{};
-    for (final votedId in _votes.values) {
-      tally[votedId] = (tally[votedId] ?? 0) + 1;
-    }
-    String? votedOutId;
-    if (tally.isNotEmpty) {
-      final maxCount = tally.values.reduce(max);
-      final topChoices = tally.entries.where((e) => e.value == maxCount).map((e) => e.key).toList();
-      votedOutId = topChoices[_random.nextInt(topChoices.length)];
-    }
-    final wasLiar = votedOutId != null && votedOutId == _liarId;
-    setState(() => _votedOutId = votedOutId);
-
-    showPixelDialog(
-      context: context,
-      builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('👉', style: TextStyle(fontSize: 40)),
-            const SizedBox(height: 12),
-            Text(
-              votedOutId == null ? '아무도 지목되지 않았습니다' : '${_nicknameFor(votedOutId)}님이\n지목되었습니다!',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: wasLiar ? AppColors.destructive.withValues(alpha: 0.12) : AppColors.success.withValues(alpha: 0.12),
-                border: Border.all(color: wasLiar ? AppColors.destructive : AppColors.success),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    wasLiar ? '🎭 라이어 지목 성공!' : '🛡️ 라이어가 살아남았습니다',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    wasLiar
-                        ? '${_nicknameFor(votedOutId!)}는 라이어입니다. 제시어를 맞추면 라이어의 역전승! 틀리면 시민팀의 승리입니다.'
-                        : '${votedOutId != null ? _nicknameFor(votedOutId) : '지목된 사람'}는 라이어가 아니었습니다. 라이어의 승리로 게임이 종료됩니다.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (wasLiar && votedOutId == 'me')
-              _LiarGuessForm(
-                onSubmit: (guess) {
-                  Navigator.of(dialogContext).pop();
-                  _submitLiarGuess(guess);
-                },
-              )
-            else
-              AppButton(
-                label: '결과 확인 ➡',
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  if (wasLiar) {
-                    setState(() => _phase = _Phase.liarGuessWait);
-                    if (votedOutId != 'me') {
-                      Timer(Duration(seconds: 2 + _random.nextInt(3)), () {
-                        if (!mounted) return;
-                        final guess = _random.nextBool() ? _realWord! : '오답';
-                        _submitLiarGuess(guess);
-                      });
-                    }
-                  } else {
-                    _finishGame(winner: 'liar', liarGuess: null, liarGuessCorrect: null);
-                  }
-                },
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  // ─── 역전승 ──────────────────────────────────────────────
-
-  bool _isCorrectGuess(String guess) {
-    String normalize(String s) => s.trim().toLowerCase().replaceAll(' ', '');
-    final g = normalize(guess);
-    final real = normalize(_realWord!);
-    return g.isNotEmpty && (g == real || g.contains(real) || real.contains(g));
-  }
-
-  void _submitLiarGuess(String guess) {
-    final correct = _isCorrectGuess(guess);
-    _finishGame(winner: correct ? 'liar' : 'citizens', liarGuess: guess, liarGuessCorrect: correct);
-  }
-
-  // ─── 게임 종료 (결과 모달) ──────────────────────────────────
-
-  void _finishGame({required String winner, required String? liarGuess, required bool? liarGuessCorrect}) {
-    final citizensWin = winner == 'citizens';
-
-    // PLAN.md의 GamePlay 1행 추가에 해당 — 이 판 결과를 내 전적/XP에 반영한다(AI 봇은 대상 아님).
-    // liarGuessCorrect는 라이어의 역전승 시도가 실제로 있었을 때만 non-null이라, "역전승 성공"
-    // 보너스(+20 XP)는 내가 라이어이면서 그 시도가 성공했을 때만 붙는다.
-    final meWasLiar = _liarId == 'me';
-    final meWon = meWasLiar == !citizensWin;
-    final meComebackSuccess = meWasLiar && liarGuessCorrect == true;
-    UserSession.stats = UserSession.stats.recordGame(
-      won: meWon,
-      wasLiar: meWasLiar,
-      liarComebackSuccess: meComebackSuccess,
-    );
-
-    var countdown = 10;
-
-    showPixelDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            Timer(const Duration(seconds: 1), () {
-              if (countdown <= 1) {
-                if (Navigator.of(dialogContext, rootNavigator: false).canPop()) {
-                  Navigator.of(dialogContext).pop();
-                }
-                return;
-              }
-              setDialogState(() => countdown--);
-            });
-
-            return SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(citizensWin ? '🎉' : '😈', style: const TextStyle(fontSize: 48)),
-                  const SizedBox(height: 8),
-                  Text(
-                    citizensWin ? 'CITIZENS WIN!' : 'LIAR WINS!',
-                    style: PixelFont.title(fontSize: 16),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    citizensWin ? '🐾 시민팀의 승리!' : '🦊 라이어의 승리!',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _WordCard(label: '시민 제시어', word: _realWord!, color: AppColors.success),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _WordCard(label: '라이어 제시어', word: _liarWord!, color: AppColors.destructive),
-                      ),
-                    ],
-                  ),
-                  if (liarGuess != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border)),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('라이어의 역전승 시도', style: TextStyle(fontSize: 11, color: AppColors.mutedForeground)),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Text('"$liarGuess"', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: liarGuessCorrect! ? AppColors.success : AppColors.destructive,
-                                ),
-                                child: Text(
-                                  liarGuessCorrect ? '정답' : '오답',
-                                  style: const TextStyle(color: Colors.white, fontSize: 11),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  Text('라이어: ${_nicknameFor(_liarId!)} 🦊', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: _participants.map((p) {
-                      // PLAN.md 전적 모델은 점수가 아니라 승/패 bool만 기록한다(GamePlay.won).
-                      final won = (p.id == _liarId) == !citizensWin;
-                      return Container(
-                        width: 84,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: won ? AppColors.success.withValues(alpha: 0.15) : AppColors.destructive.withValues(alpha: 0.15),
-                          border: Border.all(color: won ? AppColors.success : AppColors.destructive),
-                        ),
-                        child: Column(
-                          children: [
-                            UserAvatar(avatarIndex: _avatarIndexFor(p.id), radius: 16),
-                            const SizedBox(height: 4),
-                            Text(p.nickname, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
-                            Text(
-                              won ? '승' : '패',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: won ? AppColors.success : AppColors.destructive,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('$countdown초 후 대기방으로 자동 이동합니다', style: TextStyle(fontSize: 12, color: AppColors.mutedForeground)),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppButton(
-                          label: '🔄 대기방으로',
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: AppButton(
-                          label: '로비 나가기',
-                          variant: AppButtonVariant.outlined,
-                          onPressed: () {
-                            Navigator.of(dialogContext).pop();
-                            // 방장이면 방이 사라진다는 걸 로비에 알린다(PLAN.md room:closed).
-                            Navigator.of(context).pop(widget.isHost);
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    ).then((_) {
-      if (!mounted) return;
-      _returnToWaiting();
-    });
-  }
-
-  void _returnToWaiting() {
-    setState(() {
-      _addSystemMessage('--------게임이 종료되었습니다.--------', highlight: true);
-      _phase = _Phase.waiting;
-      _myWord = null;
-      _myWordExplanation = null;
-      for (var i = 0; i < _humanPlayers.length; i++) {
-        _humanPlayers[i] = _humanPlayers[i].copyWith(isReady: false);
-      }
-    });
-  }
-
-  // ─── 타이머 ──────────────────────────────────────────────
-
-  void _startTick({required VoidCallback onExpire}) {
-    _tickTimer?.cancel();
-    _tickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_secondsLeft <= 1) {
-        timer.cancel();
-        setState(() => _secondsLeft = 0);
-        onExpire();
-        return;
-      }
-      setState(() => _secondsLeft--);
-    });
-  }
-
-  // ─── 친구 초대 (대기 상태 · 방장 전용) ───────────────────────
-
-  /// 친구 목록을 스크롤 가능한 박스(하단 시트)로 보여준다. 온라인인 친구만 초대할 수 있다.
-  void _openInviteFriendsSheet() {
-    if (!_canInviteFriends) return;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              Text('👥 친구 초대', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
-              const SizedBox(height: 4),
-              Text(
-                '온라인인 친구만 초대할 수 있어요',
-                style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
-              ),
-              const SizedBox(height: 12),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 340),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: mockFriends.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) => _buildFriendInviteRow(sheetContext, mockFriends[index]),
-                ),
-              ),
+              _header(s),
+              Expanded(child: _chatFeed(s)),
+              _contextPanel(s, isHost),
+              _inputBar(s),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Widget _buildFriendInviteRow(BuildContext sheetContext, MockFriend friend) {
-    final alreadyJoined = _humanPlayers.any((p) => p.nickname == friend.nickname);
-    final pending = _pendingFriendInvites.contains(friend.nickname);
-    final roomFull = _allPlayers.length >= widget.maxPlayers;
-    final canInvite = friend.isOnline && !alreadyJoined && !pending && !roomFull;
-
-    String? statusLabel;
-    if (alreadyJoined) {
-      statusLabel = '참여중';
-    } else if (pending) {
-      statusLabel = '응답 대기중';
-    } else if (!friend.isOnline) {
-      statusLabel = '오프라인';
-    } else if (roomFull) {
-      statusLabel = '방이 가득 참';
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
+  Widget _header(RoomViewState s) {
+    final emoji = (s.emoji?.isNotEmpty ?? false) ? s.emoji! : '🎮';
+    final title = (s.title?.isNotEmpty ?? false) ? s.title! : '방 ${s.roomCode ?? ''}';
+    return PixelBox(
+      margin: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              UserAvatar(avatarIndex: friend.avatarIndex, radius: 18),
-              // 온라인일 때만 초록 점 — 초대 가능 여부를 색으로도 바로 알 수 있게 한다.
-              if (friend.isOnline)
-                Positioned(
-                  right: -1,
-                  bottom: -1,
-                  child: Container(
-                    width: 11,
-                    height: 11,
-                    decoration: BoxDecoration(
-                      color: AppColors.success,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.card, width: 2),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          Text(emoji, style: const TextStyle(fontSize: 20)),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(friend.nickname, style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold)),
-                if (statusLabel != null)
-                  Text(statusLabel, style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
+                Text(title, style: PixelFont.title(fontSize: 11, color: AppColors.foreground)),
+                Text(
+                  '코드 ${s.roomCode ?? '----'} · ${s.players.length}명',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                ),
               ],
             ),
           ),
-          AppButton(
-            label: alreadyJoined ? '참여중' : (pending ? '대기중' : '초대'),
-            dense: true,
-            fullWidth: false,
-            variant: alreadyJoined ? AppButtonVariant.primary : AppButtonVariant.outlined,
-            onPressed: canInvite
-                ? () {
-                    Navigator.of(sheetContext).pop();
-                    _sendFriendInvite(friend);
-                  }
-                : null,
+          GestureDetector(
+            onTap: _leave,
+            child: const Icon(Icons.exit_to_app, color: AppColors.mutedForeground),
           ),
         ],
       ),
     );
   }
 
-  void _sendFriendInvite(MockFriend friend) {
-    setState(() => _pendingFriendInvites.add(friend.nickname));
-    _addSystemMessage('📨 ${friend.nickname}님에게 초대를 보냈습니다.');
-
-    // 초대장은 상대방 기기로 가는 것이지 나에게 오는 게 아니므로, 내 화면에 "초대 도착"
-    // 팝업을 띄우는 건 앞뒤가 안 맞는다(내가 보낸 초대의 알림을 내가 받는 꼴). 실제 서비스라면
-    // 상대방 기기에서 수락/거절이 일어나고 그 "결과"만 나에게 돌아오므로, 여기서도 상대방의
-    // 응답을 기다리는 동안(1.5~2.5초) 잠깐 대기했다가 결과만 채팅으로 알려준다.
-    // TODO(백엔드 연동): 실제로는 상대방의 room:inviteResponse 같은 이벤트 결과를 그대로 반영.
-    final delay = Duration(milliseconds: 1500 + _random.nextInt(1000));
-    Timer(delay, () {
-      if (!mounted) return;
-      final accepted = _random.nextDouble() < 0.75;
-      _resolveFriendInvite(friend, accepted: accepted);
-    });
-  }
-
-  void _resolveFriendInvite(MockFriend friend, {required bool accepted}) {
-    setState(() => _pendingFriendInvites.remove(friend.nickname));
-
-    if (!accepted) {
-      _addSystemMessage('${friend.nickname}님이 초대를 거절했습니다.');
-      return;
-    }
-    if (_allPlayers.length >= widget.maxPlayers) {
-      _addSystemMessage('${friend.nickname}님이 초대를 수락했지만 방이 가득 찼습니다.');
-      return;
-    }
-    setState(() {
-      _humanPlayers.add(Player(id: 'friend-${friend.nickname}', nickname: friend.nickname, isReady: true));
-      // 새로 합류한 사람만큼 봇 자리가 넘치면 정원에 맞게 줄인다.
-      final maxBots = (widget.maxPlayers - _humanPlayers.length).clamp(0, widget.maxPlayers);
-      if (_botCount > maxBots) _botCount = maxBots;
-    });
-    _addSystemMessage('🎉 ${friend.nickname}님이 초대를 수락하고 참여했습니다!', highlight: true);
-  }
-
-  // ─── 방 나가기 (대기 상태에서만 유효) ──────────────────────
-
-  Future<void> _handleLeaveRoom() async {
-    // PLAN.md room:closed 계약: 호스트가 나가면 방이 통째로 사라지고, 호스트가 아닌 인원의
-    // 퇴장은 방을 유지한 채 플레이어 목록만 갱신된다.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('방 나가기'),
-          content: Text(
-            widget.isHost ? '방장이 나가면 방이 사라집니다. 정말 나가시겠어요?' : '정말 이 방에서 나가시겠어요?',
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('취소')),
-            FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('나가기')),
-          ],
-        );
-      },
+  Widget _chatFeed(RoomViewState s) {
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      itemCount: s.chatLog.length,
+      itemBuilder: (_, i) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: ChatBubble(message: _displayMessage(s.chatLog[i], s)),
+      ),
     );
-    if (confirmed != true) return;
-    if (!mounted) return;
-    // 결과로 isHost를 돌려줘서 로비가 공개방 목록에서 이 방을 지울지 판단하게 한다.
-    Navigator.of(context).pop(widget.isHost);
   }
 
-  // ─── UI ──────────────────────────────────────────────────
+  /// 서버 메시지는 senderNickname/avatarIndex가 비어 있으므로 참가자 목록으로 해석해 채워 준다.
+  ChatMessage _displayMessage(ChatMessage m, RoomViewState s) {
+    final nickname = m.isAi ? 'AI' : (m.isSystem ? '시스템' : s.nicknameOf(m.senderId));
+    return ChatMessage(
+      id: m.id,
+      senderId: m.senderId,
+      senderNickname: nickname,
+      avatarIndex: _avatarIndexFor(m.senderId, s),
+      text: m.text,
+      type: m.type,
+      highlight: m.highlight,
+      timestamp: m.timestamp,
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final isWaiting = _phase == _Phase.waiting;
-    final isDesktop = context.isDesktop;
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 32,
-        titleSpacing: 8,
-        leadingWidth: 36,
-        iconTheme: const IconThemeData(size: 18),
-        title: Text(
-          isWaiting ? '🎮 레이니의 방' : '🎮 GAME',
-          style: PixelFont.body(fontSize: 11, color: AppColors.foreground, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          // 데스크탑에서는 나가기/초대 버튼이 좌측 내비게이션 바로 이동한다.
-          // 상단바를 최대한 얇게 유지하기 위해 픽셀 버튼 대신 컴팩트한 아이콘 버튼을 쓴다.
-          if (isWaiting && !isDesktop) ...[
-            // 친구 초대는 방장 전용 기능이고, 게스트는 친구 기능 자체를 쓸 수 없어 버튼을
-            // 표시하지 않는다.
-            if (_canInviteFriends)
-              TextButton.icon(
-                onPressed: _openInviteFriendsSheet,
-                icon: const Icon(Icons.group_add, size: 16, color: AppColors.foreground),
-                label: Text('초대', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            IconButton(
-              tooltip: '방 나가기',
-              onPressed: _handleLeaveRoom,
-              icon: const Icon(Icons.logout, size: 18),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            ),
-          ] else if (_phase == _Phase.describing)
+  int _avatarIndexFor(String id, RoomViewState s) {
+    final pool = s.participants.isNotEmpty ? s.participants : s.players;
+    final idx = pool.indexWhere((p) => p.id == id);
+    return idx == -1 ? 0 : idx;
+  }
+
+  // ── 페이즈별 하단 컨텍스트 패널 ──
+  Widget _contextPanel(RoomViewState s, bool isHost) {
+    switch (s.phase) {
+      case GamePhase.waiting:
+      case GamePhase.ended:
+        return _waitingPanel(s, isHost);
+      case GamePhase.describing:
+        return _describingPanel(s);
+      case GamePhase.discussion:
+        return _discussionPanel(s, isHost);
+      case GamePhase.voting:
+        return _votingPanel(s);
+      case GamePhase.resolution:
+        return _resolutionPanel(s);
+      case GamePhase.liarGuess:
+        return _liarGuessPanel(s);
+    }
+  }
+
+  Widget _panelBox({required Widget child}) => PixelBox(
+        margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+        padding: const EdgeInsets.all(12),
+        child: child,
+      );
+
+  Widget _waitingPanel(RoomViewState s, bool isHost) {
+    final myUid = _myUid;
+    final me = s.players.where((p) => p.id == myUid).cast<Player?>().firstWhere((_) => true, orElse: () => null);
+    final allReady = s.players.isNotEmpty && s.players.every((p) => p.isReady);
+    final botCount = isHost ? _botCount : s.draftAiBotCount;
+    final enough = s.players.length + botCount >= _minParticipants;
+    final canStart = isHost && allReady && enough;
+
+    final chipCategories = <String>[
+      ..._presetCategories,
+      ...s.customCategories.where((c) => !_presetCategories.contains(c)),
+    ];
+    final selectedChip = isHost ? _selectedChip : s.draftCategory;
+    final aiRandom = isHost ? _aiRandom : s.draftCategory == null;
+
+    return _panelBox(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (s.phase == GamePhase.ended)
             Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('$_secondsLeft', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary)),
-                  SizedBox(
-                    width: 60,
-                    child: LinearProgressIndicator(
-                      value: _secondsLeft / _turnSeconds,
-                      backgroundColor: AppColors.secondary,
-                      color: AppColors.primary,
-                      minHeight: 3,
-                    ),
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text('게임 종료 — 새 게임을 시작할 수 있어요',
+                  style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
             ),
-        ],
-      ),
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (isDesktop)
-              AppNavRail(
-                items: [
-                  if (isWaiting && _canInviteFriends)
-                    AppNavRailItem(icon: Icons.group_add, label: '초대', onTap: _openInviteFriendsSheet),
-                  if (isWaiting) AppNavRailItem(icon: Icons.logout, label: '나가기', onTap: _handleLeaveRoom),
-                ],
-              ),
-            Expanded(
-              child: ResponsiveCenter(
-                maxWidth: 1000,
-                padding: EdgeInsets.fromLTRB(16, isDesktop ? 12 : 6, 16, isDesktop ? 8 : 4),
-                child: isDesktop
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(width: 200, child: _buildPlayerSidebar(context)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _buildMainArea(context)),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // 게임이 시작되면(대기 상태가 아니면) 상단 플레이어 스트립은 숨기고
-                          // 채팅/설명 영역에 공간을 더 준다. 현재 차례 안내는 본문 상단에 남아있다.
-                          if (isWaiting) ...[
-                            _buildPlayerRow(context),
-                            const SizedBox(height: 4),
-                          ],
-                          Expanded(child: _buildMainArea(context)),
-                        ],
-                      ),
-              ),
+          // 참가자 준비 상태
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: s.players
+                .map((p) => Chip(
+                      avatar: Icon(p.isReady ? Icons.check_circle : Icons.hourglass_empty,
+                          size: 14, color: p.isReady ? AppColors.success : AppColors.mutedForeground),
+                      label: Text('${p.nickname}${p.id == s.hostId ? ' 👑' : ''}',
+                          style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+                    ))
+                .toList(),
+          ),
+          const SizedBox(height: 8),
+          if (me != null)
+            AppButton(
+              label: me.isReady ? '준비 완료 ✓' : '준비하기',
+              variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+              dense: true,
+              onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
             ),
+          if (isHost) ...[
+            const SizedBox(height: 10),
+            Text('AI 봇 수: $botCount', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: () {
+                    setState(() => _botCount = (_botCount - 1).clamp(0, 8));
+                    _pushDraft();
+                  },
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+                Text('$_botCount', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+                IconButton(
+                  onPressed: () {
+                    setState(() => _botCount = (_botCount + 1).clamp(0, 8));
+                    _pushDraft();
+                  },
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+            Text('카테고리', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: chipCategories.map((c) {
+                return ChoiceChip(
+                  label: Text(c, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+                  selected: !aiRandom && c == selectedChip,
+                  onSelected: (_) {
+                    setState(() {
+                      _aiRandom = false;
+                      _selectedChip = c;
+                      _customCategoryController.clear();
+                    });
+                    _pushDraft();
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 6),
+            AppTextField(
+              controller: _customCategoryController,
+              hintText: '직접 입력',
+              onChanged: (v) {
+                setState(() {
+                  if (v.trim().isNotEmpty) {
+                    _selectedChip = null;
+                    _aiRandom = false;
+                  }
+                });
+                _pushDraft();
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('AI 랜덤 생성', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+              value: aiRandom,
+              onChanged: (v) {
+                setState(() => _aiRandom = v);
+                _pushDraft();
+              },
+            ),
+            const SizedBox(height: 6),
+            if (!allReady)
+              Text('모든 참가자가 준비 완료해야 시작할 수 있어요.',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground))
+            else if (!enough)
+              Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            const SizedBox(height: 6),
+            AppButton(label: '게임 시작 ▶', onPressed: canStart ? _startGame : null),
+          ] else ...[
+            const SizedBox(height: 8),
+            Text('방장이 게임을 시작하길 기다리는 중...',
+                style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildPlayerSidebar(BuildContext context) {
+  Widget _myWordCard(RoomViewState s) {
+    if (s.myWord == null) return const SizedBox.shrink();
     return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
+      decoration: BoxDecoration(
+        color: AppColors.secondary,
+        border: Border.all(color: AppColors.border, width: 2),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'PLAYERS (${_allPlayers.length}/${widget.maxPlayers})',
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground),
+          Text('내 제시어', style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
+          Text(s.myWord!, style: PixelFont.title(fontSize: 14, color: AppColors.primary)),
+          if (s.myWordExplanation != null) ...[
+            const SizedBox(height: 4),
+            Text(s.myWordExplanation!, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _describingPanel(RoomViewState s) {
+    final myTurn = s.isMyTurn(_myUid);
+    final turnNick = s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!);
+    return _panelBox(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _myWordCard(s),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
+                  style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              if (s.phaseDeadline != null)
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
+                ),
+            ],
           ),
-          const SizedBox(height: 8),
-          ..._allPlayers.asMap().entries.map((entry) {
-            final player = entry.value;
-            final isCurrentTurn = _phase == _Phase.describing &&
-                _currentTurnIndex < _turnOrder.length &&
-                _turnOrder[_currentTurnIndex] == player.id;
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: GestureDetector(
-                onTap: player.id == 'me' ? () => _toggleReady('me') : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : null,
-                    border: isCurrentTurn ? Border.all(color: AppColors.primary) : null,
-                  ),
+        ],
+      ),
+    );
+  }
+
+  Widget _discussionPanel(RoomViewState s, bool isHost) {
+    return _panelBox(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _myWordCard(s),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('자유 토론 중',
+                  style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+              if (s.phaseDeadline != null)
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
+                ),
+            ],
+          ),
+          if (isHost) ...[
+            const SizedBox(height: 8),
+            AppButton(
+              label: '투표로 넘어가기',
+              variant: AppButtonVariant.outlined,
+              dense: true,
+              onPressed: () => ref.read(roomProvider.notifier).skipDiscussion(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _votingPanel(RoomViewState s) {
+    final myUid = _myUid;
+    final candidates = s.participants.where((p) => p.id != myUid).toList();
+    return _panelBox(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('라이어를 투표하세요',
+                  style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
+              if (s.phaseDeadline != null)
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
+                ),
+            ],
+          ),
+          if (s.votesInCount != null && s.totalVoteCount != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('투표 ${s.votesInCount}/${s.totalVoteCount}',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: candidates.map((p) {
+              return GestureDetector(
+                onTap: () => ref.read(roomProvider.notifier).castVote(p.id),
+                child: PixelBox(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      player.isBot
-                          ? const Icon(Icons.smart_toy, size: 22, color: AppColors.mutedForeground)
-                          : UserAvatar(avatarIndex: entry.key, radius: 12),
+                      UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 10),
                       const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          player.nickname,
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (_phase == _Phase.waiting)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: player.isReady ? AppColors.success : AppColors.secondary,
-                          ),
-                          child: Text(
-                            player.isReady ? '준비' : '대기',
-                            style: TextStyle(fontSize: 9, color: player.isReady ? Colors.white : AppColors.mutedForeground),
-                          ),
-                        )
-                      else if (player.isHost)
-                        const Text('🦊', style: TextStyle(fontSize: 12)),
+                      Text(p.nickname, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
                     ],
                   ),
                 ),
-              ),
-            );
-          }),
+              );
+            }).toList(),
+          ),
         ],
       ),
     );
   }
 
-  /// 모바일에서는 플레이어 목록을 좌측 세로 사이드바 대신 상단 가로 스크롤 스트립으로 보여준다.
-  /// 채팅 영역을 최대한 넓게 쓰도록 가능한 한 얇게 표시한다.
-  Widget _buildPlayerRow(BuildContext context) {
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: _allPlayers.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 6),
-        itemBuilder: (context, index) => _buildPlayerChip(context, index),
+  Widget _resolutionPanel(RoomViewState s) {
+    final r = s.roundResolved;
+    final result = s.finalResult;
+    return _panelBox(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('투표 결과', style: PixelFont.title(fontSize: 12, color: AppColors.primary)),
+          const SizedBox(height: 6),
+          if (r != null) ...[
+            Text(
+              r.votedOutId == null
+                  ? '지목된 사람이 없습니다.'
+                  : '${s.nicknameOf(r.votedOutId!)}님이 지목됨 — ${r.wasLiar ? '라이어였습니다!' : '라이어가 아니었습니다.'}',
+              style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
+            ),
+            const SizedBox(height: 4),
+            Text('진짜: ${r.realWord} / 라이어: ${r.liarWord}',
+                style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+          ],
+          if (result != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              result.winner == 'citizens' ? '🎉 시민 팀 승리!' : '😈 라이어 팀 승리!',
+              style: PixelFont.title(fontSize: 13, color: AppColors.primary),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text('결과를 확인하는 중... 잠시 후 대기방으로 돌아갑니다.',
+              style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+        ],
       ),
     );
   }
 
-  Widget _buildPlayerChip(BuildContext context, int index) {
-    final player = _allPlayers[index];
-    final isCurrentTurn = _phase == _Phase.describing &&
-        _currentTurnIndex < _turnOrder.length &&
-        _turnOrder[_currentTurnIndex] == player.id;
-    return GestureDetector(
-      onTap: player.id == 'me' ? () => _toggleReady('me') : null,
-      child: Container(
-        width: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        decoration: BoxDecoration(
-          color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.1) : null,
-          border: isCurrentTurn ? Border.all(color: AppColors.primary.withValues(alpha: 0.33)) : null,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            player.isBot
-                ? Container(
-                    width: 20,
-                    height: 20,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border, width: 1.5)),
-                    child: const Icon(Icons.smart_toy, size: 12, color: AppColors.mutedForeground),
-                  )
-                : UserAvatar(avatarIndex: index, radius: 10),
-            const SizedBox(height: 1),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 40),
-              child: Text(
-                player.nickname,
-                style: PixelFont.body(fontSize: 8, color: AppColors.foreground, height: 1.0),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            ),
-            if (_phase == _Phase.waiting)
-              Text(
-                player.isReady ? '✓준비' : '대기',
-                style: PixelFont.body(
-                  fontSize: 7,
-                  height: 1.0,
-                  color: player.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText,
-                ),
-              )
-            else if (player.isHost)
-              const Text('🦊', style: TextStyle(fontSize: 8, height: 1.0)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMainArea(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_phase == _Phase.describing)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text('NOW TURN', style: TextStyle(fontSize: 10, color: AppColors.mutedForeground)),
-          )
-        else if (_phase == _Phase.allDone)
-          Container(
-            margin: const EdgeInsets.only(bottom: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            color: AppColors.primary,
-            child: const Text('ALL DONE!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-          ),
-        if (_myWord != null) _buildWordHelper(context),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
-            child: ListView.builder(
-              controller: _scrollController,
-              itemCount: _messages.length,
-              itemBuilder: (context, index) => ChatBubble(message: _messages[index]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        _buildBottomBar(context),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: Opacity(
-                opacity: _canChat ? 1 : 0.5,
-                child: AppTextField(
-                  controller: _chatController,
-                  hintText: _canChat
-                      ? (_phase == _Phase.describing ? '설명을 입력하세요...' : '대기방 채팅...')
-                      : (_phase == _Phase.describing ? '지금은 당신의 차례가 아닙니다' : '지금은 채팅할 수 없습니다'),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(onPressed: _canChat ? _sendMessage : null, icon: const Icon(Icons.send)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// 제시어가 낯설 때 누르는 "AI 설명보기" 버튼과, 누른 뒤 나오는 설명 박스.
-  Widget _buildWordHelper(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: _myWordExplanation != null
-          ? Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border)),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('💡', style: TextStyle(fontSize: 13)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      _myWordExplanation!,
-                      style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : Align(
-              alignment: Alignment.centerLeft,
-              child: GestureDetector(
-                onTap: _isExplainingWord ? null : _explainMyWord,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-                  child: Text(
-                    _isExplainingWord ? '🤖 생각 중...' : '🤖 이 단어가 낯설다면? AI 설명보기',
-                    style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _buildBottomBar(BuildContext context) {
-    switch (_phase) {
-      case _Phase.waiting:
-        return _buildWaitingBar(context);
-      case _Phase.describing:
-        return Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${_nicknameFor(_turnOrder[_currentTurnIndex])}이(가) 설명 중입니다...',
-                style: TextStyle(fontSize: 12, color: AppColors.mutedForeground),
-              ),
-            ),
-            if (widget.isHost) AppButton(label: '다음 차례 ▶', fullWidth: false, onPressed: _skipTurn),
-          ],
-        );
-      case _Phase.allDone:
-        return Row(
-          children: [
-            const Expanded(child: Text('모든 플레이어가 설명했습니다.', style: TextStyle(fontSize: 12))),
-            AppButton(label: '투표 시작', fullWidth: false, onPressed: _openVoteDialog),
-          ],
-        );
-      case _Phase.voting:
-        return const Text('투표 진행 중...', style: TextStyle(fontSize: 12));
-      case _Phase.liarGuessWait:
-        return Text(
-          '${_votedOutId != null ? _nicknameFor(_votedOutId!) : ''}님이 역전승에 도전 중입니다...',
-          style: const TextStyle(fontSize: 12),
-        );
+  Widget _liarGuessPanel(RoomViewState s) {
+    final isMe = s.liarGuessTimeLimitSec != null;
+    if (!isMe) {
+      return _panelBox(
+        child: Text('라이어가 진짜 제시어를 맞히는 중...',
+            style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+      );
     }
+    final guessController = TextEditingController();
+    return _panelBox(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('역전 기회! 진짜 제시어를 맞히세요',
+                  style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
+              if (s.phaseDeadline != null)
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          AppTextField(controller: guessController, hintText: '진짜 제시어'),
+          const SizedBox(height: 6),
+          AppButton(
+            label: '제출',
+            dense: true,
+            onPressed: () {
+              final g = guessController.text.trim();
+              if (g.isNotEmpty) ref.read(roomProvider.notifier).guessWord(g);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildWaitingBar(BuildContext context) {
-    final me = _humanPlayers.firstWhere((p) => p.id == 'me');
-    // 데스크탑(웹)은 마우스로 클릭하는 넓은 화면이라 모바일용 컴팩트 크기로는 너무 작다.
-    // 화면 폭에 따라 스테퍼/라벨/버튼 크기를 키운다.
-    final isDesktop = context.isDesktop;
-    final stepperSize = isDesktop ? 40.0 : 26.0;
-    final stepperIconSize = isDesktop ? 20.0 : 14.0;
-
-    final categoryBox = Container(
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: isDesktop ? 12 : 9),
-      decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+  Widget _inputBar(RoomViewState s) {
+    // 대기/종료 페이즈엔 하단 컨텍스트 패널에 컨트롤이 있으니 자유 채팅만 노출.
+    final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
+    final hint = describingMyTurn ? '제시어 설명 입력...' : '메시지 입력...';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              '$_selectedCategory',
-              style: PixelFont.body(fontSize: isDesktop ? 14 : 12, color: AppColors.foreground),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+            child: AppTextField(
+              controller: _chatController,
+              hintText: hint,
+              onSubmitted: (_) => _sendChatOrDescription(s),
             ),
           ),
-          if (widget.isHost) ...[
-            const SizedBox(width: 2),
-            Icon(Icons.expand_more, size: isDesktop ? 18 : 14, color: AppColors.mutedForeground),
-          ],
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _sendChatOrDescription(s),
+            child: PixelBox(
+              padding: const EdgeInsets.all(10),
+              color: AppColors.primary,
+              child: const Icon(Icons.send, size: 18, color: AppColors.primaryForeground),
+            ),
+          ),
         ],
       ),
-    );
-
-    return Row(
-      children: [
-        // 남는 공간을 전부 카테고리 박스에 줘서(뒤 요소는 고정 크기) AI봇 스테퍼와
-        // 비슷한 높이로 커지고 글자도 잘리지 않게 한다. Spacer와 함께 쓰면 여유 공간을
-        // 반씩 나눠 가져 카테고리 글자가 잘리므로 여기서는 Spacer를 쓰지 않는다.
-        // 방장이 아니면 카테고리는 탭할 수 없는 단순 표시로만 보여준다.
-        Expanded(
-          child: widget.isHost ? GestureDetector(onTap: _openCategoryPicker, child: categoryBox) : categoryBox,
-        ),
-        // AI봇 수 조절(+/-)은 방장 전용이지만, 몇 명이 있는지는 참가자 모두에게 보여준다.
-        SizedBox(width: isDesktop ? 10 : 6),
-        Text('AI봇', style: PixelFont.body(fontSize: isDesktop ? 13 : 10, color: AppColors.mutedForeground)),
-        SizedBox(width: isDesktop ? 6 : 4),
-        if (widget.isHost) ...[
-          Container(
-            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: () => _changeBotCount(-1),
-                  icon: Icon(Icons.remove, size: stepperIconSize),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(minWidth: stepperSize, minHeight: stepperSize),
-                ),
-                SizedBox(
-                  width: isDesktop ? 22 : 14,
-                  child: Text(
-                    '$_botCount',
-                    textAlign: TextAlign.center,
-                    style: PixelFont.body(fontSize: isDesktop ? 15 : 11),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => _changeBotCount(1),
-                  icon: Icon(Icons.add, size: stepperIconSize),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(minWidth: stepperSize, minHeight: stepperSize),
-                ),
-              ],
-            ),
-          ),
-        ] else
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: isDesktop ? 10 : 8, vertical: isDesktop ? 10 : 7),
-            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-            child: Text(
-              '$_botCount',
-              style: PixelFont.body(fontSize: isDesktop ? 15 : 11, color: AppColors.foreground),
-            ),
-          ),
-        SizedBox(width: isDesktop ? 10 : 6),
-        if (widget.isHost)
-          AppButton(
-            label: '▶ 시작',
-            fullWidth: false,
-            dense: !isDesktop,
-            onPressed: _canStartGame ? _startGame : null,
-          )
-        else
-          AppButton(
-            label: me.isReady ? '✓준비완료' : '준비하기',
-            fullWidth: false,
-            dense: !isDesktop,
-            variant: me.isReady ? AppButtonVariant.primary : AppButtonVariant.outlined,
-            onPressed: () => _toggleReady('me'),
-          ),
-      ],
-    );
-  }
-
-  /// 카테고리는 목록을 항상 펼쳐두지 않고, 이 버튼을 눌러야 세부 선택지가 담긴
-  /// 하단 시트가 열린다(디자인 시안 기준).
-  Future<void> _openCategoryPicker() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.background,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  Text('카테고리 선택', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _availableCategories.map((category) {
-                      final selected = category == _selectedCategory;
-                      return GestureDetector(
-                        onTap: () {
-                          _selectCategory(category);
-                          setSheetState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: selected ? AppColors.primary : AppColors.secondary,
-                            border: Border.all(color: selected ? AppColors.primaryBorder : AppColors.border),
-                          ),
-                          child: Text(
-                            category,
-                            style: PixelFont.body(
-                              fontSize: 12,
-                              color: selected ? Colors.white : AppColors.foreground,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  AppTextField(
-                    controller: _customCategoryController,
-                    hintText: '카테고리 직접 입력...',
-                    onSubmitted: (_) {
-                      _addCustomCategory();
-                      setSheetState(() {});
-                    },
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _WordCard extends StatelessWidget {
-  final String label;
-  final String word;
-  final Color color;
-
-  const _WordCard({required this.label, required this.word, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), border: Border.all(color: color)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(fontSize: 10, color: AppColors.mutedForeground)),
-          const SizedBox(height: 4),
-          Text(word, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        ],
-      ),
-    );
-  }
-}
-
-class _LiarGuessForm extends StatefulWidget {
-  final ValueChanged<String> onSubmit;
-
-  const _LiarGuessForm({required this.onSubmit});
-
-  @override
-  State<_LiarGuessForm> createState() => _LiarGuessFormState();
-}
-
-class _LiarGuessFormState extends State<_LiarGuessForm> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('제시어 입력', style: TextStyle(fontSize: 11, color: AppColors.mutedForeground)),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: AppTextField(
-                controller: _controller,
-                hintText: '제시어를 입력하세요...',
-                onSubmitted: widget.onSubmit,
-              ),
-            ),
-            const SizedBox(width: 8),
-            AppButton(label: '제출', fullWidth: false, onPressed: () => widget.onSubmit(_controller.text.trim())),
-          ],
-        ),
-      ],
     );
   }
 }

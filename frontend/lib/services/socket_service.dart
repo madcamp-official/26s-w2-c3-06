@@ -141,12 +141,21 @@ class SocketService {
     required String nickname,
     required String visibility,
     required int maxPlayers,
+    String? title,
+    String? emoji,
   }) {
     _socket?.emit('room:create', {
       'nickname': nickname,
       'visibility': visibility,
       'maxPlayers': maxPlayers,
+      if (title != null) 'title': title,
+      if (emoji != null) 'emoji': emoji,
     });
+  }
+
+  /// 현재 방으로 친구를 초대한다(방장/참가자 공용). 대상이 온라인이면 room:invited를 받는다.
+  void inviteFriend(String toUid) {
+    _socket?.emit('friend:invite', {'toUid': toUid});
   }
 
   void listPublicRooms() {
@@ -249,6 +258,8 @@ class DraftConfig {
 class RoomSnapshot {
   final String roomCode;
   final String hostId;
+  final String title;
+  final String emoji;
   final String visibility;
   final List<Player> players;
 
@@ -259,6 +270,8 @@ class RoomSnapshot {
   const RoomSnapshot({
     required this.roomCode,
     required this.hostId,
+    this.title = '',
+    this.emoji = '🎮',
     required this.visibility,
     required this.players,
     required this.customCategories,
@@ -269,6 +282,8 @@ class RoomSnapshot {
     return RoomSnapshot(
       roomCode: json['roomCode'] as String,
       hostId: json['hostId'] as String,
+      title: (json['title'] as String?) ?? '',
+      emoji: (json['emoji'] as String?) ?? '🎮',
       visibility: json['visibility'] as String,
       players: (json['players'] as List)
           .map((e) => Player.fromJson(e as Map<String, dynamic>))
@@ -285,6 +300,8 @@ class RoomSnapshot {
 class RoomRejoinedSnapshot {
   final String roomCode;
   final String hostId;
+  final String title;
+  final String emoji;
   final String visibility;
   final List<Player> players;
   final List<String> customCategories;
@@ -295,6 +312,8 @@ class RoomRejoinedSnapshot {
   const RoomRejoinedSnapshot({
     required this.roomCode,
     required this.hostId,
+    this.title = '',
+    this.emoji = '🎮',
     required this.visibility,
     required this.players,
     required this.customCategories,
@@ -307,6 +326,8 @@ class RoomRejoinedSnapshot {
     return RoomRejoinedSnapshot(
       roomCode: json['roomCode'] as String,
       hostId: json['hostId'] as String,
+      title: (json['title'] as String?) ?? '',
+      emoji: (json['emoji'] as String?) ?? '🎮',
       visibility: json['visibility'] as String,
       players: (json['players'] as List)
           .map((e) => Player.fromJson(e as Map<String, dynamic>))

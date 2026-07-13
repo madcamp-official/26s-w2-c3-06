@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api/backend_api.dart';
 import '../services/auth_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService.instance);
@@ -37,3 +38,18 @@ class AvatarUrlNotifier extends Notifier<String?> {
 
 /// 업로드한 프로필 사진의 Firebase Storage 다운로드 URL. null이면 기본 아이콘을 쓴다.
 final avatarUrlProvider = NotifierProvider<AvatarUrlNotifier, String?>(AvatarUrlNotifier.new);
+
+/// 내 전적(서버 파생 — GET /api/users/me). 게임 종료 후 로비로 돌아오면 invalidate로 재조회한다.
+final myStatsProvider = FutureProvider.autoDispose<UserStats>((ref) {
+  return BackendApi.instance.getMyStats();
+});
+
+/// 받은 친구 요청 수(로비 친구 배지용). 실패 시 0으로 취급.
+final pendingFriendRequestCountProvider = FutureProvider.autoDispose<int>((ref) async {
+  try {
+    final reqs = await BackendApi.instance.getPendingFriendRequests();
+    return reqs.length;
+  } catch (_) {
+    return 0;
+  }
+});
