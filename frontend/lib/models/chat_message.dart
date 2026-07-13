@@ -16,6 +16,10 @@ class ChatMessage {
   final ChatMessageType type;
   final DateTime timestamp;
 
+  /// 게임 시작/종료처럼 특별히 눈에 띄어야 하는 시스템 안내 메시지인지. 서버 계약(`type`)과는
+  /// 별개로 클라이언트 표시용으로만 쓰는 필드다.
+  final bool highlight;
+
   ChatMessage({
     required this.id,
     required this.senderId,
@@ -23,6 +27,7 @@ class ChatMessage {
     this.avatarIndex = 0,
     required this.text,
     this.type = ChatMessageType.chat,
+    this.highlight = false,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 }

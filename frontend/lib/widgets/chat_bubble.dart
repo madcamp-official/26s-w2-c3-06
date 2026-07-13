@@ -26,18 +26,32 @@ class ChatBubble extends StatelessWidget {
   }
 
   Widget _buildSystemPill(BuildContext context) {
+    // 게임 시작/종료 같은 주요 안내는 진한 배지로 강조하고, 입장/차례/시간초과 같은
+    // 일상적인 안내는 테두리·배경 없이 옅은 글자로만 표시해 더 뒤로 물러나 보이게 한다.
+    final highlight = message.highlight;
+    if (!highlight) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Center(
+          child: Text(
+            message.text,
+            style: TextStyle(fontSize: 10, color: AppColors.mutedForeground.withValues(alpha: 0.6)),
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Center(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            color: AppColors.accent,
-            border: Border.all(color: AppColors.border),
+            color: AppColors.primary,
+            border: Border.all(color: AppColors.primaryBorder),
           ),
           child: Text(
             message.text,
-            style: const TextStyle(fontSize: 11, color: AppColors.mutedForeground),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
           ),
         ),
       ),
