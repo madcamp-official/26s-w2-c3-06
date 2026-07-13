@@ -114,16 +114,11 @@ interface Player {
 }
 // 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
+// 설명 한 바퀴. 설명 순서는 게임 단위로 고정이고 투표는 게임당 한 번뿐이므로,
+// 순서·투표·판정 결과는 Round가 아니라 GameState에 둔다. Round는 그 바퀴의 설명(turns)만 담는다.
 interface Round {
   roundNumber: number;
-  playerOrder: string[];
   turns: { playerId: string; text: string }[];
-  votes: Record<string, string>;   // 서버 전용, 클라이언트로 절대 전송 안 함
-  votedOutId?: string;
-  wasLiar?: boolean;
-  liarGuess?: string;
-  liarGuessCorrect?: boolean;
-  winner?: 'liar' | 'citizens';
 }
 
 interface GameState {
@@ -135,8 +130,17 @@ interface GameState {
   participantIds: string[];     // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
   aiBotCount: number;
   phase: 'setup'|'describing'|'discussion'|'voting'|'resolution'|'liarGuess'|'ended';
+  playerOrder: string[];         // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
   usedWordsThisGame: string[];
-  rounds: Round[];               // MVP: 길이 1. 추후 스트레치: 라운드 재시작 지원 시 길이 증가
+  rounds: Round[];               // 설명 라운드들. MVP: 길이 1. 추후 스트레치: 다중 설명 라운드 지원 시 증가
+
+  // 투표·판정은 게임당 한 번(모든 설명 라운드 종료 후). 라운드가 아니라 게임에 귀속된다.
+  votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
+  votedOutId?: string;
+  wasLiar?: boolean;
+  liarGuess?: string;
+  liarGuessCorrect?: boolean;
+  winner?: 'liar' | 'citizens';
 }
 
 interface ChatMessage {
