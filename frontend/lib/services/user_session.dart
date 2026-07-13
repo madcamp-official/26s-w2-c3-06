@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../models/user_stats.dart';
+
 /// 로그인에 사용한 방식. 이메일 가입 계정만 비밀번호 변경이 가능하다(PLAN.md 결정).
 enum AuthProvider { guest, email, google }
 
@@ -16,12 +18,17 @@ class UserSession {
   /// 실제로 첨부한 프로필 사진. null이면 [avatarIndex] 기반 기본 아이콘을 대신 보여준다.
   static Uint8List? profileImageBytes;
 
+  /// 내 전적(승률/레벨). 로비에 표시된다(PLAN.md "로비 — 내 승률·레벨·프로필 사진 표시").
+  static UserStats stats = UserStats.guest;
+
   static void signInAsGuest(String guestNickname) {
     nickname = guestNickname;
     isGuest = true;
     avatarIndex = 0;
     authProvider = AuthProvider.guest;
     profileImageBytes = null;
+    // 신규 게스트는 아직 한 판도 하지 않은 상태로 시작한다.
+    stats = UserStats.guest;
   }
 
   static void signInAsMember({required String nickname, AuthProvider provider = AuthProvider.email}) {
@@ -30,5 +37,6 @@ class UserSession {
     avatarIndex = 0;
     authProvider = provider;
     profileImageBytes = null;
+    stats = UserStats.mockMember;
   }
 }
