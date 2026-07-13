@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
@@ -67,8 +69,44 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
     setState(() {});
   }
 
-  void _joinAndEnter(String code) {
+  /// room:join을 보낸 뒤 서버 응답(room:joined 또는 room:error)이 올 때까지 기다린다.
+  /// 성공하면 null, 실패하면 에러 메시지를 반환한다(존재하지 않는 방 코드 등으로 join이
+  /// 실패했는데도 무작정 RoomScreen으로 들어가버리는 걸 막기 위함). 서버가 5초 안에 아무
+  /// 응답도 안 주는 극단적인 경우엔 타임아웃으로 실패 취급한다.
+  Future<String?> _awaitJoinResult() async {
+    final completer = Completer<String?>();
+    final roomCodeSub = ref.listenManual<String?>(
+      roomProvider.select((s) => s.roomCode),
+      (prev, next) {
+        if (prev == null && next != null && !completer.isCompleted) {
+          completer.complete(null);
+        }
+      },
+    );
+    final errorSub = ref.listenManual<AsyncValue<String>>(roomErrorProvider, (prev, next) {
+      next.whenData((message) {
+        if (!completer.isCompleted) completer.complete(message);
+      });
+    });
+    final result = await Future.any([
+      completer.future,
+      Future.delayed(const Duration(seconds: 5), () => '응답이 없습니다. 다시 시도해주세요.'),
+    ]);
+    roomCodeSub.close();
+    errorSub.close();
+    return result;
+  }
+
+  Future<void> _joinAndEnter(String code) async {
     ref.read(roomProvider.notifier).joinRoom(roomCode: code, nickname: UserSession.nickname);
+    final error = await _awaitJoinResult();
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
     _enterRoom();
   }
 
