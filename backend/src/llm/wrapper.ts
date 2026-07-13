@@ -11,6 +11,7 @@ import {
 } from './prompts';
 import type { BotTurnContext, TurnCommentContext } from '../types';
 import { mockLLM } from './mock';
+import { isFuzzyMatch } from './textMatch';
 
 // PLAN "LLM 래퍼" 인터페이스. provider/모델을 나중에 쉽게 바꿀 수 있도록 얇게만 감싼다.
 export interface LiarGameLLM {
@@ -113,6 +114,11 @@ const realLLM: LiarGameLLM = {
   },
 
   async judgeLiarGuess(guess, realWord) {
+    // "펜싱"을 "팬싱"으로 쓰는 등 사소한 오타는 LLM이 지침을 줘도 가끔 너무 엄격하게 오답
+    // 처리하는 경우가 있어, 편집 거리 기반 결정적 체크를 먼저 하고 통과하면 LLM 호출 없이
+    // 바로 정답 처리한다. 이 체크를 통과 못 하면(의미는 같지만 표기가 많이 다른 경우,
+    // 예: "burger"/"버거") 기존처럼 LLM에게 의미 판단을 맡긴다.
+    if (isFuzzyMatch(guess, realWord)) return true;
     const raw = await completeText(judgeLiarGuessPrompt(guess, realWord), 8);
     return raw.trim().toLowerCase().startsWith('true');
   },

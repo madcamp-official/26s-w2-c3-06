@@ -1,6 +1,7 @@
 import type { Server } from 'socket.io';
 import type { GamePhase, GameState, Round, RoomState } from '../types';
 import { llm } from '../llm/wrapper';
+import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
@@ -58,10 +59,6 @@ function getParticipantNickname(room: RoomState, id: string): string {
   if (human) return human.nickname;
   const bot = (botsByRoom.get(room.roomCode) ?? []).find((b) => b.id === id);
   return bot?.nickname ?? id;
-}
-
-function normalizeWord(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, '');
 }
 
 function currentRound(game: GameState): Round {
@@ -525,8 +522,8 @@ export async function submitLiarGuess(
   try {
     correct = await llm.judgeLiarGuess(guess, game.realWord);
   } catch (err) {
-    console.error('[gameEngine] judgeLiarGuess 실패, 단순 일치 비교로 폴백', err);
-    correct = normalizeWord(guess) === normalizeWord(game.realWord);
+    console.error('[gameEngine] judgeLiarGuess 실패, 유사 일치 비교로 폴백', err);
+    correct = isFuzzyMatch(guess, game.realWord);
   }
   // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'liarGuess') return;
@@ -547,7 +544,9 @@ function finalizeGame(
   const game = room.currentGame;
   if (!game) return;
 
-  io.to(room.roomCode).emit('round:finalResult', result);
+  // 라이어가 실제로 역전승을 시도했다면(game.liarGuess) 그때 쓴 답도 결과 발표에 함께 보낸다
+  // (시도 자체가 없었으면 undefined → null).
+  io.to(room.roomCode).emit('round:finalResult', { ...result, liarGuess: game.liarGuess ?? null });
 
   const humanEntries = game.participantIds
     .filter((id) => !isBotId(id))

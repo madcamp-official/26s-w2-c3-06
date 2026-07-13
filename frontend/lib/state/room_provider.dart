@@ -155,6 +155,7 @@ class RoomViewState {
       wasLiar: resolved.wasLiar,
       liarNickname: nicknameOf(resolved.liarId),
       liarGuessCorrect: result.liarGuessCorrect,
+      liarGuess: result.liarGuess,
     );
   }
 

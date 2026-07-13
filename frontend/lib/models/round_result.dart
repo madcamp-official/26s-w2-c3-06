@@ -27,13 +27,15 @@ class RoundResolved {
   }
 }
 
-/// PLAN `round:finalResult` 페이로드: `{ liarGuessCorrect, winner }`.
+/// PLAN `round:finalResult` 페이로드: `{ liarGuessCorrect, winner, liarGuess }`.
 /// `liarGuessCorrect`는 역전승 시도 자체가 없었으면(라이어가 애초에 지목 안 됨) null.
+/// `liarGuess`는 라이어가 역전승 시도로 실제 입력한 답(시도 자체가 없었으면 null).
 class RoundFinalResult {
   final bool? liarGuessCorrect;
   final String winner; // 'liar' | 'citizens'
+  final String? liarGuess;
 
-  const RoundFinalResult({required this.liarGuessCorrect, required this.winner});
+  const RoundFinalResult({required this.liarGuessCorrect, required this.winner, this.liarGuess});
 
   bool get citizensWin => winner == 'citizens';
 
@@ -41,6 +43,7 @@ class RoundFinalResult {
     return RoundFinalResult(
       liarGuessCorrect: json['liarGuessCorrect'] as bool?,
       winner: json['winner'] as String,
+      liarGuess: json['liarGuess'] as String?,
     );
   }
 }
