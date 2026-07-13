@@ -82,6 +82,7 @@ AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 ### 네비게이션
 - **"뒤로가기" 버튼**: 로그인/회원가입 페이지의 "뒤로가기" 버튼은 진입 경로(메인 또는 로비)로 복귀 — 스택 기반 네비게이션이면 단순 pop으로 처리 가능.
 - **인증 성공**: 로그인/가입 성공 시에는 진입 경로와 무관하게 항상 로비로 이동(메인에서 들어왔어도 로비로 감) — 이건 pop이 아니라 명시적 이동(예: pushReplacement)으로 별도 처리해야 함.
+- **게스트가 개인정보 수정 페이지에서 "로그인/회원가입" 진입**: 이 경로는 로그아웃을 먼저 하지 않는다 — 로그인/회원가입 화면을 현재 게스트 세션 위에 그대로 push해, 뒤로가기를 누르면 로그아웃 없이 원래 쓰던 게스트 계정을 계속 이용할 수 있다. 실제로 로그인/가입을 완료해야만(익명 승격 또는 계정 전환) 세션이 바뀌며, 이때는 위 "인증 성공" 규칙대로 로비까지 이동한다.
 
 ### 로비에서 로그아웃
 완전히 sign out 후, 메인 페이지의 "게스트로 계속하기"를 눌렀을 때와 동일한 닉네임 입력 화면으로 이동 → 새 익명 세션 시작.
@@ -336,7 +337,7 @@ Lv.20 이후에도 같은 규칙으로 계속 증가한다. 다음 레벨까지 
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
-- `POST /api/friends/requests` `{ addresseeUid }` 또는 `{ addresseeNickname }` → 201 `Friendship` — 닉네임으로 보내면 서버가 uid로 해석(없으면 404). 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
+- `POST /api/friends/requests` `{ addresseeUid }` 또는 `{ addresseeNickname }` → 201 `Friendship` — 닉네임으로 보내면 서버가 uid로 해석(없으면 404). 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409. **회원끼리만 가능** — 요청자·대상 중 한쪽이라도 게스트(익명 계정)면 403(게스트는 uid가 세션마다 바뀔 수 있어 친구 관계가 쉽게 끊어지기 때문)
 - `GET /api/friends/requests` — 내가 받은 대기 요청 목록. 응답 `{ requests: [{ ...Friendship, requester: { uid, nickname, avatarUrl } }] }`
 - `POST /api/friends/requests/:id/accept` → 200 `Friendship`(status: accepted)
 - `POST /api/friends/requests/:id/decline` → 204 (행 삭제, 재요청 가능)
