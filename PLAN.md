@@ -308,7 +308,7 @@ interface LiarGameLLM {
   generateWordPair(category: string | null, usedWords: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWordIfUnfamiliar(word: string): Promise<string | null>;   // 제시어 설명 텍스트. 난이도 무관 모든 단어에 대해 생성(생성 실패 시에만 null)
+  explainWord(word: string): Promise<string | null>;   // 제시어 설명 텍스트. 난이도 무관 모든 단어에 대해 생성(생성 실패 시에만 null)
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 ```
@@ -316,7 +316,7 @@ interface LiarGameLLM {
 - `generateWordPair` 프롬프트 핵심: 같은 카테고리 안에서 연관성은 있지만 다른 두 단어를 생성 (예: 카테고리 "동물" → realWord "사자", liarWord "호랑이") — 너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아짐.
 - `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건).
 - `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 **의도적으로 헷갈리게 만드는** 코멘트를 생성. 실제 라이어가 누구인지는 절대 이 프롬프트에 입력하지 않음 — 정답을 아는 채로 교란하면 너무 정교해져 게임이 망가지므로, 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. 플레이어를 지칭할 때는 항상 닉네임을 사용한다.
-- `explainWordIfUnfamiliar` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
+- `explainWord` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
 - `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정.
 
 ## 백엔드 구현 현황 (backend 브랜치)
