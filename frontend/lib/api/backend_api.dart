@@ -180,17 +180,35 @@ class UserStats {
   final double? overallWinRate;
   final double? liarWinRate;
   final double? citizenWinRate;
-  final int score; // 승 +20 / 패 -10, 하한 0 (서버 파생)
-  final int level; // score 기반 구간 레벨 (100점당 1)
+  final int xp; // 누적 XP(단조증가, 서버 DB 저장값). PLAN "XP 획득 규칙" 참고
+  final int level; // xp 기반 파생 레벨(비선형 구간, PLAN "레벨 구간" 참고)
 
   const UserStats({
     required this.totalGames,
     required this.overallWinRate,
     required this.liarWinRate,
     required this.citizenWinRate,
-    required this.score,
+    required this.xp,
     required this.level,
   });
+
+  /// 레벨 L의 누적 XP 임계값: 100*(L-1) + 15*(L-1)*(L-2) (L=1이면 0). 서버와 동일 공식.
+  static int levelThreshold(int level) {
+    if (level <= 1) return 0;
+    return 100 * (level - 1) + 15 * (level - 1) * (level - 2);
+  }
+
+  /// 현재 레벨 안에서의 진행도(0.0~1.0).
+  double get levelProgress {
+    final start = levelThreshold(level);
+    final next = levelThreshold(level + 1);
+    final span = next - start;
+    if (span <= 0) return 1;
+    return ((xp - start) / span).clamp(0, 1).toDouble();
+  }
+
+  /// 다음 레벨까지 남은 XP.
+  int get xpToNextLevel => (levelThreshold(level + 1) - xp).clamp(0, 1 << 30);
 
   factory UserStats.fromJson(Map<String, dynamic> json) {
     return UserStats(
@@ -198,7 +216,7 @@ class UserStats {
       overallWinRate: (json['overallWinRate'] as num?)?.toDouble(),
       liarWinRate: (json['liarWinRate'] as num?)?.toDouble(),
       citizenWinRate: (json['citizenWinRate'] as num?)?.toDouble(),
-      score: json['score'] as int? ?? 0,
+      xp: json['xp'] as int? ?? 0,
       level: json['level'] as int? ?? 1,
     );
   }

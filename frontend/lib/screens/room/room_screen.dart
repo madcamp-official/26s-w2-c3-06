@@ -15,9 +15,11 @@ import '../../theme/pixel_font.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
+import '../../widgets/app_nav_rail.dart';
 import '../../widgets/countdown_text.dart';
 import '../../widgets/pixel_box.dart';
 import '../../widgets/user_avatar.dart';
+import '../../utils/breakpoints.dart';
 
 /// 대기 → 설명 → 토론 → 투표 → 결과 → (역전승) → 종료(대기 복귀)를 하나의 화면으로 표현한다.
 /// 모든 페이즈 전이·타이머·판정은 서버가 소유하고(PLAN "Socket.IO 이벤트 계약"), 이 화면은
@@ -288,6 +290,18 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       }
     }
 
+    final isDesktop = context.isDesktop;
+    // 데스크탑에서는 나가기/초대 버튼이 헤더가 아니라 좌측 내비게이션 바로 이동한다
+    // (frontend 브랜치의 데스크탑 레이아웃 참고, lobby_screen과 동일한 패턴).
+    final body = Column(
+      children: [
+        _header(s, isHost, showActions: !isDesktop),
+        Expanded(child: _chatFeed(s)),
+        _contextPanel(s, isHost),
+        _inputBar(s),
+      ],
+    );
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -296,14 +310,25 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: SafeArea(
-          child: Column(
-            children: [
-              _header(s, isHost),
-              Expanded(child: _chatFeed(s)),
-              _contextPanel(s, isHost),
-              _inputBar(s),
-            ],
-          ),
+          child: isDesktop
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AppNavRail(
+                      items: [
+                        if (isHost && _canInviteFriends)
+                          AppNavRailItem(
+                            icon: Icons.person_add_alt_1,
+                            label: '초대',
+                            onTap: _openInviteFriendsSheet,
+                          ),
+                        AppNavRailItem(icon: Icons.exit_to_app, label: '나가기', onTap: _leave),
+                      ],
+                    ),
+                    Expanded(child: body),
+                  ],
+                )
+              : body,
         ),
       ),
     );
@@ -313,7 +338,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 아이디 기반이라 애초에 친구 기능 자체를 쓸 수 없다(로비의 게스트 친구 제한과 동일 규칙).
   bool get _canInviteFriends => !UserSession.isGuest;
 
-  Widget _header(RoomViewState s, bool isHost) {
+  Widget _header(RoomViewState s, bool isHost, {required bool showActions}) {
     final emoji = (s.emoji?.isNotEmpty ?? false) ? s.emoji! : '🎮';
     final title = (s.title?.isNotEmpty ?? false) ? s.title! : '방 ${s.roomCode ?? ''}';
     return PixelBox(
@@ -335,17 +360,19 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
-          if (isHost && _canInviteFriends) ...[
+          if (showActions) ...[
+            if (isHost && _canInviteFriends) ...[
+              HoverTap(
+                onTap: _openInviteFriendsSheet,
+                child: const Icon(Icons.person_add_alt_1, color: AppColors.mutedForeground),
+              ),
+              const SizedBox(width: 14),
+            ],
             HoverTap(
-              onTap: _openInviteFriendsSheet,
-              child: const Icon(Icons.person_add_alt_1, color: AppColors.mutedForeground),
+              onTap: _leave,
+              child: const Icon(Icons.exit_to_app, color: AppColors.mutedForeground),
             ),
-            const SizedBox(width: 14),
           ],
-          HoverTap(
-            onTap: _leave,
-            child: const Icon(Icons.exit_to_app, color: AppColors.mutedForeground),
-          ),
         ],
       ),
     );
@@ -399,7 +426,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       case GamePhase.ended:
         return _waitingPanel(s, isHost);
       case GamePhase.describing:
-        return _describingPanel(s);
+        return _describingPanel(s, isHost);
       case GamePhase.discussion:
         return _discussionPanel(s, isHost);
       case GamePhase.voting:
@@ -596,7 +623,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
-  Widget _describingPanel(RoomViewState s) {
+  Widget _describingPanel(RoomViewState s, bool isHost) {
     final myTurn = s.isMyTurn(_myUid);
     final turnNick = s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!);
     return _panelBox(
@@ -608,13 +635,26 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
-                  style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              Expanded(
+                child: Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
+                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              ),
               if (s.phaseDeadline != null)
                 CountdownText(
                   deadline: s.phaseDeadline!,
                   style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
                 ),
+              // 방장이 진행이 느릴 때 현재 턴(사람/봇 무관)을 강제로 넘길 수 있다.
+              if (isHost) ...[
+                const SizedBox(width: 8),
+                AppButton(
+                  label: '다음 차례 ▶',
+                  fullWidth: false,
+                  dense: true,
+                  variant: AppButtonVariant.outlined,
+                  onPressed: () => ref.read(roomProvider.notifier).skipTurn(),
+                ),
+              ],
             ],
           ),
         ],

@@ -84,32 +84,56 @@ export interface UserStats {
   overallWinRate: number | null;
   liarWinRate: number | null;
   citizenWinRate: number | null;
-  score: number;
+  xp: number;
   level: number;
 }
 
-// 점수·레벨 설계. 점수는 별도 컬럼으로 저장하지 않고 GamePlay(승/패)로부터 파생한다 —
-// 전적·승률과 동일한 방식이라 GamePlay가 단일 진실 공급원으로 유지되고, 배점을 조정하면
-// 과거 기록까지 일관되게 재계산된다.
-// 승리 +20, 패배 -10, 하한 0(음수 없음). 레벨은 100점당 1구간(선형).
-const WIN_POINTS = 20;
-const LOSE_POINTS = 10;
-const POINTS_PER_LEVEL = 100;
+// PLAN "DB 스키마"의 XP 및 레벨 참고. XP는 GamePlay와 달리 파생값이 아니라 User.xp 컬럼에
+// 직접 저장되는 단조증가 값이다(게임 종료 시 awardXp로 증가시킨다).
 
-function deriveScore(wins: number, losses: number): number {
-  return Math.max(0, wins * WIN_POINTS - losses * LOSE_POINTS);
+// 레벨 L(L≥1)까지 도달하는 데 필요한 누적 XP 임계값. 다음 레벨까지 필요한 증분은
+// 100 + (L-1)*30으로 매 레벨 30씩 늘어나며, 이를 누적한 닫힌 형태 공식이다.
+// (L=1은 0, L=2는 100, L=3은 230, L=4는 390 ... PLAN의 레벨 구간표와 정확히 일치)
+function levelThreshold(level: number): number {
+  if (level <= 1) return 0;
+  return 100 * (level - 1) + 15 * (level - 1) * (level - 2);
 }
 
-function deriveLevel(score: number): number {
-  return Math.floor(score / POINTS_PER_LEVEL) + 1;
+function deriveLevel(xp: number): number {
+  let level = 1;
+  while (levelThreshold(level + 1) <= xp) level++;
+  return level;
 }
 
-// 전적·점수는 GamePlay 집계로 파생 (PLAN "DB 스키마" 파생 방식 참고). 분모 0이면 null("기록 없음").
+// 게임 1판이 정상 종료됐을 때(사람 참가자만) 지급하는 XP. PLAN "XP 획득 규칙" 참고.
+// 방을 나가 승패 판정 자체가 안 난 경우는 이 함수가 아예 호출되지 않아 0 XP가 자연스레 보장된다.
+function xpForOutcome(wasLiar: boolean, won: boolean): number {
+  if (wasLiar) return won ? 110 : 60;
+  return won ? 100 : 60;
+}
+
+// finalizeGame이 recordGame과 함께 호출 — 한 게임당 유저별로 한 번만 불려 중복 지급을 막는다.
+export async function awardXp(
+  entries: { userId: string; wasLiar: boolean; won: boolean }[],
+): Promise<void> {
+  await Promise.all(
+    entries.map((e) =>
+      prisma.user.update({
+        where: { uid: e.userId },
+        data: { xp: { increment: xpForOutcome(e.wasLiar, e.won) } },
+      }),
+    ),
+  );
+}
+
+// 전적은 GamePlay 집계로 파생하고(PLAN "DB 스키마" 파생 방식 참고), XP는 User.xp를 그대로
+// 읽는다. 분모 0인 승률은 null("기록 없음"). 아직 로컬 DB에 User 행이 없는 유저(막 가입해
+// upsertUser가 아직 안 돈 경우)는 xp 0/level 1로 취급한다.
 export async function getUserStats(uid: string): Promise<UserStats> {
-  const plays = await prisma.gamePlay.findMany({
-    where: { userId: uid },
-    select: { wasLiar: true, won: true },
-  });
+  const [plays, user] = await Promise.all([
+    prisma.gamePlay.findMany({ where: { userId: uid }, select: { wasLiar: true, won: true } }),
+    prisma.user.findUnique({ where: { uid }, select: { xp: true } }),
+  ]);
 
   const totalGames = plays.length;
   const liarPlays = plays.filter((p) => p.wasLiar);
@@ -118,15 +142,14 @@ export async function getUserStats(uid: string): Promise<UserStats> {
   const rate = (rows: { won: boolean }[]) =>
     rows.length === 0 ? null : rows.filter((r) => r.won).length / rows.length;
 
-  const wins = plays.filter((p) => p.won).length;
-  const score = deriveScore(wins, totalGames - wins);
+  const xp = user?.xp ?? 0;
 
   return {
     totalGames,
     overallWinRate: rate(plays),
     liarWinRate: rate(liarPlays),
     citizenWinRate: rate(citizenPlays),
-    score,
-    level: deriveLevel(score),
+    xp,
+    level: deriveLevel(xp),
   };
 }

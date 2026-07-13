@@ -418,7 +418,7 @@ class _StatsCard extends ConsumerWidget {
       data: (stats) {
         final winRateText =
             stats.overallWinRate == null ? '기록 없음' : '승률 ${(stats.overallWinRate! * 100).round()}%';
-        return 'Lv.${stats.level} (${stats.score} XP) · 전체 ${stats.totalGames}판 · $winRateText';
+        return 'Lv.${stats.level} (${stats.xp} XP) · 전체 ${stats.totalGames}판 · $winRateText';
       },
     );
 

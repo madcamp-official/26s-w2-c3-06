@@ -31,6 +31,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late int _avatarIndex;
   Uint8List? _profileImageBytes;
   String? _avatarUrl;
+  UserStats? _stats;
 
   @override
   void initState() {
@@ -41,6 +42,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // 서버에 저장된 프로필 사진 URL 복원(로컬 미리보기가 없을 때 표시).
     BackendApi.instance.getMyProfile().then((p) {
       if (mounted) setState(() => _avatarUrl = p.avatarUrl);
+    }).catchError((_) {});
+    // 레벨 배지·진행바 표시용(PLAN "XP·레벨 프론트 표시").
+    BackendApi.instance.getMyStats().then((s) {
+      if (mounted) setState(() => _stats = s);
     }).catchError((_) {});
   }
 
@@ -219,6 +224,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
+                if (_stats != null) ...[
+                  const SizedBox(height: 14),
+                  _LevelBadge(stats: _stats!),
+                ],
                 // 사진 변경은 아바타 우하단 카메라 버튼으로 하고, 여기선 삭제만 노출한다.
                 if (_profileImageBytes != null) ...[
                   const SizedBox(height: 12),
@@ -266,6 +275,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 레벨 배지 + 레벨 내 진행바. PLAN "XP·레벨 프론트 표시" 참고 — 진행도는
+/// UserStats.levelProgress(서버와 동일한 레벨 임계값 공식)로 계산한다.
+class _LevelBadge extends StatelessWidget {
+  final UserStats stats;
+
+  const _LevelBadge({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(color: AppColors.primary, border: Border.all(color: AppColors.primaryBorder)),
+            child: Text('Lv.${stats.level}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12)),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: 160,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: stats.levelProgress,
+                minHeight: 6,
+                backgroundColor: AppColors.border.withValues(alpha: 0.3),
+                valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '다음 레벨까지 ${stats.xpToNextLevel} XP',
+            style: TextStyle(fontSize: 10, color: AppColors.mutedForeground),
+          ),
+        ],
       ),
     );
   }

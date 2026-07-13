@@ -515,6 +515,8 @@ class RoomNotifier extends Notifier<RoomViewState> {
 
   void submitDescription(String text) => _socket.submitDescription(text);
 
+  void skipTurn() => _socket.skipTurn();
+
   void skipDiscussion() => _socket.skipDiscussion();
 
   void castVote(String votedPlayerId) => _socket.castVote(votedPlayerId);
