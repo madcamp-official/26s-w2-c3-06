@@ -7,7 +7,6 @@ import 'package:image_picker/image_picker.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
-import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
@@ -194,51 +193,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Center(
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Container(
-                        width: 96,
-                        height: 96,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
-                        child: UserAvatar(
-                          avatarIndex: _avatarIndex,
-                          radius: 40,
-                          imageBytes: _profileImageBytes,
-                          imageUrl: _avatarUrl,
-                        ),
-                      ),
-                      Positioned(
-                        right: -6,
-                        bottom: -6,
-                        child: HoverTap(
-                          onTap: _handlePickPhoto,
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(color: AppColors.primary, border: Border.all(color: AppColors.card, width: 2)),
-                            child: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: Container(
+                    width: 96,
+                    height: 96,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
+                    child: UserAvatar(
+                      avatarIndex: _avatarIndex,
+                      radius: 40,
+                      imageBytes: _profileImageBytes,
+                      imageUrl: _avatarUrl,
+                    ),
                   ),
                 ),
                 if (_stats != null) ...[
                   const SizedBox(height: 14),
                   _LevelBadge(stats: _stats!),
                 ],
-                // 사진 변경은 아바타 우하단 카메라 버튼으로 하고, 여기선 삭제만 노출한다.
-                if (_profileImageBytes != null) ...[
-                  const SizedBox(height: 12),
-                  Center(
-                    child: TextButton(
-                      onPressed: _handleRemovePhoto,
-                      style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
-                      child: const Text('사진 삭제'),
-                    ),
+                const SizedBox(height: 12),
+                Center(
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 4,
+                    children: [
+                      TextButton(
+                        onPressed: _handlePickPhoto,
+                        child: const Text('사진 변경'),
+                      ),
+                      TextButton(
+                        onPressed: _handleRemovePhoto,
+                        style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
+                        child: const Text('사진 삭제'),
+                      ),
+                    ],
                   ),
-                ],
+                ),
                 const SizedBox(height: 20),
                 _FieldSection(
                   label: 'NICKNAME',
