@@ -573,4 +573,9 @@ function finalizeGame(
   clearRoomTimers(room.roomCode);
   botsByRoom.delete(room.roomCode);
   turnIndexByRoom.delete(room.roomCode);
+
+  // 로비 카드의 "진행중" 표시가 실시간으로 내려가도록(다시 입장 가능해짐).
+  if (room.visibility === 'public') {
+    io.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
+  }
 }

@@ -259,6 +259,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       const resetConfig = { category: null, aiBotCount: 0 };
       roomManager.setDraftConfig(room, resetConfig);
       io.to(room.roomCode).emit('game:draftConfigUpdated', resetConfig);
+      // 로비 카드의 "진행중" 표시가 실시간으로 반영되도록.
+      broadcastPublicRoomsIfPublic(room.visibility);
     } catch (err) {
       console.error('[handlers] game:configure 실패', err);
       socket.emit('room:error', { message: '게임 시작에 실패했습니다. 잠시 후 다시 시도해주세요.' });
