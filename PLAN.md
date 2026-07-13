@@ -109,10 +109,10 @@ interface Player {
   id: string;
   nickname: string;
   isBot: boolean;
-  isHost: boolean;
   connected: boolean;      // disconnect 시 즉시 false, 유예 시간 내 room:rejoin하면 true로 복귀
   isReady: boolean;        // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
 }
+// 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
 interface Round {
   roundNumber: number;
