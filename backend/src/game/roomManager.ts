@@ -190,6 +190,8 @@ export function addCustomCategory(room: RoomState, category: string): boolean {
 }
 
 // 방장이 나가면(퇴장/유예 만료) 승계하지 않고 방 자체를 닫는다.
+// 방장은 나가기 전까지 항상 players에 남아있으므로, 방장이 아닌 사람을 제거해도
+// players가 0이 되는 일은 없다 → 방을 닫는 조건은 "방장이 나갔는가" 하나면 충분하다.
 function removePlayerFromRoom(
   room: RoomState,
   uid: string,
@@ -197,7 +199,7 @@ function removePlayerFromRoom(
   const wasHost = room.hostId === uid;
   room.players = room.players.filter((p) => p.id !== uid);
 
-  if (wasHost || room.players.length === 0) {
+  if (wasHost) {
     rooms.delete(room.roomCode);
     return { room, roomClosed: true };
   }
