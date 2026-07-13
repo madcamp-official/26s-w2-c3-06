@@ -29,7 +29,7 @@ AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 1. 방장이 지정(또는 AI 랜덤)한 카테고리로 진짜/가짜 제시어 쌍을 생성
 2. 방장이 선택한 수만큼 AI 봇이 플레이어로 참여해 설명 생성 (봇도 자신이 라이어인지 모름 — 사람과 동일 조건)
 3. **매 턴** 설명이 제출될 때마다 AI가 일부러 헷갈리게 하는 "교란" 코멘트를 닉네임으로 지칭해 단다
-4. 제시어가 낯선 단어로 판단되면 AI가 해당 단어에 대한 텍스트 설명을 함께 제공한다 (이미지 생성은 하지 않음)
+4. 모든 제시어에 대해 AI가 짧은 텍스트 설명을 미리 만들어 함께 내려준다 (난이도 무관, 이미지 생성은 하지 않음) — 유저는 "AI 설명보기" 버튼으로 원할 때 펼쳐 본다
 5. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
 
 **방 UI는 그룹 채팅 형식**으로, 턴 설명·AI 교란 코멘트·시스템 안내·자유 채팅이 하나의 피드에 흐른다. 채팅은 새 게임 시작 시에만 초기화된다(데이터 모델 `chatLog` 참고).
@@ -109,10 +109,10 @@ interface Player {
   id: string;
   nickname: string;
   isBot: boolean;
-  isHost: boolean;
   connected: boolean;      // disconnect 시 즉시 false, 유예 시간 내 room:rejoin하면 true로 복귀
   isReady: boolean;        // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
 }
+// 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
 interface Round {
   roundNumber: number;
@@ -158,7 +158,7 @@ interface RoomState {
   visibility: 'public' | 'private';
   maxPlayers: number;        // 방장이 방 생성 시 지정. 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];
-  customCategories: string[]; // 방장이 이 방에서 직접 추가한 카테고리 이름. 방 종료 시 함께 소멸(영구 저장 안 함)
+  customCategories: string[]; // 이 방에서 실제 사용된 카테고리(방장 직접 입력 + AI 랜덤 생성분 모두, 중복 제거). 다음 게임 선택지로 재사용. 방 종료 시 함께 소멸(영구 저장 안 함)
   draftConfig: DraftGameConfig; // 방장이 게임 시작 전 고르고 있는 봇 수/카테고리 (실시간 공유용, game:draftConfig와 같은 모양)
   chatLog: ChatMessage[];    // 방 존재 동안 유지, 새 게임 시작 시에만 초기화
   currentGame: GameState | null;
@@ -169,7 +169,7 @@ interface RoomState {
 
 ### DB 스키마 (영구 저장: 유저·전적·친구)
 
-방/게임/라운드 같은 휘발성 상태는 인메모리에 두지만, **유저 프로필·전적·친구 관계는 로컬 Postgres에 Prisma로 영구 저장**한다(현재는 stretch). Firebase Auth는 인증만 담당하고, `uid`를 PK로 삼아 이 DB가 유저 데이터를 소유한다. 아래는 `backend/prisma/schema.prisma`의 영구 저장 모델 설계다.
+방/게임/라운드 같은 휘발성 상태는 인메모리에 두지만, **유저 프로필·전적·친구 관계는 로컬 Postgres에 Prisma로 영구 저장**한다(원래 선택 범위(stretch) 항목이었으나 현재 구현 완료 — "백엔드 구현 현황" 참고). Firebase Auth는 인증만 담당하고, `uid`를 PK로 삼아 이 DB가 유저 데이터를 소유한다. 아래는 `backend/prisma/schema.prisma`의 영구 저장 모델 설계다.
 
 ```prisma
 model User {
@@ -251,21 +251,23 @@ enum FriendshipStatus {
 - `chat:send` `{ text }` — 언제든 자유 채팅
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
 - `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
-- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 추가된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열 — 프리셋에 없는 새 이름이면 서버가 해당 방의 `customCategories`에 추가해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함), (3) `null` — 이 경우 AI가 카테고리까지 생성. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
 - `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
+- `discussion:skip` `{}` — 호스트 전용. 토론 페이즈에서 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다(남은 토론 타이머 취소 후 `vote:started`). 토론 페이즈가 아니거나 호스트가 아니면 무시
 - `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
 
 **Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
+- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
 - `game:draftConfigUpdated` `{ category, aiBotCount }` — `game:draftConfig` 수신 시 방 전체 브로드캐스트, 게임 시작(`game:configure`) 시 `{ category: null, aiBotCount: 0 }`로 리셋
+- `room:customCategoriesUpdated` `{ customCategories }` (`string[]`) — 새 게임 시작 시 이번 카테고리(방장 입력·AI 랜덤 포함)가 방의 재사용 목록에 새로 추가됐을 때만 방 전체에 브로드캐스트. 클라이언트는 다음 게임 카테고리 칩 목록을 이 값으로 갱신
 - `room:publicList` `{ rooms: [{roomCode, playerCount, maxPlayers, inProgress}] }` — `inProgress`는 해당 방에 진행 중인 게임이 있는지(로비 목록에 "게임 중" 표시용)
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
-- `room:rejoined` `{ roomCode, hostId, visibility, players, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
+- `room:rejoined` `{ roomCode, hostId, visibility, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
-- `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
+- `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
 - `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
 - `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
@@ -278,6 +280,8 @@ enum FriendshipStatus {
 서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
 
 **타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 두지 않는다.
+
+**토론 조기 종료**: 토론 페이즈 한정으로 호스트는 `discussion:skip`을 보내 제한시간을 다 기다리지 않고 곧바로 투표로 넘어갈 수 있다(남은 토론 타이머를 취소하고 즉시 `startVoting`). 서버가 페이즈·호스트 여부를 검증하므로 토론 페이즈가 아니거나 호스트가 아닌 요청은 무시된다.
 
 ### REST API (전적·친구)
 
@@ -307,7 +311,7 @@ interface LiarGameLLM {
   generateWordPair(category: string | null, usedWords: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWordIfUnfamiliar(word: string): Promise<string | null>;   // 낯선 단어로 판단되면 설명 텍스트, 아니면 null
+  explainWord(word: string): Promise<string | null>;   // 제시어 설명 텍스트. 난이도 무관 모든 단어에 대해 생성(생성 실패 시에만 null)
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 ```
@@ -315,7 +319,7 @@ interface LiarGameLLM {
 - `generateWordPair` 프롬프트 핵심: 같은 카테고리 안에서 연관성은 있지만 다른 두 단어를 생성 (예: 카테고리 "동물" → realWord "사자", liarWord "호랑이") — 너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아짐.
 - `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건).
 - `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 **의도적으로 헷갈리게 만드는** 코멘트를 생성. 실제 라이어가 누구인지는 절대 이 프롬프트에 입력하지 않음 — 정답을 아는 채로 교란하면 너무 정교해져 게임이 망가지므로, 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. 플레이어를 지칭할 때는 항상 닉네임을 사용한다.
-- `explainWordIfUnfamiliar` 프롬프트 핵심: 해당 단어를 모르면 유저가 "AI 설명보기" 버튼을 클릭함. ai가 해당 단어에 대한 짧은 텍스트 설명을 생성. `round:yourWord`에 실린 단어를 대상으로 `game:configure` 직후 호출.
+- `explainWord` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
 - `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정.
 
 ## 백엔드 구현 현황 (backend 브랜치)
@@ -341,6 +345,7 @@ interface LiarGameLLM {
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
 - **`maxPlayers` 방 생성 UI**: `screens/lobby/lobby_screen.dart`에 슬라이더로 지정, `createRoom()`이 이 값을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
+- **`discussion:skip`**: `panels/describing_panel.dart`의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
 
 위 정리는 정적 코드 검토 기준이며, 런타임 동작(빌드/실행)은 별도로 확인해야 한다.
 
@@ -376,7 +381,7 @@ interface LiarGameLLM {
 12. 호스트 연결 종료 시 방 정리 및 공개방 목록에서도 제거되는지 확인
 13. 참가자(사람+봇 합산)가 3명 미만이거나 전원 준비 완료 전에는 `game:configure`가 `room:error`로 거부되는지 확인
 14. 투표로 실제 라이어가 아닌 사람이 지목됐을 때, 역전승 단계 없이 바로 `winner: 'liar'`로 게임이 종료되는지 확인
-15. 방장이 프리셋에 없는 카테고리 이름을 자유 입력했을 때 해당 방에서 다음 게임부터 칩으로 재사용되는지, 방 종료 후에는 사라지는지 확인
+15. 방장이 자유 입력한 카테고리든 "AI 랜덤 생성"으로 확정된 카테고리든, 해당 방에서 다음 게임부터 칩으로 재사용되는지(`room:customCategoriesUpdated` 수신), 중복 없이 쌓이는지, 방 종료 후에는 사라지는지 확인
 16. `backend`→`frontend` 병합 후 클린 체크아웃에서 두 디렉터리가 충돌 없이 공존하며 각자 정상 실행되는지 확인
 
 ## 배포 및 DB 운영
