@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { getAnthropic, hasAnthropicKey, MODEL } from './client';
+import { getAnthropic, hasAnthropicKey, MODEL as ANTHROPIC_MODEL } from './anthropicClient';
+import { getOpenAI, hasOpenAIKey, OPENAI_MODEL } from './openaiClient';
 import {
   categoryCandidatesPrompt,
   wordPairPrompt,
@@ -26,9 +27,38 @@ export interface LiarGameLLM {
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 
+// 실제 호출할 provider. .env의 LLM_PROVIDER로 명시 지정(anthropic|openai) — 나중에 다시
+// Claude로 돌아가고 싶으면 이 값만 anthropic으로 바꾸면 된다(코드 변경 불필요, 두 키 모두
+// .env에 남아있으면 즉시 전환 가능). 명시 지정이 없으면 키가 있는 쪽을 자동으로 고른다.
+type LLMProvider = 'anthropic' | 'openai';
+
+function resolveProvider(): LLMProvider | null {
+  const explicit = process.env.LLM_PROVIDER?.trim().toLowerCase();
+  if (explicit === 'anthropic' || explicit === 'openai') return explicit;
+  if (hasOpenAIKey()) return 'openai';
+  if (hasAnthropicKey()) return 'anthropic';
+  return null;
+}
+
+const provider = resolveProvider();
+
+// 프롬프트 문구·JSON 파싱·거절 감지 등 나머지 로직은 provider와 무관하게 전부 동일하게
+// 재사용한다 — 여기서 실제 API 호출 부분만 provider별로 분기한다.
 async function completeText(prompt: string, maxTokens: number, system?: string): Promise<string> {
+  if (provider === 'openai') {
+    const res = await getOpenAI().chat.completions.create({
+      model: OPENAI_MODEL,
+      max_tokens: maxTokens,
+      messages: [
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: prompt },
+      ],
+    });
+    return (res.choices[0]?.message?.content ?? '').trim();
+  }
+
   const res = await getAnthropic().messages.create({
-    model: MODEL,
+    model: ANTHROPIC_MODEL,
     max_tokens: maxTokens,
     ...(system ? { system } : {}),
     messages: [{ role: 'user', content: prompt }],
@@ -124,11 +154,12 @@ const realLLM: LiarGameLLM = {
   },
 };
 
-// ANTHROPIC_API_KEY가 없는 로컬 dev 환경에서도 게임 흐름 전체를 테스트할 수 있도록,
+// API 키가 하나도 없는 로컬 dev 환경에서도 게임 흐름 전체를 테스트할 수 있도록,
 // firebase-admin과 동일한 패턴으로 키가 없으면 결정적 mock 응답으로 폴백한다.
-// 키를 넣으면 코드 변경 없이 바로 실제 Claude 호출로 전환된다.
-export const llm: LiarGameLLM = hasAnthropicKey() ? realLLM : mockLLM;
+export const llm: LiarGameLLM = provider ? realLLM : mockLLM;
 
-if (!hasAnthropicKey()) {
-  console.warn('[llm] ANTHROPIC_API_KEY 없음 — mock LLM으로 동작 (실제 Claude 호출 안 함)');
+if (!provider) {
+  console.warn('[llm] ANTHROPIC_API_KEY/OPENAI_API_KEY 없음 — mock LLM으로 동작 (실제 LLM 호출 안 함)');
+} else {
+  console.log(`[llm] provider=${provider} 로 동작`);
 }
