@@ -28,12 +28,12 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyC4cQA3b6kNyDQnd_tSa4OHl6pJ-xz48LY',
-    appId: '1:205188813133:web:bf6b237def5efb016aa704',
-    messagingSenderId: '205188813133',
-    projectId: 'liar-game-8ff55',
-    authDomain: 'liar-game-8ff55.firebaseapp.com',
-    storageBucket: 'liar-game-8ff55.firebasestorage.app',
+    apiKey: 'AIzaSyDx-moBYDAgpGVM2hbfNKumwdHQ2Y0rOwg',
+    appId: '1:372020945949:web:6ff5af9cfc84719f6112f4',
+    messagingSenderId: '372020945949',
+    projectId: 'l-ai-r-game',
+    authDomain: 'l-ai-r-game.firebaseapp.com',
+    storageBucket: 'l-ai-r-game.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
