@@ -107,7 +107,7 @@ interface Player {
   nickname: string;
   isBot: boolean;
   connected: boolean;      // disconnect 시 즉시 false, 유예 시간 내 room:rejoin하면 true로 복귀
-  isReady: boolean;        // 대기방 준비 상태. 봇은 참여 즉시 true로 고정
+  isReady: boolean;        // 대기방 준비 상태. 봇과 방장은 참여 즉시 true로 고정(방장은 준비 토글 UI 자체가 없음)
 }
 // 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
@@ -181,6 +181,7 @@ model User {
   avatarUrl   String?                        // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용
   isAnonymous Boolean  @default(true)        // 게스트 구분 (리더보드 필터링 · 30일 정리 대상 판별)
   lastActive  DateTime @default(now())       // 게스트 cleanup(마지막 활동 30일 경과) 기준
+  xp          Int      @default(0)           // 누적 XP (정수, 단조증가만 가능, 게임 종료 시 XP 획득 규칙에 따라 증가). 레벨은 이 xp에서 계산하는 파생값(저장 안 함)
 
   plays                  GamePlay[]          // 참여한 게임들 (전적의 source of truth)
   sentFriendRequests     Friendship[] @relation("requester")
@@ -231,9 +232,39 @@ enum FriendshipStatus {
 
 분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
 
-**점수·레벨**: 별도 컬럼을 두지 않고 `plays`의 승/패 집계에서 파생한다(전적과 동일하게 `GamePlay`가 source of truth라 배점을 바꾸면 과거 기록까지 일관되게 재계산됨).
-- 점수 = `max(0, count(won = true) × 20 − count(won = false) × 10)` — 승리 +20, 패배 −10, 하한 0(음수 없음)
-- 레벨 = `floor(점수 / 100) + 1` — 100점당 한 구간(순승 5회당 약 1레벨). 참여 횟수가 아니라 점수(실력)에 연동된다.
+**XP 및 레벨**: 누적 XP는 `User` 테이블의 별도 컬럼(`xp` 정수형, 기본값 0, 단조증가만 가능)으로 저장한다. 레벨은 누적 XP에서 계산하는 파생값이며, DB나 API에 직접 저장되지 않는다(매번 필요할 때 계산).
+
+**레벨 구간 (누적 XP 기준):**
+```
+Lv.1: 0 XP 이상
+Lv.2: 100 XP 이상
+Lv.3: 230 XP 이상
+Lv.4: 390 XP 이상
+Lv.5: 580 XP 이상
+Lv.6: 800 XP 이상
+Lv.7: 1050 XP 이상
+Lv.8: 1330 XP 이상
+Lv.9: 1640 XP 이상
+Lv.10: 1980 XP 이상
+Lv.11: 2350 XP 이상
+Lv.12: 2750 XP 이상
+Lv.13: 3180 XP 이상
+Lv.14: 3640 XP 이상
+Lv.15: 4130 XP 이상
+Lv.16: 4650 XP 이상
+Lv.17: 5200 XP 이상
+Lv.18: 5780 XP 이상
+Lv.19: 6390 XP 이상
+Lv.20: 7030 XP 이상
+```
+Lv.20 이후에도 같은 규칙으로 계속 증가한다. 다음 레벨까지 필요한 XP(레벨업에 필요한 증분, 누적이 아님) = `100 + (현재 레벨 − 1) × 30`. 이 점화식을 닫힌 형태로 적으면 레벨 L(L≥1)의 누적 임계값은 `100×(L−1) + 15×(L−1)×(L−2)` (L=1이면 0) — 위 표의 모든 값과 정확히 일치하고 20 이후로도 같은 공식으로 무한히 확장된다. 레벨 이름이나 칭호는 없고, 화면에는 "Lv.N" 숫자만 표시한다.
+
+**XP 획득 규칙 (게임 1판이 정상 종료됐을 때, 사람 플레이어에게만 지급 — AI 봇은 지급 대상 아님. 한 게임당 유저별로 한 번만 기록해 중복 지급 방지):**
+- 시민 승리: 100 XP
+- 시민 패배: 60 XP
+- 라이어 승리: 110 XP
+- 라이어 패배: 60 XP
+- 게임 도중 방을 나가면: 0 XP (승패 판정 자체가 나지 않으므로 XP 지급 대상이 아님)
 
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
@@ -299,8 +330,9 @@ enum FriendshipStatus {
 - `PUT /api/users/me` `{ nickname }` → 204 — 회원가입/닉네임 변경 직후 로컬 DB에 즉시 반영. Firebase ID 토큰의 name 클레임이 `updateDisplayName` 직후 바로 갱신되지 않을 수 있어, 프론트가 닉네임 확정 시 명시적으로 호출해 친구 요청 등이 가입 직후에도 바로 동작하게 한다. 닉네임 중복이면 409
 - `GET /api/users/me/profile` — 로그인 시 업로드한 프로필 사진을 복원하기 위한 조회. 응답 `{ nickname, avatarUrl }`
 - `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
-- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, score, level }` (승률은 0~1 float, 분모 0이면 `null`. `score`는 승/패 기반 파생 정수(승 +20/패 −10, 하한 0), `level`은 `floor(score/100)+1`. 자세한 배점은 "DB 스키마"의 점수·레벨 참고)
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, xp, level }` (승률은 0~1 float, 분모 0이면 `null`. `xp`는 누적 XP 정수값(단조증가, DB에 저장), `level`은 계산된 파생값(저장 안 함, 매번 누적 XP로부터 계산). 자세한 XP 획득 규칙과 레벨 계산식은 "DB 스키마"의 XP 및 레벨 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
+- `GET /api/users/:uid/profile` — 임의 uid의 닉네임/프로필 사진 조회(`/me/profile`의 타인 버전). 응답 `{ nickname, avatarUrl }`. 방 참가자 채팅·투표 후보 아바타에 실제 프로필 사진을 보여주는 데 쓴다(봇 id는 DB에 없어 `{ nickname: null, avatarUrl: null }`)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
@@ -349,10 +381,11 @@ interface LiarGameLLM {
 - **투표/판정 서버 소유**: 투표 페이즈 UI(room_screen.dart 내부)는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
 - **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, room_screen.dart는 역전승 프롬프트를 자신에게 온 경우에만 렌더링한다.
 - **`RoomSummary`**: `models/room_summary.dart`가 `room:publicList` 계약(`{ roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress }`)을 그대로 반영한다.
-- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영.
+- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영. 방장은 이 토글 자체를 보지 않는다(서버가 `isReady: true`로 고정해두므로 항상 준비된 것으로 취급) — 방장이 아닌 참가자 전원이 준비를 마치면 방장이 "게임 시작"을 눌러 시작한다.
+- **`friend:invite`/`room:invited`**: room_screen.dart 헤더 우측 상단에 방장 전용(게스트 제외) "친구 초대" 버튼을 두고, 누르면 접속 중인 친구 목록 다이얼로그를 띄운다. 목록의 "초대" 버튼이 `friend:invite`를 보내고, 상대는 로비에서 `room:invited` 수신 스낵바(+"입장" 액션)로 받는다.
 - **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
-- **`maxPlayers` 방 생성 UI**: `screens/lobby/lobby_screen.dart`에 슬라이더로 지정, `createRoom()`이 이 값을 emit.
+- **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
 - **`discussion:skip`**: room_screen.dart 토론 페이즈의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
 
@@ -369,8 +402,8 @@ interface LiarGameLLM {
 
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
-- **점수·레벨 튜닝**: 승 +20/패 −10, 100점당 1레벨로 확정해 구현함(데이터 모델 섹션 참조). 배점·구간 폭은 플레이 데이터를 보고 추후 조정 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
-- **점수·레벨 프론트 표시 (일부 연결)**: 백엔드가 `GET /api/users/me`로 `score`·`level`을 내려주고, 로비 전적 카드는 이미 `Lv.{level} ({score} XP)` 형태로 표시한다(`lobby_screen.dart`). 남은 것은 프로필 화면 쪽 — 현재 프로필은 사진·닉네임 편집 전용이라 레벨 배지·점수 진행바가 없다. 진행바를 붙일 때 레벨 내 진행도는 `현재 레벨 시작점 = (level-1)×100`, `다음 레벨까지 = score − (level-1)×100 / 100`으로 계산.
+- **XP·레벨 구간 확정**: XP 획득 규칙(시민 승 100/패 60, 라이어 승 110/패 60)과 레벨 구간 공식(`100×(L−1) + 15×(L−1)×(L−2)`)으로 확정 구현됨(데이터 모델 섹션 참조). 규칙 조정은 플레이 데이터를 보고 추후 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
+- **XP·레벨 프론트 표시**: 백엔드가 `GET /api/users/me`로 누적 `xp`(저장값)와 계산된 `level`(파생값)을 내려주고, 로비 전적 카드에서 `Lv.{level} ({xp} XP)` 형태로 표시한다(`lobby_screen.dart`). 프로필 화면에는 레벨 배지와 레벨 내 진행바를 표시 가능 — 진행도 계산은 `현재 레벨 시작점(누적 XP) = 100×(level−1) + 15×(level−1)×(level−2)`, `다음 레벨까지 필요 증분 XP = 100 + (level−1)×30`, `진행도 = (xp − 현재_레벨_시작점) / 다음_레벨까지_필요_증분`으로 계산.
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`liar-game-8ff55.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
