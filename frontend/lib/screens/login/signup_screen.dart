@@ -34,16 +34,13 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   bool _submitting = false;
   final _emailController = TextEditingController();
   final _nicknameController = TextEditingController();
-  final _userIdController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
 
   bool? _emailAvailable;
   bool? _nicknameAvailable;
-  bool? _userIdAvailable;
   bool _isCheckingEmail = false;
   bool _isCheckingNickname = false;
-  bool _isCheckingUserId = false;
 
   @override
   void initState() {
@@ -65,7 +62,6 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   void dispose() {
     _emailController.dispose();
     _nicknameController.dispose();
-    _userIdController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
@@ -116,29 +112,10 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     }
   }
 
-  // [MOCK] 백엔드는 별도 아이디(userId) 개념이 없다(인증은 이메일+비밀번호, 표시명은 닉네임).
-  // 이 필드/중복확인은 UI 데모용 mock이며 서버로 전송되지 않는다.
-  Future<void> _checkUserId() async {
-    final value = _userIdController.text.trim();
-    if (value.isEmpty) return;
-    setState(() {
-      _isCheckingUserId = true;
-      _userIdAvailable = null;
-    });
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    final taken = mockTakenUserIds.any((id) => id.toLowerCase() == value.toLowerCase());
-    setState(() {
-      _isCheckingUserId = false;
-      _userIdAvailable = !taken;
-    });
-  }
-
   bool get _canSubmit =>
       !_submitting &&
       _emailAvailable == true &&
       _nicknameAvailable == true &&
-      _userIdAvailable == true &&
       _isPasswordValid(_passwordController.text) &&
       _confirmController.text == _passwordController.text;
 
@@ -220,16 +197,6 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     available: _nicknameAvailable,
                     onCheck: _checkNickname,
                     onChanged: () => setState(() => _nicknameAvailable = null),
-                  ),
-                  const SizedBox(height: 16),
-                  _CheckableField(
-                    controller: _userIdController,
-                    label: '아이디',
-                    hintText: '로그인에 사용할 아이디',
-                    isChecking: _isCheckingUserId,
-                    available: _userIdAvailable,
-                    onCheck: _checkUserId,
-                    onChanged: () => setState(() => _userIdAvailable = null),
                   ),
                   const SizedBox(height: 16),
                   AppTextField(
