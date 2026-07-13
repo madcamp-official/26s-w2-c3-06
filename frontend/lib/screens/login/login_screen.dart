@@ -15,7 +15,12 @@ import '../../widgets/responsive_center.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  /// 게스트 프로필 화면에서 "로그인/회원가입"을 눌러 들어온 경우 true. 이때는 기존 게스트
+  /// 세션을 로그아웃시키지 않고(뒤로가기 시 계속 게스트로 이용 가능하도록) 화면 위에 push되며,
+  /// 초기 화면(로고+두 버튼)을 건너뛰고 바로 로그인 폼으로 진입하고, 성공 시 로비까지 pop한다.
+  final bool pushedFromProfile;
+
+  const LoginScreen({super.key, this.pushedFromProfile = false});
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -24,15 +29,30 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _showAuthOptions = false;
+  late bool _showAuthOptions;
   bool _showPassword = false;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _showAuthOptions = widget.pushedFromProfile;
+  }
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  /// 게스트 프로필에서 들어온 경우, 인증 성공 후 이 화면(및 그 위에 쌓인 SignUpScreen 등)을
+  /// 전부 닫고 로비까지 돌아간다. 원래(비로그인) 경로로 들어온 경우엔 AuthGate가 반응형으로
+  /// 알아서 전환하므로 아무것도 하지 않는다.
+  void _afterAuthSuccess() {
+    if (widget.pushedFromProfile && mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   // 로그인 성공 후 화면 전환·세션 복원(닉네임/아바타/소켓)은 최상위 AuthGate가 인증 상태 변화를
@@ -162,12 +182,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
     _runAuth(() async {
       await AuthService.instance.signInWithEmail(email: email, password: password);
+      _afterAuthSuccess();
     });
   }
 
   void _handleSignUp() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SignUpScreen()),
+      MaterialPageRoute(builder: (_) => SignUpScreen(pushedFromProfile: widget.pushedFromProfile)),
     );
   }
 
@@ -185,12 +206,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           // 실패해도 로그인 자체는 막지 않는다 — requireAuth 폴백이 뒤이어 채워준다.
         }
       }
+      _afterAuthSuccess();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // 게스트 프로필에서 들어온 경우에만 뒤로가기를 보여준다 — 누르면 로그아웃 없이 이
+      // 라우트만 닫혀 원래 쓰던 게스트 계정으로 그대로 돌아간다(세션을 건드리지 않았으므로).
+      appBar: widget.pushedFromProfile
+          ? AppBar(
+              leading: IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+              ),
+            )
+          : null,
       body: SafeArea(
         child: SingleChildScrollView(
           child: ResponsiveCenter(
@@ -261,20 +293,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 24),
-        HoverTap(
-          onTap: () => setState(() => _showAuthOptions = false),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.arrow_back, size: 14, color: AppColors.mutedForeground),
-              const SizedBox(width: 6),
-              Text(
-                '홈으로',
-                style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground),
-              ),
-            ],
+        // 게스트 프로필에서 들어온 경우 AppBar 뒤로가기가 이미 있고, "홈으로"(게스트로 플레이
+        // 화면)를 다시 보여주는 건 이미 게스트인 상태와 혼동을 주므로 숨긴다.
+        if (!widget.pushedFromProfile)
+          HoverTap(
+            onTap: () => setState(() => _showAuthOptions = false),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.arrow_back, size: 14, color: AppColors.mutedForeground),
+                const SizedBox(width: 6),
+                Text(
+                  '홈으로',
+                  style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground),
+                ),
+              ],
+            ),
           ),
-        ),
         PixelBox(
           margin: const EdgeInsets.only(top: 24),
           padding: const EdgeInsets.only(top: 28, left: 28, right: 28, bottom: 32),

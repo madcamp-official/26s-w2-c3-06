@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
+import '../../services/user_session.dart';
 import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
@@ -57,9 +58,12 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
       await BackendApi.instance.sendFriendRequestByNickname(nickname);
       _snack('"$nickname"님에게 친구 요청을 보냈습니다.');
     } on BackendApiException catch (e) {
-      _snack(e.statusCode == 404
-          ? '해당 닉네임의 사용자를 찾을 수 없습니다.'
-          : (e.statusCode == 409 ? '이미 친구이거나 요청 중입니다.' : '요청 실패: ${e.message}'));
+      _snack(switch (e.statusCode) {
+        404 => '해당 닉네임의 사용자를 찾을 수 없습니다.',
+        409 => '이미 친구이거나 요청 중입니다.',
+        403 => '게스트 계정과는 친구를 맺을 수 없습니다.',
+        _ => '요청 실패: ${e.message}',
+      });
     }
   }
 
@@ -99,19 +103,27 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
                 Text('닉네임으로 친구 추가',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mutedForeground)),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppTextField(
-                        controller: _addController,
-                        hintText: '상대방 닉네임 입력...',
-                        onSubmitted: (_) => _handleAddFriend(),
+                // 친구 요청은 회원끼리만 가능하다 — 게스트는 uid가 세션마다 바뀔 수 있어
+                // 친구 관계가 쉽게 끊어지므로 입력창 자체를 막고 안내만 보여준다.
+                if (UserSession.isGuest)
+                  Text(
+                    '친구 추가는 회원만 이용할 수 있어요. 로그인/회원가입 후 다시 시도해주세요.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mutedForeground),
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppTextField(
+                          controller: _addController,
+                          hintText: '상대방 닉네임 입력...',
+                          onSubmitted: (_) => _handleAddFriend(),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    AppButton(icon: Icons.person_add_alt_1, label: '', fullWidth: false, onPressed: _handleAddFriend),
-                  ],
-                ),
+                      const SizedBox(width: 8),
+                      AppButton(icon: Icons.person_add_alt_1, label: '', fullWidth: false, onPressed: _handleAddFriend),
+                    ],
+                  ),
                 const SizedBox(height: 16),
                 Row(
                   children: [

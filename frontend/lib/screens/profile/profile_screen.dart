@@ -15,6 +15,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
+import '../login/login_screen.dart';
 
 /// 프로필 사진/닉네임을 수정하는 화면.
 /// 게스트는 닉네임/사진만 바꿀 수 있고, 대신 계정을 만들 수 있는 진입점을 제공한다.
@@ -82,6 +83,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await AuthService.instance.signOut();
     if (!mounted) return;
     _backToRoot();
+  }
+
+  /// 게스트가 "로그인 / 회원가입"을 눌렀을 때. 로그아웃(세션 파괴) 없이 로그인 화면을
+  /// 그대로 push한다 — 뒤로가기를 누르면 로그아웃 없이 원래 쓰던 게스트 계정으로 계속
+  /// 이용할 수 있고, 실제로 로그인/가입을 완료해야만 그 계정으로 전환된다.
+  void _handleGuestUpgrade() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LoginScreen(pushedFromProfile: true)),
+    );
   }
 
   Future<void> _handlePickPhoto() async {
@@ -236,7 +246,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text('게스트로 이용 중입니다. 계정을 만들면 다음에도 같은 프로필로 로그인할 수 있어요.',
                       style: TextStyle(color: AppColors.mutedForeground)),
                   const SizedBox(height: 12),
-                  AppButton(label: '로그인 / 회원가입', onPressed: _handleLogout),
+                  AppButton(label: '로그인 / 회원가입', onPressed: _handleGuestUpgrade),
                 ] else ...[
                   AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleLogout),
                   const SizedBox(height: 12),

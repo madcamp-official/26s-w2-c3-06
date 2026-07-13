@@ -20,7 +20,11 @@ bool _isPasswordValid(String password) {
 }
 
 class SignUpScreen extends ConsumerStatefulWidget {
-  const SignUpScreen({super.key});
+  /// 게스트 프로필 화면에서 로그인/회원가입으로 들어온 경우 true. 이 경우 가입 성공 시
+  /// 이 화면 하나만 닫는 게 아니라, 그 위에 쌓인 LoginScreen까지 함께 닫아 로비로 바로 보낸다.
+  final bool pushedFromProfile;
+
+  const SignUpScreen({super.key, this.pushedFromProfile = false});
 
   @override
   ConsumerState<SignUpScreen> createState() => _SignUpScreenState();
@@ -153,8 +157,14 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       // 가입 직후 로컬 DB에 닉네임 즉시 반영(친구 요청 등이 바로 동작하도록).
       await BackendApi.instance.syncNickname(nickname);
       if (!mounted) return;
-      // 로그인 상태가 됐으므로 최상위 AuthGate가 로비로 전환·세션 복원한다. 이 가입 라우트만 닫는다.
-      Navigator.of(context).pop();
+      // 로그인 상태가 됐으므로 최상위 AuthGate가 로비로 전환·세션 복원한다.
+      if (widget.pushedFromProfile) {
+        // 게스트 프로필 위에 LoginScreen→SignUpScreen 순으로 쌓여 있으므로, 전부 닫고
+        // 맨 아래(로비)로 돌아간다 — 안 그러면 갱신된 로비가 가려진 채 남는다.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      } else {
+        Navigator.of(context).pop();
+      }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

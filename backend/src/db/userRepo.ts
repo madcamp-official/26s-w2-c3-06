@@ -57,6 +57,15 @@ export async function findUidByNickname(nickname: string): Promise<string | null
   return user?.uid ?? null;
 }
 
+// 친구 요청은 게스트(익명 계정)끼리는 물론 게스트-회원 간에도 막고 회원끼리만 허용한다 —
+// 게스트는 uid가 매 세션 바뀔 수 있어 친구 관계가 끊기기 쉽기 때문. 대상 uid의 DB 행이
+// 아직 없으면(친구 요청 대상이 될 정도로 실존하는 닉네임이면 이미 있는 게 정상이지만
+// 방어적으로) 게스트로 간주해 차단한다.
+export async function isAnonymousUser(uid: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({ where: { uid }, select: { isAnonymous: true } });
+  return user?.isAnonymous ?? true;
+}
+
 export async function touchLastActive(uid: string): Promise<void> {
   await prisma.user.update({ where: { uid }, data: { lastActive: new Date() } }).catch(() => {
     // 유저 행이 아직 없으면(예: DB 연동 전 소켓 흐름) 조용히 무시 — 전적 기록 시 upsert로 생성됨.
