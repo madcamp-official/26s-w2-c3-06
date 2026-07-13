@@ -157,19 +157,22 @@ const mockTakenEmails = <String>['test@example.com', 'liar@game.com'];
 const mockTakenNicknames = <String>['방장곰', '토끼', '고양이'];
 const mockTakenUserIds = <String>['admin', 'liarking'];
 
-/// PLAN.md `GET /api/friends` 응답 계약(`{ uid, nickname, avatarUrl }`)엔 온라인 여부나
-/// 참여 중인 방 정보가 없어, 프론트에서도 온라인/오프라인 표시나 "참여" 버튼을 두지 않는다.
+/// PLAN.md `GET /api/friends` 응답 계약(`{ uid, nickname, avatarUrl }`) 자체엔 온라인 여부가
+/// 없지만(그래서 "참여" 버튼처럼 방 정보에 기대는 UI는 두지 않는다), 접속 여부 표시와
+/// 방 초대 가능 여부에는 필요해 [isOnline]을 별도로 둔다. 실제로는 REST가 아니라 소켓
+/// 프레즌스로 내려받을 값.
 class MockFriend {
   final String nickname;
   final int avatarIndex;
+  final bool isOnline;
 
-  const MockFriend({required this.nickname, required this.avatarIndex});
+  const MockFriend({required this.nickname, required this.avatarIndex, this.isOnline = false});
 }
 
-/// FriendsScreen "친구 목록" 탭 더미 데이터.
+/// FriendsScreen "친구 목록" 탭 / RoomScreen "친구 초대" 공용 더미 데이터.
 const mockFriends = <MockFriend>[
-  MockFriend(nickname: '레이니', avatarIndex: 6),
-  MockFriend(nickname: '하늘이', avatarIndex: 7),
+  MockFriend(nickname: '레이니', avatarIndex: 6, isOnline: true),
+  MockFriend(nickname: '하늘이', avatarIndex: 7, isOnline: true),
   MockFriend(nickname: '별빛', avatarIndex: 4),
   MockFriend(nickname: '달토끼', avatarIndex: 5),
 ];

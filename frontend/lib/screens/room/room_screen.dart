@@ -61,6 +61,9 @@ class _RoomScreenState extends State<RoomScreen> {
   final List<String> _customCategories = [];
   final Set<String> _usedWordPairs = {};
 
+  /// 응답 대기 중인 친구 초대(닉네임 기준). 방장 전용 "친구 초대" 기능에서만 쓴다.
+  final Set<String> _pendingFriendInvites = {};
+
   _Phase _phase = _Phase.waiting;
 
   List<Player> _participants = [];
@@ -165,6 +168,10 @@ class _RoomScreenState extends State<RoomScreen> {
       _allPlayers.length >= 3 &&
       _allPlayers.every((p) => p.isReady) &&
       _selectedCategory != null;
+
+  /// 친구 초대는 방장이면서 회원(게스트가 아님)일 때만 가능하다 — 게스트는 친구 목록이
+  /// 아이디 기반이라 애초에 친구 기능 자체를 쓸 수 없다(로비의 게스트 친구 제한과 동일 규칙).
+  bool get _canInviteFriends => widget.isHost && !UserSession.isGuest;
 
   // ─── 채팅 ────────────────────────────────────────────────
 
@@ -741,7 +748,8 @@ class _RoomScreenState extends State<RoomScreen> {
                           variant: AppButtonVariant.outlined,
                           onPressed: () {
                             Navigator.of(dialogContext).pop();
-                            Navigator.of(context).pop();
+                            // 방장이면 방이 사라진다는 걸 로비에 알린다(PLAN.md room:closed).
+                            Navigator.of(context).pop(widget.isHost);
                           },
                         ),
                       ),
@@ -790,15 +798,175 @@ class _RoomScreenState extends State<RoomScreen> {
     });
   }
 
+  // ─── 친구 초대 (대기 상태 · 방장 전용) ───────────────────────
+
+  /// 친구 목록을 스크롤 가능한 박스(하단 시트)로 보여준다. 온라인인 친구만 초대할 수 있다.
+  void _openInviteFriendsSheet() {
+    if (!_canInviteFriends) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              Text('👥 친구 초대', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+              const SizedBox(height: 4),
+              Text(
+                '온라인인 친구만 초대할 수 있어요',
+                style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 340),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: mockFriends.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) => _buildFriendInviteRow(sheetContext, mockFriends[index]),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFriendInviteRow(BuildContext sheetContext, MockFriend friend) {
+    final alreadyJoined = _humanPlayers.any((p) => p.nickname == friend.nickname);
+    final pending = _pendingFriendInvites.contains(friend.nickname);
+    final roomFull = _allPlayers.length >= widget.maxPlayers;
+    final canInvite = friend.isOnline && !alreadyJoined && !pending && !roomFull;
+
+    String? statusLabel;
+    if (alreadyJoined) {
+      statusLabel = '참여중';
+    } else if (pending) {
+      statusLabel = '응답 대기중';
+    } else if (!friend.isOnline) {
+      statusLabel = '오프라인';
+    } else if (roomFull) {
+      statusLabel = '방이 가득 참';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
+      child: Row(
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              UserAvatar(avatarIndex: friend.avatarIndex, radius: 18),
+              // 온라인일 때만 초록 점 — 초대 가능 여부를 색으로도 바로 알 수 있게 한다.
+              if (friend.isOnline)
+                Positioned(
+                  right: -1,
+                  bottom: -1,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: AppColors.success,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.card, width: 2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(friend.nickname, style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold)),
+                if (statusLabel != null)
+                  Text(statusLabel, style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
+              ],
+            ),
+          ),
+          AppButton(
+            label: alreadyJoined ? '참여중' : (pending ? '대기중' : '초대'),
+            dense: true,
+            fullWidth: false,
+            variant: alreadyJoined ? AppButtonVariant.primary : AppButtonVariant.outlined,
+            onPressed: canInvite
+                ? () {
+                    Navigator.of(sheetContext).pop();
+                    _sendFriendInvite(friend);
+                  }
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendFriendInvite(MockFriend friend) {
+    setState(() => _pendingFriendInvites.add(friend.nickname));
+    _addSystemMessage('📨 ${friend.nickname}님에게 초대를 보냈습니다.');
+
+    // 초대장은 상대방 기기로 가는 것이지 나에게 오는 게 아니므로, 내 화면에 "초대 도착"
+    // 팝업을 띄우는 건 앞뒤가 안 맞는다(내가 보낸 초대의 알림을 내가 받는 꼴). 실제 서비스라면
+    // 상대방 기기에서 수락/거절이 일어나고 그 "결과"만 나에게 돌아오므로, 여기서도 상대방의
+    // 응답을 기다리는 동안(1.5~2.5초) 잠깐 대기했다가 결과만 채팅으로 알려준다.
+    // TODO(백엔드 연동): 실제로는 상대방의 room:inviteResponse 같은 이벤트 결과를 그대로 반영.
+    final delay = Duration(milliseconds: 1500 + _random.nextInt(1000));
+    Timer(delay, () {
+      if (!mounted) return;
+      final accepted = _random.nextDouble() < 0.75;
+      _resolveFriendInvite(friend, accepted: accepted);
+    });
+  }
+
+  void _resolveFriendInvite(MockFriend friend, {required bool accepted}) {
+    setState(() => _pendingFriendInvites.remove(friend.nickname));
+
+    if (!accepted) {
+      _addSystemMessage('${friend.nickname}님이 초대를 거절했습니다.');
+      return;
+    }
+    if (_allPlayers.length >= widget.maxPlayers) {
+      _addSystemMessage('${friend.nickname}님이 초대를 수락했지만 방이 가득 찼습니다.');
+      return;
+    }
+    setState(() {
+      _humanPlayers.add(Player(id: 'friend-${friend.nickname}', nickname: friend.nickname, isReady: true));
+      // 새로 합류한 사람만큼 봇 자리가 넘치면 정원에 맞게 줄인다.
+      final maxBots = (widget.maxPlayers - _humanPlayers.length).clamp(0, widget.maxPlayers);
+      if (_botCount > maxBots) _botCount = maxBots;
+    });
+    _addSystemMessage('🎉 ${friend.nickname}님이 초대를 수락하고 참여했습니다!', highlight: true);
+  }
+
   // ─── 방 나가기 (대기 상태에서만 유효) ──────────────────────
 
   Future<void> _handleLeaveRoom() async {
+    // PLAN.md room:closed 계약: 호스트가 나가면 방이 통째로 사라지고, 호스트가 아닌 인원의
+    // 퇴장은 방을 유지한 채 플레이어 목록만 갱신된다.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('방 나가기'),
-          content: const Text('정말 이 방에서 나가시겠어요?'),
+          content: Text(
+            widget.isHost ? '방장이 나가면 방이 사라집니다. 정말 나가시겠어요?' : '정말 이 방에서 나가시겠어요?',
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('취소')),
             FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('나가기')),
@@ -808,7 +976,8 @@ class _RoomScreenState extends State<RoomScreen> {
     );
     if (confirmed != true) return;
     if (!mounted) return;
-    Navigator.of(context).pop();
+    // 결과로 isHost를 돌려줘서 로비가 공개방 목록에서 이 방을 지울지 판단하게 한다.
+    Navigator.of(context).pop(widget.isHost);
   }
 
   // ─── UI ──────────────────────────────────────────────────
@@ -828,9 +997,20 @@ class _RoomScreenState extends State<RoomScreen> {
           style: PixelFont.body(fontSize: 11, color: AppColors.foreground, fontWeight: FontWeight.bold),
         ),
         actions: [
-          // 데스크탑에서는 나가기 버튼이 좌측 내비게이션 바로 이동한다.
+          // 데스크탑에서는 나가기/초대 버튼이 좌측 내비게이션 바로 이동한다.
           // 상단바를 최대한 얇게 유지하기 위해 픽셀 버튼 대신 컴팩트한 아이콘 버튼을 쓴다.
-          if (isWaiting && !isDesktop)
+          if (isWaiting && !isDesktop) ...[
+            // 친구 초대는 방장 전용 기능이고, 게스트는 친구 기능 자체를 쓸 수 없어 버튼을
+            // 표시하지 않는다.
+            if (_canInviteFriends)
+              IconButton(
+                tooltip: '친구 초대',
+                onPressed: _openInviteFriendsSheet,
+                icon: const Icon(Icons.group_add, size: 18),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
             IconButton(
               tooltip: '방 나가기',
               onPressed: _handleLeaveRoom,
@@ -838,8 +1018,8 @@ class _RoomScreenState extends State<RoomScreen> {
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            )
-          else if (_phase == _Phase.describing)
+            ),
+          ] else if (_phase == _Phase.describing)
             Padding(
               padding: const EdgeInsets.only(right: 10),
               child: Column(
@@ -868,6 +1048,8 @@ class _RoomScreenState extends State<RoomScreen> {
             if (isDesktop)
               AppNavRail(
                 items: [
+                  if (isWaiting && _canInviteFriends)
+                    AppNavRailItem(icon: Icons.group_add, label: '초대', onTap: _openInviteFriendsSheet),
                   if (isWaiting) AppNavRailItem(icon: Icons.logout, label: '나가기', onTap: _handleLeaveRoom),
                 ],
               ),

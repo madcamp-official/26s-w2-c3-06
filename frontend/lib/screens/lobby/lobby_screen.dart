@@ -49,7 +49,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
     int maxPlayers = 8,
     String? initialCategory,
   }) async {
-    await Navigator.of(context).push(
+    // RoomScreen은 방장이 나갈 때 true를 돌려준다(PLAN.md room:closed — 방장 퇴장 시 방이
+    // 통째로 사라짐). 그 경우 공개방 목록에서도 지워야 다른 사람이 사라진 방에 들어가려는
+    // 걸 막을 수 있다. 방장이 아닌 사람의 퇴장은 방이 유지되므로 목록도 그대로 둔다.
+    final roomClosed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         settings: const RouteSettings(name: 'room'),
         builder: (_) => RoomScreen(
@@ -60,9 +63,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ),
       ),
     );
-    // 방에서 게임을 마치고 돌아오면 갱신된 전적(승률/레벨)이 로비에 바로 반영되도록 다시 그린다.
     if (!mounted) return;
-    setState(() {});
+    // 방에서 게임을 마치고 돌아오면 갱신된 전적(승률/레벨)이 로비에 바로 반영되도록 다시 그린다.
+    setState(() {
+      if (roomClosed == true) {
+        _publicRooms.removeWhere((r) => r.code == code);
+      }
+    });
   }
 
   String _generateRoomCode() {

@@ -152,10 +152,39 @@ class _FriendTile extends StatelessWidget {
         decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
         child: Row(
           children: [
-            UserAvatar(avatarIndex: friend.avatarIndex, radius: 20),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                UserAvatar(avatarIndex: friend.avatarIndex, radius: 20),
+                // 접속중인 친구만 초록 점으로 표시한다.
+                if (friend.isOnline)
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: AppColors.success,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.card, width: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    friend.isOnline ? '온라인' : '오프라인',
+                    style: TextStyle(fontSize: 12, color: friend.isOnline ? AppColors.success : AppColors.mutedForeground),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
