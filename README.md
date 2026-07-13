@@ -51,7 +51,7 @@
 
 ## 기획안
 
-- **산출물 주제:** AI가 개입하는 라이어게임 (Liar Game)
+- **산출물 주제:** AI가 개입하는 라이어게임 — 프로젝트명 **L-AI-R GAME**
 - **제작 목적:** 실시간 인터랙션 · LLM Wrapper · Cross-Platform 세 옵션을 하나의 게임 산출물로 통합 구현
 - **선택 옵션:** 실시간 인터랙션 + LLM Wrapper + Cross-Platform
 - **핵심 구현 요소:**
