@@ -38,6 +38,16 @@ dependencies:
   # 프로필 사진(실제 이미지 첨부)용 이미지 선택기.
   image_picker: ^1.1.2
 
+  # 백엔드 연동 스택 (Socket.IO 실시간 이벤트 + Firebase 인증/스토리지 + REST).
+  socket_io_client: ^3.1.6
+  firebase_core: ^4.11.0
+  firebase_auth: ^6.5.4
+  firebase_storage: ^13.0.6
+  flutter_riverpod: ^3.3.2
+  google_sign_in: ^7.2.0
+  http: ^1.6.0
+  shared_preferences: ^2.5.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

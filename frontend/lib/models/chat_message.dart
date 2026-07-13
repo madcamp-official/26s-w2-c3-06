@@ -1,6 +1,20 @@
 /// 채팅 메시지의 종류. PLAN.md 계약(type: 'chat'|'turnDescription'|'aiComment'|'system')과 맞춘다.
 enum ChatMessageType { chat, turnDescription, aiComment, system }
 
+ChatMessageType _chatTypeFromString(String raw) {
+  switch (raw) {
+    case 'turnDescription':
+      return ChatMessageType.turnDescription;
+    case 'aiComment':
+      return ChatMessageType.aiComment;
+    case 'system':
+      return ChatMessageType.system;
+    case 'chat':
+    default:
+      return ChatMessageType.chat;
+  }
+}
+
 class ChatMessage {
   final String id;
 
@@ -23,11 +37,27 @@ class ChatMessage {
   ChatMessage({
     required this.id,
     required this.senderId,
-    required this.senderNickname,
+    this.senderNickname = '',
     this.avatarIndex = 0,
     required this.text,
     this.type = ChatMessageType.chat,
     this.highlight = false,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
+
+  bool get isAi => senderId == 'ai';
+  bool get isSystem => senderId == 'system';
+
+  /// 서버 chat:message 페이로드(`{ id, senderId, type, text, timestamp }`)를 그대로 파싱한다.
+  /// senderNickname/avatarIndex 같은 표시용 값은 서버 계약에 없어(참가자 목록으로 매핑) 비워 두고,
+  /// 화면에서 senderId를 닉네임으로 해석한다. game 시작/종료 등 강조 여부(highlight)도 화면에서 판단.
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      id: json['id'] as String,
+      senderId: json['senderId'] as String,
+      type: _chatTypeFromString(json['type'] as String),
+      text: json['text'] as String,
+      timestamp: DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int),
+    );
+  }
 }
