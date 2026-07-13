@@ -5,16 +5,12 @@ import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
 import '../../services/auth_service.dart';
-import '../../services/user_session.dart';
-import '../../state/auth_provider.dart';
-import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/pixel_box.dart';
 import '../../widgets/pixel_dialog.dart';
 import '../../widgets/responsive_center.dart';
-import '../lobby/lobby_screen.dart';
 import 'signup_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -38,32 +34,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-  void _enterApp() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const LobbyScreen()),
-    );
-  }
-
-  /// 로그인/가입 성공 직후 공통 처리: 닉네임 확정, 소켓 연결(ID 토큰 handshake), 로비 진입.
-  /// 전적(UserStats)은 로비/프로필 화면이 백엔드에서 직접 조회하므로 여기서 다루지 않는다.
-  Future<void> _afterAuth(User user, {required bool isGuest}) async {
-    final nickname = (user.displayName?.trim().isNotEmpty ?? false) ? user.displayName!.trim() : '플레이어';
-    if (isGuest) {
-      UserSession.signInAsGuest(nickname);
-    } else {
-      UserSession.signInAsMember(nickname: nickname);
-    }
-    ref.read(nicknameProvider.notifier).set(nickname);
-    final token = await AuthService.instance.getIdToken();
-    if (token != null) ref.read(roomProvider.notifier).connect(token);
-    // 업로드해둔 프로필 사진(서버 저장 URL)을 복원 — 실패해도 로그인은 막지 않는다.
-    try {
-      final profile = await BackendApi.instance.getMyProfile();
-      ref.read(avatarUrlProvider.notifier).set(profile.avatarUrl);
-    } catch (_) {}
-    if (!mounted) return;
-    _enterApp();
-  }
+  // 로그인 성공 후 화면 전환·세션 복원(닉네임/아바타/소켓)은 최상위 AuthGate가 인증 상태 변화를
+  // 감지해 반응형으로 처리한다(main.dart). 이 화면은 인증만 수행한다.
 
   /// 인증 액션 공통 래퍼 — 중복 탭 방지, 에러 시 스낵바 표시.
   Future<void> _runAuth(Future<void> Function() action) async {
@@ -161,7 +133,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
         return;
       }
-      final user = await AuthService.instance.signInAsGuest(nickname);
+      await AuthService.instance.signInAsGuest(nickname);
       // 익명 계정 생성 후 로컬 DB에 닉네임을 즉시 예약 — 서버 @unique 제약으로 권위 검증(409면 중복).
       try {
         await BackendApi.instance.syncNickname(nickname);
@@ -174,7 +146,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
         return;
       }
-      await _afterAuth(user, isGuest: true);
+      // 로그인 성공 → AuthGate가 감지해 로비로 전환하고 세션을 복원한다.
     });
   }
 
@@ -188,8 +160,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
     _runAuth(() async {
-      final user = await AuthService.instance.signInWithEmail(email: email, password: password);
-      await _afterAuth(user, isGuest: false);
+      await AuthService.instance.signInWithEmail(email: email, password: password);
     });
   }
 
@@ -201,8 +172,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _handleGoogleAuth() {
     _runAuth(() async {
-      final user = await AuthService.instance.signInOrLinkWithGoogle();
-      await _afterAuth(user, isGuest: false);
+      await AuthService.instance.signInOrLinkWithGoogle();
     });
   }
 

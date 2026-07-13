@@ -14,7 +14,6 @@ import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
-import '../login/login_screen.dart';
 
 /// 프로필 사진/닉네임/비밀번호를 수정하는 화면.
 /// 게스트는 닉네임/사진만 바꿀 수 있고, 대신 계정을 만들 수 있는 진입점을 제공한다.
@@ -111,17 +110,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _goToLoginScreen() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
+  /// 최상위(AuthGate)로 되돌아간다. 로그아웃/탈퇴 후 호출하면 AuthGate가 인증 상태 변화를
+  /// 감지해 로그인 화면을 보여준다(개별 화면이 LoginScreen을 직접 push하지 않는다).
+  void _backToRoot() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _handleLogout() async {
     await AuthService.instance.signOut();
     if (!mounted) return;
-    _goToLoginScreen();
+    _backToRoot();
   }
 
   Future<void> _handlePickPhoto() async {
@@ -198,7 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     if (!mounted) return;
-    _goToLoginScreen();
+    _backToRoot();
   }
 
   @override
@@ -341,7 +339,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text('게스트로 이용 중입니다. 계정을 만들면 다음에도 같은 프로필로 로그인할 수 있어요.',
                       style: TextStyle(color: AppColors.mutedForeground)),
                   const SizedBox(height: 12),
-                  AppButton(label: '로그인 / 회원가입', onPressed: _goToLoginScreen),
+                  AppButton(label: '로그인 / 회원가입', onPressed: _handleLogout),
                 ] else ...[
                   AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleLogout),
                   const SizedBox(height: 12),

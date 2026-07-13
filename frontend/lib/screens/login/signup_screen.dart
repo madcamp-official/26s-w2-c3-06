@@ -5,14 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/backend_api.dart';
 import '../../mock/mock_data.dart';
 import '../../services/auth_service.dart';
-import '../../services/user_session.dart';
-import '../../state/auth_provider.dart';
-import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
-import '../lobby/lobby_screen.dart';
 
 final _specialCharPattern = RegExp(r'''[!@#$%^&*(),.?":{}|<>_\-\[\]/\\;+=~`]''');
 
@@ -140,15 +136,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       );
       // 가입 직후 로컬 DB에 닉네임 즉시 반영(친구 요청 등이 바로 동작하도록).
       await BackendApi.instance.syncNickname(nickname);
-      UserSession.signInAsMember(nickname: nickname);
-      ref.read(nicknameProvider.notifier).set(nickname);
-      final token = await AuthService.instance.getIdToken();
-      if (token != null) ref.read(roomProvider.notifier).connect(token);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LobbyScreen()),
-        (route) => false,
-      );
+      // 로그인 상태가 됐으므로 최상위 AuthGate가 로비로 전환·세션 복원한다. 이 가입 라우트만 닫는다.
+      Navigator.of(context).pop();
     } on FirebaseAuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
