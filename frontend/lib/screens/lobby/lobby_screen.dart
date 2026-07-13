@@ -433,8 +433,10 @@ class _StatsCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Lv.${stats.level} · 전체 ${stats.totalGames}판 · $winRateText',
+                  'Lv.${stats.level} (${stats.xp} XP) · 전체 ${stats.totalGames}판 · $winRateText',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ],
             ),
