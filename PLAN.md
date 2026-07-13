@@ -183,7 +183,7 @@ model User {
   avatarUrl   String?                        // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용
   isAnonymous Boolean  @default(true)        // 게스트 구분 (리더보드 필터링 · 30일 정리 대상 판별)
   lastActive  DateTime @default(now())       // 게스트 cleanup(마지막 활동 30일 경과) 기준
-  xp          Int      @default(0)           // 누적 경험치(EXP) (정수, 단조증가만 가능 — 절대 감소하지 않음. 게임 종료 시 경험치 지급 규칙에 따라 증가). 레벨은 이 xp에서 계산하는 파생값(저장 안 함)
+  exp         Int      @default(0)           // 누적 경험치(EXP) (정수, 단조증가만 가능 — 절대 감소하지 않음. 게임 종료 시 경험치 지급 규칙에 따라 증가). 레벨은 이 exp에서 계산하는 파생값(저장 안 함)
 
   plays                  GamePlay[]          // 참여한 게임들 (전적의 source of truth)
   sentFriendRequests     Friendship[] @relation("requester")
@@ -232,7 +232,7 @@ enum FriendshipStatus {
 
 분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
 
-**경험치(EXP) 및 레벨**: 누적 EXP는 `User` 테이블의 별도 컬럼(`xp` 정수형, 기본값 0, **단조증가만 가능 — 절대 감소하지 않는다**)으로 저장한다. 레벨은 누적 EXP에서 계산하는 파생값이며, DB나 API에 직접 저장되지 않는다(매번 필요할 때 계산). 정책 상세는 아래 [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책) 참고.
+**경험치(EXP) 및 레벨**: 누적 EXP는 `User` 테이블의 별도 컬럼(`exp` 정수형, 기본값 0, **단조증가만 가능 — 절대 감소하지 않는다**)으로 저장한다. 레벨은 누적 EXP에서 계산하는 파생값이며, DB나 API에 직접 저장되지 않는다(매번 필요할 때 계산). 정책 상세는 아래 [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책) 참고.
 
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
@@ -378,7 +378,7 @@ finalExp = max(0, floor(baseExp × participationMultiplier × repeatMatchMultipl
 - `PUT /api/users/me` `{ nickname }` → 204 — 회원가입/닉네임 변경 직후 로컬 DB에 즉시 반영. Firebase ID 토큰의 name 클레임이 `updateDisplayName` 직후 바로 갱신되지 않을 수 있어, 프론트가 닉네임 확정 시 명시적으로 호출해 친구 요청 등이 가입 직후에도 바로 동작하게 한다. 닉네임 중복이면 409
 - `GET /api/users/me/profile` — 로그인 시 업로드한 프로필 사진을 복원하기 위한 조회. 응답 `{ nickname, avatarUrl }`
 - `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
-- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, xp, level }` (승률은 0~1 float, 분모 0이면 `null`. `xp`는 누적 경험치(EXP) 정수값(단조증가, DB에 저장, 절대 감소하지 않음), `level`은 계산된 파생값(저장 안 함, 매번 누적 경험치로부터 계산). 자세한 경험치 지급 규칙과 레벨 계산식은 [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책) 참고)
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, exp, level }` (승률은 0~1 float, 분모 0이면 `null`. `exp`는 누적 경험치(EXP) 정수값(단조증가, DB에 저장, 절대 감소하지 않음), `level`은 계산된 파생값(저장 안 함, 매번 누적 경험치로부터 계산). 자세한 경험치 지급 규칙과 레벨 계산식은 [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책) 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
 - `GET /api/users/:uid/profile` — 임의 uid의 닉네임/프로필 사진 조회(`/me/profile`의 타인 버전). 응답 `{ nickname, avatarUrl }`. 방 참가자 채팅·투표 후보 아바타에 실제 프로필 사진을 보여주는 데 쓴다(봇 id는 DB에 없어 `{ nickname: null, avatarUrl: null }`)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
@@ -453,7 +453,7 @@ interface LiarGameLLM {
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
 - **경험치 지급 정책 재구현 필요**: [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책)에서 역할·승패·투표 대상·참여도까지 반영하는 세분화된 규칙으로 정책을 개정했다. 현재 백엔드(`userRepo.ts`)는 이전 버전(시민 승 100/패 60, 라이어 승 110/패 60, 참여도 보정 없음)으로 구현돼 있어 새 정책과 어긋난다 — `GamePlay`에 플레이어별 설명 제출 여부·투표 완료 여부·투표 대상 필드를 추가하고 지급 로직을 새 정책에 맞게 갱신해야 한다. 레벨 구간 공식(`100×(L−1) + 15×(L−1)×(L−2)`) 자체는 변경 없음. 규칙 조정은 플레이 데이터를 보고 추후 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
-- **경험치·레벨 프론트 표시**: 백엔드가 `GET /api/users/me`로 누적 `xp`(저장값)와 계산된 `level`(파생값)을 내려주고, 로비 전적 카드에서 `Lv.{level} ({xp} XP)` 형태로 표시한다(`lobby_screen.dart`). 프로필 화면에도 레벨 배지와 레벨 내 진행바(`_LevelBadge`)를 표시한다 — 진행도 계산은 `현재 레벨 시작점(누적 경험치) = 100×(level−1) + 15×(level−1)×(level−2)`, `다음 레벨까지 필요 증분 경험치 = 100 + (level−1)×30`, `진행도 = (xp − 현재_레벨_시작점) / 다음_레벨까지_필요_증분`으로 계산(`UserStats.levelProgress`/`xpToNextLevel`).
+- **경험치·레벨 프론트 표시**: 백엔드가 `GET /api/users/me`로 누적 `exp`(저장값)와 계산된 `level`(파생값)을 내려주고, 로비 전적 카드에서 `Lv.{level} ({exp} EXP)` 형태로 표시한다(`lobby_screen.dart`). 프로필 화면에도 레벨 배지와 레벨 내 진행바(`_LevelBadge`)를 표시한다 — 진행도 계산은 `현재 레벨 시작점(누적 경험치) = 100×(level−1) + 15×(level−1)×(level−2)`, `다음 레벨까지 필요 증분 경험치 = 100 + (level−1)×30`, `진행도 = (exp − 현재_레벨_시작점) / 다음_레벨까지_필요_증분`으로 계산(`UserStats.levelProgress`/`expToNextLevel`).
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`l-ai-r-game.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.

@@ -45,7 +45,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     BackendApi.instance.getMyProfile().then((p) {
       if (mounted) setState(() => _avatarUrl = p.avatarUrl);
     }).catchError((_) {});
-    // 레벨 배지·진행바 표시용(PLAN "XP·레벨 프론트 표시").
+    // 레벨 배지·진행바 표시용(PLAN "경험치(EXP)·레벨 프론트 표시").
     BackendApi.instance.getMyStats().then((s) {
       if (mounted) setState(() => _stats = s);
     }).catchError((_) {});
@@ -306,7 +306,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 }
 
-/// 레벨 배지 + 레벨 내 진행바. PLAN "XP·레벨 프론트 표시" 참고 — 진행도는
+/// 레벨 배지 + 레벨 내 진행바. PLAN "경험치(EXP)·레벨 프론트 표시" 참고 — 진행도는
 /// UserStats.levelProgress(서버와 동일한 레벨 임계값 공식)로 계산한다.
 class _LevelBadge extends StatelessWidget {
   final UserStats stats;
@@ -338,7 +338,7 @@ class _LevelBadge extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '다음 레벨까지 ${stats.xpToNextLevel} XP',
+            '다음 레벨까지 ${stats.expToNextLevel} EXP',
             style: TextStyle(fontSize: 10, color: AppColors.mutedForeground),
           ),
         ],

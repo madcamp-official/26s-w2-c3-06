@@ -16,7 +16,7 @@ model User {
   avatarUrl   String? // Firebase Storage 업로드 사진(avatars/{uid}). null이면 기본 아이콘 사용.
   isAnonymous Boolean  @default(true) // 게스트 구분 (리더보드 필터링 · 30일 정리 판별)
   lastActive  DateTime @default(now()) // 게스트 cleanup(마지막 활동 30일 경과) 기준
-  xp          Int      @default(0) // 누적 XP(단조증가만 가능, 게임 종료 시 XP 획득 규칙에 따라 증가). 레벨은 파생값(저장 안 함)
+  exp         Int      @default(0) // 누적 경험치(EXP)(단조증가만 가능, 게임 종료 시 EXP 획득 규칙에 따라 증가). 레벨은 파생값(저장 안 함)
 
   plays                  GamePlay[] // 참여한 게임들 (전적의 source of truth)
   sentFriendRequests     Friendship[] @relation("requester")

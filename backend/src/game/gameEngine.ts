@@ -5,7 +5,7 @@ import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
-import { awardXp } from '../db/userRepo';
+import { awardExp } from '../db/userRepo';
 
 // 게임/라운드 상태 머신. PLAN "Socket.IO 이벤트 계약"의 페이즈 전이를 서버가 전적으로 소유:
 // 대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)
@@ -556,7 +556,7 @@ function finalizeGame(
       won: result.winner === 'liar' ? game.liarIds.includes(id) : !game.liarIds.includes(id),
     }));
   recordGame(humanEntries).catch((err) => console.error('[gameEngine] GamePlay 기록 실패', err));
-  awardXp(humanEntries).catch((err) => console.error('[gameEngine] XP 지급 실패', err));
+  awardExp(humanEntries).catch((err) => console.error('[gameEngine] EXP 지급 실패', err));
 
   io.to(room.roomCode).emit('game:ended', {});
 
