@@ -64,7 +64,7 @@ List<Player> buildMockPlayers({required bool selfIsHost}) {
 
 /// RoomScreen에서 고를 수 있는 기본(하드코딩) 카테고리 목록. 방장이 이 방에서 직접 추가한
 /// 카테고리는 RoomScreen 내부 상태에만 보관되고 방 종료 시 함께 사라진다.
-const mockCategories = <String>['동물', '음식', '스포츠', '영화', '직업', 'K-pop'];
+const mockCategories = <String>['동물', '음식', '스포츠', '영화', '직업', 'K-pop', '랜덤선택'];
 
 /// 카테고리별 (진짜 제시어, 가짜 제시어) 후보 목록. 실제로는 AI가 생성하지만,
 /// 백엔드 연동 전까지는 이 목데이터 중 아직 이번 게임에서 안 쓴 쌍을 무작위로 골라 흉내 낸다.
