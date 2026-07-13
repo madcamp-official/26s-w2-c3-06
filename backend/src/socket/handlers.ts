@@ -227,6 +227,14 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     void gameEngine.submitDescription(io, room, uid, payload.text.trim());
   });
 
+  // 방장이 토론 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다.
+  socket.on('discussion:skip', () => {
+    const room = currentRoom();
+    if (!room) return;
+    if (!roomManager.isHost(room, uid)) return;
+    gameEngine.skipDiscussion(io, room);
+  });
+
   socket.on('vote:cast', (payload: { votedPlayerId: string }) => {
     const room = currentRoom();
     if (!room) return;

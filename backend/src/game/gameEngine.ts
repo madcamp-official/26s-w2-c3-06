@@ -351,6 +351,17 @@ function endDescribingPhase(io: Server, room: RoomState): void {
   phaseTimers.set(room.roomCode, timer);
 }
 
+// 방장이 토론 제한시간을 기다리지 않고 곧바로 투표로 넘어간다.
+// 토론 페이즈가 아닐 때(설명 중·이미 투표 중 등) 호출되면 조용히 무시한다.
+export function skipDiscussion(io: Server, room: RoomState): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'discussion') return;
+  const timer = phaseTimers.get(room.roomCode);
+  if (timer) clearTimeout(timer);
+  phaseTimers.delete(room.roomCode);
+  startVoting(io, room);
+}
+
 // ── 투표 페이즈 ──
 
 function startVoting(io: Server, room: RoomState): void {
