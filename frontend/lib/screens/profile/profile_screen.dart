@@ -16,9 +16,8 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
 
-/// 프로필 사진/닉네임/비밀번호를 수정하는 화면.
+/// 프로필 사진/닉네임을 수정하는 화면.
 /// 게스트는 닉네임/사진만 바꿀 수 있고, 대신 계정을 만들 수 있는 진입점을 제공한다.
-/// 비밀번호 변경은 이메일 가입 계정(AuthProvider.email)에서만 노출된다(구글 계정은 비밀번호가 없음).
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -28,12 +27,6 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _nicknameController;
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  bool _showCurrent = false;
-  bool _showNew = false;
-  bool _showConfirm = false;
   late int _avatarIndex;
   Uint8List? _profileImageBytes;
   String? _avatarUrl;
@@ -53,9 +46,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _nicknameController.dispose();
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -81,33 +71,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _snack(e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 저장에 실패했습니다.');
     } catch (e) {
       _snack('오류: $e');
-    }
-  }
-
-  Future<void> _handleChangePassword() async {
-    if (_newPasswordController.text.length < 8) {
-      _snack('새 비밀번호는 8자 이상이어야 합니다.');
-      return;
-    }
-    if (_newPasswordController.text != _confirmPasswordController.text) {
-      _snack('새 비밀번호가 일치하지 않습니다.');
-      return;
-    }
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      final email = user?.email;
-      // 비밀번호 변경은 최근 로그인 필요 — 현재 비밀번호로 재인증 후 변경.
-      if (email != null && _currentPasswordController.text.isNotEmpty) {
-        final cred = EmailAuthProvider.credential(email: email, password: _currentPasswordController.text);
-        await user!.reauthenticateWithCredential(cred);
-      }
-      await user?.updatePassword(_newPasswordController.text);
-      _currentPasswordController.clear();
-      _newPasswordController.clear();
-      _confirmPasswordController.clear();
-      _snack('비밀번호가 변경되었습니다.');
-    } on FirebaseAuthException catch (e) {
-      _snack('변경 실패: ${e.message ?? e.code}');
     }
   }
 
@@ -204,8 +167,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final isGuest = user?.isAnonymous ?? UserSession.isGuest;
-    // 비밀번호 변경은 이메일/비밀번호(provider 'password') 계정에서만 노출(구글 계정은 비밀번호 없음).
-    final canChangePassword = user?.providerData.any((p) => p.providerId == 'password') ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -284,57 +245,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                if (canChangePassword) ...[
-                  const SizedBox(height: 16),
-                  _FieldSection(
-                    label: 'PASSWORD',
-                    description: '이메일 가입 계정 — 비밀번호를 변경할 수 있습니다',
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AppTextField(
-                          controller: _currentPasswordController,
-                          hintText: '현재 비밀번호',
-                          obscureText: !_showCurrent,
-                          suffixIcon: IconButton(
-                            icon: Icon(_showCurrent ? Icons.visibility_off : Icons.visibility, size: 18),
-                            onPressed: () => setState(() => _showCurrent = !_showCurrent),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        AppTextField(
-                          controller: _newPasswordController,
-                          hintText: '새 비밀번호 (8자 이상)',
-                          obscureText: !_showNew,
-                          suffixIcon: IconButton(
-                            icon: Icon(_showNew ? Icons.visibility_off : Icons.visibility, size: 18),
-                            onPressed: () => setState(() => _showNew = !_showNew),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        AppTextField(
-                          controller: _confirmPasswordController,
-                          hintText: '새 비밀번호 확인',
-                          obscureText: !_showConfirm,
-                          suffixIcon: IconButton(
-                            icon: Icon(_showConfirm ? Icons.visibility_off : Icons.visibility, size: 18),
-                            onPressed: () => setState(() => _showConfirm = !_showConfirm),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: AppButton(
-                            label: '비밀번호 변경',
-                            icon: Icons.check,
-                            fullWidth: false,
-                            onPressed: _handleChangePassword,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 24),
                 if (isGuest) ...[
                   Text('게스트로 이용 중입니다. 계정을 만들면 다음에도 같은 프로필로 로그인할 수 있어요.',
@@ -367,10 +277,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
 class _FieldSection extends StatelessWidget {
   final String label;
-  final String? description;
   final Widget child;
 
-  const _FieldSection({required this.label, this.description, required this.child});
+  const _FieldSection({required this.label, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -382,10 +291,6 @@ class _FieldSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground, letterSpacing: 1)),
-          if (description != null) ...[
-            const SizedBox(height: 4),
-            Text(description!, style: TextStyle(fontSize: 12, color: AppColors.mutedForeground)),
-          ],
           const SizedBox(height: 10),
           child,
         ],
