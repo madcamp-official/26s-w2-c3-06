@@ -111,7 +111,7 @@ Flutter(iOS/Android/Web) 클라이언트가 `socket_io_client`로 Node/Express +
 
 ### 데이터 구조
 
-방(Room) > 게임(Game) > 라운드(Round) 계층. 방은 인메모리 `RoomState`(방 코드, 플레이어, 채팅 로그, 현재 게임)로 관리하고, 유저 프로필·전적·친구 관계만 로컬 DB(PostgreSQL+Prisma)에 영구 저장(선택 구현). 상세 인터페이스는 [PLAN.md](./PLAN.md)의 "데이터 모델"·"DB 스키마" 섹션 참고.
+방(Room) > 게임(Game) > 라운드(Round) 계층. 방은 인메모리 `RoomState`(방 코드, 플레이어, 채팅 로그, 현재 게임)로 관리하고, 유저 프로필·전적·친구 관계만 로컬 DB(PostgreSQL+Prisma)에 영구 저장(선택 구현). 상세 인터페이스는 [PLAN.md](./PLAN.md)의 "인메모리 데이터 모델"·"DB 스키마" 섹션 참고.
 
 ### API / 외부 서비스 연동
 
