@@ -86,7 +86,7 @@ export async function startGame(
     });
   }
 
-  // 낯선 단어면 AI가 텍스트 설명을 함께 준다. real/liar 단어 딱 2개뿐이므로 한 번씩만 판단.
+  // 모든 제시어에 AI가 텍스트 설명을 미리 만들어 함께 준다(난이도 무관). real/liar 딱 2개뿐이라 한 번씩만 생성.
   const [realExplanation, liarExplanation] = await Promise.all([
     llm.explainWordIfUnfamiliar(realWord).catch(() => null),
     llm.explainWordIfUnfamiliar(liarWord).catch(() => null),

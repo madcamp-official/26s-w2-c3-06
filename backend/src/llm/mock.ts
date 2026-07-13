@@ -34,9 +34,8 @@ export const mockLLM: LiarGameLLM = {
   },
 
   async explainWordIfUnfamiliar(word: string) {
-    // 결정적 테스트를 위해 항상 설명 없음으로 응답 (실제 판단은 real LLM에서만 발생).
-    void word;
-    return null;
+    // 난이도 무관 항상 설명을 생성하는 실제 동작에 맞춰, mock도 결정적 설명 문자열을 반환.
+    return `(mock) "${word}"에 대한 짧은 설명입니다.`;
   },
 
   async judgeLiarGuess(guess: string, realWord: string) {
