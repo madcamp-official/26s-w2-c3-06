@@ -42,6 +42,22 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   bool _isCheckingUserId = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 익명(게스트) 상태에서 회원가입으로 승격하는 경우, 기존 게스트 닉네임을 입력창에 미리 채워
+    // 그대로 이어받게 한다. 본인의 현재 닉네임이라 중복확인을 통과한 것으로 간주한다
+    // (백엔드 PUT /me가 self uid를 제외하므로 같은 닉네임 유지가 가능).
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null && user.isAnonymous) {
+      final guestNickname = user.displayName?.trim() ?? '';
+      if (guestNickname.isNotEmpty) {
+        _nicknameController.text = guestNickname;
+        _nicknameAvailable = true;
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _nicknameController.dispose();

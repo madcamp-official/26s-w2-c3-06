@@ -68,40 +68,51 @@ class AuthService {
   /// Google 로그인/가입 통합 버튼. 익명이면 link, 실패(이미 가입된 계정)면 기존 계정으로 전환.
   Future<User> signInOrLinkWithGoogle() async {
     final current = _auth.currentUser;
+    final wasAnonymous = current != null && current.isAnonymous;
+    // 승격(link) 시 이어받을 게스트 닉네임. 계정 전환(기존 구글 계정) 땐 그 계정 닉네임을 쓴다.
+    final guestNickname = wasAnonymous ? current.displayName?.trim() : null;
+
+    User user;
+    bool promoted = false; // 익명 계정을 그대로 승격(link)했는가
 
     if (kIsWeb) {
       final provider = GoogleAuthProvider();
-      if (current != null && current.isAnonymous) {
+      if (wasAnonymous) {
         try {
-          final result = await current.linkWithPopup(provider);
-          return result.user!;
+          user = (await current.linkWithPopup(provider)).user!;
+          promoted = true;
         } on FirebaseAuthException catch (e) {
-          if (_isAlreadyInUse(e.code)) {
-            final result = await _auth.signInWithPopup(provider);
-            return result.user!;
-          }
-          rethrow;
+          if (!_isAlreadyInUse(e.code)) rethrow;
+          user = (await _auth.signInWithPopup(provider)).user!;
         }
+      } else {
+        user = (await _auth.signInWithPopup(provider)).user!;
       }
-      final result = await _auth.signInWithPopup(provider);
-      return result.user!;
+    } else {
+      final credential = await _googleCredential();
+      if (wasAnonymous) {
+        try {
+          user = (await current.linkWithCredential(credential)).user!;
+          promoted = true;
+        } on FirebaseAuthException catch (e) {
+          if (!_isAlreadyInUse(e.code)) rethrow;
+          user = (await _auth.signInWithCredential(credential)).user!;
+        }
+      } else {
+        user = (await _auth.signInWithCredential(credential)).user!;
+      }
     }
 
-    final credential = await _googleCredential();
-    if (current != null && current.isAnonymous) {
-      try {
-        final result = await current.linkWithCredential(credential);
-        return result.user!;
-      } on FirebaseAuthException catch (e) {
-        if (_isAlreadyInUse(e.code)) {
-          final result = await _auth.signInWithCredential(credential);
-          return result.user!;
-        }
-        rethrow;
-      }
+    // 익명 → 구글 승격 시 기존 게스트 닉네임을 이어받는다. Google link가 displayName을
+    // 구글 계정 이름으로 덮어쓸 수 있어 명시적으로 되돌린다(uid는 그대로라 DB 닉네임은 유지됨).
+    if (promoted &&
+        guestNickname != null &&
+        guestNickname.isNotEmpty &&
+        user.displayName != guestNickname) {
+      await user.updateDisplayName(guestNickname);
+      await user.reload();
     }
-    final result = await _auth.signInWithCredential(credential);
-    return result.user!;
+    return _auth.currentUser!;
   }
 
   /// 완전히 로그아웃 — 메인 화면의 "게스트로 계속하기"와 동일한 새 익명 세션 시작 지점으로 복귀.
