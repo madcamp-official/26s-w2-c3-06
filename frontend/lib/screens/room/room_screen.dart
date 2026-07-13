@@ -1131,7 +1131,7 @@ class _RoomScreenState extends State<RoomScreen> {
         children: [
           Expanded(
             child: Text(
-              '카테고리: $_selectedCategory',
+              '$_selectedCategory',
               style: PixelFont.body(fontSize: isDesktop ? 14 : 12, color: AppColors.foreground),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
@@ -1154,11 +1154,11 @@ class _RoomScreenState extends State<RoomScreen> {
         Expanded(
           child: widget.isHost ? GestureDetector(onTap: _openCategoryPicker, child: categoryBox) : categoryBox,
         ),
-        // AI봇 수 조절은 방장 전용 기능이라 방장이 아니면 아예 표시하지 않는다.
+        // AI봇 수 조절(+/-)은 방장 전용이지만, 몇 명이 있는지는 참가자 모두에게 보여준다.
+        SizedBox(width: isDesktop ? 10 : 6),
+        Text('AI봇', style: PixelFont.body(fontSize: isDesktop ? 13 : 10, color: AppColors.mutedForeground)),
+        SizedBox(width: isDesktop ? 6 : 4),
         if (widget.isHost) ...[
-          SizedBox(width: isDesktop ? 10 : 6),
-          Text('AI봇', style: PixelFont.body(fontSize: isDesktop ? 13 : 10, color: AppColors.mutedForeground)),
-          SizedBox(width: isDesktop ? 6 : 4),
           Container(
             decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
             child: Row(
@@ -1189,7 +1189,15 @@ class _RoomScreenState extends State<RoomScreen> {
               ],
             ),
           ),
-        ],
+        ] else
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: isDesktop ? 10 : 8, vertical: isDesktop ? 10 : 7),
+            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+            child: Text(
+              '$_botCount',
+              style: PixelFont.body(fontSize: isDesktop ? 15 : 11, color: AppColors.foreground),
+            ),
+          ),
         SizedBox(width: isDesktop ? 10 : 6),
         if (widget.isHost)
           AppButton(

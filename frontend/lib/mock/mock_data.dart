@@ -35,7 +35,7 @@ const mockPublicRooms = <RoomSummary>[
     code: '5820',
     title: '파티파티',
     emoji: '🌟',
-    category: '자유',
+    category: '랜덤',
     hostNickname: '박지호',
     playerCount: 5,
     maxPlayers: 8,
