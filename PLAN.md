@@ -264,6 +264,7 @@ enum FriendshipStatus {
 - `discussion:skip` `{}` — 호스트 전용. 토론 페이즈에서 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다(남은 토론 타이머 취소 후 `vote:started`). 토론 페이즈가 아니거나 호스트가 아니면 무시
 - `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
+- `friend:invite` `{ toUid }` — 현재 방으로 친구를 초대. 초대자는 방에 있어야 하고, 대상이 온라인이면 그 소켓(들)에 `room:invited`가 전송된다(방에 없거나 대상이 오프라인이면 `room:error`)
 
 **Server → Client**:
 - `room:created`/`room:joined` `{ roomCode, hostId, title, emoji, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
@@ -284,6 +285,7 @@ enum FriendshipStatus {
 - `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens' }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect: null`. 정답 판정은 서버가 LLM(`judgeLiarGuess`)에게 위임해 유사 표현·오타·한글/영어 표기 차이를 허용
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
 - `room:closed` — 호스트가 방을 나가면(재접속 유예 시간 만료 포함) 방이 폭파되며 전송. 호스트가 아닌 인원의 퇴장은 방을 유지한 채 `room:playerListUpdated`만 브로드캐스트
+- `room:invited` `{ roomCode, title, emoji, fromUid, fromNickname }` — 친구가 나를 방으로 초대했을 때(`friend:invite`) 온라인인 내 소켓에 전송. 클라이언트는 알림을 띄우고 수락 시 해당 `roomCode`로 입장
 
 서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
 
@@ -305,11 +307,11 @@ enum FriendshipStatus {
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
 **친구** (`/api/friends`, `backend/src/http/friendsRoutes.ts`):
-- `POST /api/friends/requests` `{ addresseeUid }` → 201 `Friendship` — 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
+- `POST /api/friends/requests` `{ addresseeUid }` 또는 `{ addresseeNickname }` → 201 `Friendship` — 닉네임으로 보내면 서버가 uid로 해석(없으면 404). 이미 상대가 나에게 보낸 대기 요청이 있으면 자동으로 맞수락 처리됨. 자기 자신·이미 친구·차단 상태면 409
 - `GET /api/friends/requests` — 내가 받은 대기 요청 목록. 응답 `{ requests: [{ ...Friendship, requester: { uid, nickname, avatarUrl } }] }`
 - `POST /api/friends/requests/:id/accept` → 200 `Friendship`(status: accepted)
 - `POST /api/friends/requests/:id/decline` → 204 (행 삭제, 재요청 가능)
-- `GET /api/friends` — 수락된 친구 목록. 응답 `{ friends: [{ uid, nickname, avatarUrl }] }`
+- `GET /api/friends` — 수락된 친구 목록. 응답 `{ friends: [{ uid, nickname, avatarUrl, isOnline }] }` (`isOnline`은 서버 소켓 프레젠스 스냅샷)
 - `DELETE /api/friends/:uid` → 204 (친구 해제)
 
 ## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
@@ -336,9 +338,11 @@ interface LiarGameLLM {
 
 - **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Claude Haiku 4.5 실 연동, 다섯 함수 전부, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(매일 04:00)
 - **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 라이어 다수 선택)뿐
-- **프론트 연동도 완료**: `frontend-2` 브랜치가 이 문서의 백엔드 계약에 맞춰 실연동을 마쳤다. 자세한 내용은 "프론트-백엔드 연결 정합성" 참고.
+- **프론트 연동도 완료**: `frontend-2` 브랜치가 이 문서의 백엔드 계약에 맞춰 실연동을 마쳤고, 이후 픽셀아트 UI 프론트(`frontend` 계열)와 백엔드를 하나로 합친 **풀스택 `backend` 브랜치**에서 통합이 완료됐다. 자세한 내용은 "프론트-백엔드 연결 정합성" 참고.
 
 ## 프론트-백엔드 연결 정합성
+
+> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 아래 `frontend-2` 기준 세부 항목도 동일 계약이라 그대로 유효하다.
 
 `frontend-2` 브랜치가 이 문서의 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 아래와 같이 정리됐다.
 
