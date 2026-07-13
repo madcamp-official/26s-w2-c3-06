@@ -401,7 +401,12 @@ class _StatsCard extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-          UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 18, imageBytes: UserSession.profileImageBytes),
+          UserAvatar(
+            avatarIndex: UserSession.avatarIndex,
+            radius: 18,
+            imageBytes: UserSession.profileImageBytes,
+            imageUrl: ref.watch(avatarUrlProvider),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

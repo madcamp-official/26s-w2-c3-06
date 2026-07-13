@@ -208,7 +208,7 @@ class _FriendTile extends StatelessWidget {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                UserAvatar(avatarIndex: _avatarIndexOf(friend.uid), radius: 20),
+                UserAvatar(avatarIndex: _avatarIndexOf(friend.uid), radius: 20, imageUrl: friend.avatarUrl),
                 if (friend.isOnline)
                   Positioned(
                     right: -1,

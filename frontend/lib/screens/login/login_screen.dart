@@ -56,6 +56,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ref.read(nicknameProvider.notifier).set(nickname);
     final token = await AuthService.instance.getIdToken();
     if (token != null) ref.read(roomProvider.notifier).connect(token);
+    // 업로드해둔 프로필 사진(서버 저장 URL)을 복원 — 실패해도 로그인은 막지 않는다.
+    try {
+      final profile = await BackendApi.instance.getMyProfile();
+      ref.read(avatarUrlProvider.notifier).set(profile.avatarUrl);
+    } catch (_) {}
     if (!mounted) return;
     _enterApp();
   }

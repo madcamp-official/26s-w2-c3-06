@@ -36,6 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _showConfirm = false;
   late int _avatarIndex;
   Uint8List? _profileImageBytes;
+  String? _avatarUrl;
 
   @override
   void initState() {
@@ -43,6 +44,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nicknameController = TextEditingController(text: UserSession.nickname);
     _avatarIndex = UserSession.avatarIndex;
     _profileImageBytes = UserSession.profileImageBytes;
+    // 서버에 저장된 프로필 사진 URL 복원(로컬 미리보기가 없을 때 표시).
+    BackendApi.instance.getMyProfile().then((p) {
+      if (mounted) setState(() => _avatarUrl = p.avatarUrl);
+    }).catchError((_) {});
   }
 
   @override
@@ -146,7 +151,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handleRemovePhoto() async {
-    setState(() => _profileImageBytes = null);
+    setState(() {
+      _profileImageBytes = null;
+      _avatarUrl = null;
+    });
     UserSession.profileImageBytes = null;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -221,7 +229,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         height: 96,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
-                        child: UserAvatar(avatarIndex: _avatarIndex, radius: 40, imageBytes: _profileImageBytes),
+                        child: UserAvatar(
+                          avatarIndex: _avatarIndex,
+                          radius: 40,
+                          imageBytes: _profileImageBytes,
+                          imageUrl: _avatarUrl,
+                        ),
                       ),
                       Positioned(
                         right: -6,
