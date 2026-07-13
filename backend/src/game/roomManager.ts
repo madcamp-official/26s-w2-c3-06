@@ -53,6 +53,19 @@ export function cancelRemoval(roomCode: string, uid: string): void {
   }
 }
 
+// 방이 삭제될 때 호출. 그 방에 걸려있던 모든 유예 타이머를 정리한다.
+// 이렇게 하지 않으면, 삭제된 방의 타이머가 뒤늦게 만료되며 (같은 코드로 재발급된)
+// 다른 방의 동일 uid를 잘못 퇴장시킬 수 있다.
+function cancelRoomRemovals(roomCode: string): void {
+  const prefix = `${roomCode}:`;
+  for (const [key, timer] of pendingRemovals) {
+    if (key.startsWith(prefix)) {
+      clearTimeout(timer);
+      pendingRemovals.delete(key);
+    }
+  }
+}
+
 export interface JoinError {
   error: string;
 }
@@ -200,6 +213,7 @@ function removePlayerFromRoom(
   room.players = room.players.filter((p) => p.id !== uid);
 
   if (wasHost) {
+    cancelRoomRemovals(room.roomCode);
     rooms.delete(room.roomCode);
     return { room, roomClosed: true };
   }
