@@ -559,7 +559,6 @@ function finalizeGame(
       userId: id,
       wasLiar: game.liarIds.includes(id),
       won: result.winner === 'liar' ? game.liarIds.includes(id) : !game.liarIds.includes(id),
-      category: game.category,
     }));
   recordGame(humanEntries).catch((err) => console.error('[gameEngine] GamePlay 기록 실패', err));
   awardXp(humanEntries).catch((err) => console.error('[gameEngine] XP 지급 실패', err));

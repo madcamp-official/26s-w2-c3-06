@@ -5,7 +5,6 @@ export interface GamePlayEntry {
   userId: string;
   wasLiar: boolean;
   won: boolean;
-  category: string;
 }
 
 export async function recordGame(entries: GamePlayEntry[]): Promise<void> {
