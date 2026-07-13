@@ -69,17 +69,27 @@ export interface UserStats {
   overallWinRate: number | null;
   liarWinRate: number | null;
   citizenWinRate: number | null;
+  score: number;
   level: number;
 }
 
-// PLAN "레벨": 승패 무관, 참여 자체(count(plays))로 오르는 구간제 레벨.
-// 정확한 구간표는 PLAN TODO에 "추후 확정"으로 남아 있어, 5판당 1레벨을 잠정 기본값으로 둔다.
-const GAMES_PER_LEVEL = 5;
-function deriveLevel(totalGames: number): number {
-  return Math.floor(totalGames / GAMES_PER_LEVEL) + 1;
+// 점수·레벨 설계. 점수는 별도 컬럼으로 저장하지 않고 GamePlay(승/패)로부터 파생한다 —
+// 전적·승률과 동일한 방식이라 GamePlay가 단일 진실 공급원으로 유지되고, 배점을 조정하면
+// 과거 기록까지 일관되게 재계산된다.
+// 승리 +20, 패배 -10, 하한 0(음수 없음). 레벨은 100점당 1구간(선형).
+const WIN_POINTS = 20;
+const LOSE_POINTS = 10;
+const POINTS_PER_LEVEL = 100;
+
+function deriveScore(wins: number, losses: number): number {
+  return Math.max(0, wins * WIN_POINTS - losses * LOSE_POINTS);
 }
 
-// 전적 4종은 GamePlay 집계로 파생 (PLAN "DB 스키마" 파생 방식 참고). 분모 0이면 null("기록 없음").
+function deriveLevel(score: number): number {
+  return Math.floor(score / POINTS_PER_LEVEL) + 1;
+}
+
+// 전적·점수는 GamePlay 집계로 파생 (PLAN "DB 스키마" 파생 방식 참고). 분모 0이면 null("기록 없음").
 export async function getUserStats(uid: string): Promise<UserStats> {
   const plays = await prisma.gamePlay.findMany({
     where: { userId: uid },
@@ -93,11 +103,15 @@ export async function getUserStats(uid: string): Promise<UserStats> {
   const rate = (rows: { won: boolean }[]) =>
     rows.length === 0 ? null : rows.filter((r) => r.won).length / rows.length;
 
+  const wins = plays.filter((p) => p.won).length;
+  const score = deriveScore(wins, totalGames - wins);
+
   return {
     totalGames,
     overallWinRate: rate(plays),
     liarWinRate: rate(liarPlays),
     citizenWinRate: rate(citizenPlays),
-    level: deriveLevel(totalGames),
+    score,
+    level: deriveLevel(score),
   };
 }
