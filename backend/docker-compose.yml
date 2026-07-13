@@ -1,0 +1,23 @@
+# 로컬 개발용 Postgres. `docker compose up -d`로 띄운다.
+# (Colima 사용 시 `colima start`가 선행되어야 함)
+services:
+  db:
+    image: postgres:16
+    container_name: liar-pg
+    environment:
+      POSTGRES_USER: liar
+      POSTGRES_PASSWORD: liarpass
+      POSTGRES_DB: liar_game
+    ports:
+      - "5432:5432"
+    volumes:
+      - liar-pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liar -d liar_game"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  liar-pg-data:

@@ -114,16 +114,11 @@ interface Player {
 }
 // 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
+// 설명 한 바퀴. 설명 순서는 게임 단위로 고정이고 투표는 게임당 한 번뿐이므로,
+// 순서·투표·판정 결과는 Round가 아니라 GameState에 둔다. Round는 그 바퀴의 설명(turns)만 담는다.
 interface Round {
   roundNumber: number;
-  playerOrder: string[];
   turns: { playerId: string; text: string }[];
-  votes: Record<string, string>;   // 서버 전용, 클라이언트로 절대 전송 안 함
-  votedOutId?: string;
-  wasLiar?: boolean;
-  liarGuess?: string;
-  liarGuessCorrect?: boolean;
-  winner?: 'liar' | 'citizens';
 }
 
 interface GameState {
@@ -135,8 +130,17 @@ interface GameState {
   participantIds: string[];     // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
   aiBotCount: number;
   phase: 'setup'|'describing'|'discussion'|'voting'|'resolution'|'liarGuess'|'ended';
+  playerOrder: string[];         // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
   usedWordsThisGame: string[];
-  rounds: Round[];               // MVP: 길이 1. 추후 스트레치: 라운드 재시작 지원 시 길이 증가
+  rounds: Round[];               // 설명 라운드들. MVP: 길이 1. 추후 스트레치: 다중 설명 라운드 지원 시 증가
+
+  // 투표·판정은 게임당 한 번(모든 설명 라운드 종료 후). 라운드가 아니라 게임에 귀속된다.
+  votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
+  votedOutId?: string;
+  wasLiar?: boolean;
+  liarGuess?: string;
+  liarGuessCorrect?: boolean;
+  winner?: 'liar' | 'citizens';
 }
 
 interface ChatMessage {
@@ -155,6 +159,8 @@ interface DraftGameConfig {
 interface RoomState {
   roomCode: string;          // 4자리 숫자 문자열, 예: "4821"
   hostId: string;
+  title: string;             // 방 제목. 방 생성 시 지정(미지정 시 "{방장}의 방")
+  emoji: string;             // 로비 목록 표시용 방 이모지. 방 생성 시 지정(미지정 시 기본 이모지)
   visibility: 'public' | 'private';
   maxPlayers: number;        // 방장이 방 생성 시 지정. 시스템상 상한 없음(사람+봇 합산 기준)
   players: Player[];
@@ -228,7 +234,9 @@ enum FriendshipStatus {
 
 분모가 0인 경우(예: 라이어를 한 번도 안 해봄)는 "기록 없음"으로 표기한다. 조회 빈도가 높아지면 `User`에 캐시 카운터를 두는 최적화를 나중에 검토하되, source of truth는 `GamePlay`로 유지한다.
 
-**레벨**: 별도 컬럼을 두지 않고 `count(plays)`(전체 게임수)에서 파생한다 — 승패와 무관하게 참여 자체로 오르는 구간제 레벨(예: 게임수 구간에 따라 Lv.1/2/3…). 정확한 구간표는 추후 확정.
+**점수·레벨**: 별도 컬럼을 두지 않고 `plays`의 승/패 집계에서 파생한다(전적과 동일하게 `GamePlay`가 source of truth라 배점을 바꾸면 과거 기록까지 일관되게 재계산됨).
+- 점수 = `max(0, count(won = true) × 20 − count(won = false) × 10)` — 승리 +20, 패배 −10, 하한 0(음수 없음)
+- 레벨 = `floor(점수 / 100) + 1` — 100점당 한 구간(순승 5회당 약 1레벨). 참여 횟수가 아니라 점수(실력)에 연동된다.
 
 **친구 조회**: 특정 유저 X의 수락된 친구 목록은 `Friendship where (requesterId = X OR addresseeId = X) AND status = 'accepted'`로 양방향을 모두 본다. 받은 대기 요청은 `addresseeId = X AND status = 'pending'`.
 
@@ -243,7 +251,7 @@ enum FriendshipStatus {
 단일 기본 네임스페이스 + Socket.IO **room**(`socket.join(roomCode)`)으로 충분.
 
 **Client → Server**:
-- `room:create` `{ nickname, visibility: 'public'|'private', maxPlayers: number }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성). `maxPlayers`는 방장이 지정, 시스템상 상한 없음
+- `room:create` `{ nickname, visibility: 'public'|'private', maxPlayers: number, title?: string, emoji?: string }` — 서버가 4자리 숫자 코드 발급(충돌 시 재생성). `maxPlayers`는 방장이 지정, 시스템상 상한 없음. `title` 미지정 시 "{방장}의 방", `emoji` 미지정 시 기본 이모지
 - `room:listPublic` `{}` — 로비 진입 시 공개방 목록 요청
 - `room:join` `{ roomCode, nickname }` — 방이 꽉 찼거나(`players.length >= maxPlayers`) 이미 게임 진행 중이면 `room:error`
 - `room:leave` `{}` — 대기 상태(설정 전/게임 종료 후 대기 복귀 상태)에서만 유효. 게임 진행 중(`설명~역전승 시도`)에는 UI에 "방 나가기" 버튼 자체를 노출하지 않아 이 시나리오가 발생하지 않게 한다
@@ -258,12 +266,12 @@ enum FriendshipStatus {
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
 
 **Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
+- `room:created`/`room:joined` `{ roomCode, hostId, title, emoji, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
 - `game:draftConfigUpdated` `{ category, aiBotCount }` — `game:draftConfig` 수신 시 방 전체 브로드캐스트, 게임 시작(`game:configure`) 시 `{ category: null, aiBotCount: 0 }`로 리셋
 - `room:customCategoriesUpdated` `{ customCategories }` (`string[]`) — 새 게임 시작 시 이번 카테고리(방장 입력·AI 랜덤 포함)가 방의 재사용 목록에 새로 추가됐을 때만 방 전체에 브로드캐스트. 클라이언트는 다음 게임 카테고리 칩 목록을 이 값으로 갱신
-- `room:publicList` `{ rooms: [{roomCode, playerCount, maxPlayers, inProgress}] }` — `inProgress`는 해당 방에 진행 중인 게임이 있는지(로비 목록에 "게임 중" 표시용)
+- `room:publicList` `{ rooms: [{roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress}] }` — 로비 카드 표시용. `category`는 방장이 대기방에서 고르고 있는 값(null이면 AI 랜덤), `inProgress`는 해당 방에 진행 중인 게임이 있는지("게임 중" 표시용)
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
-- `room:rejoined` `{ roomCode, hostId, visibility, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
+- `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
@@ -292,7 +300,7 @@ enum FriendshipStatus {
 - `PUT /api/users/me` `{ nickname }` → 204 — 회원가입/닉네임 변경 직후 로컬 DB에 즉시 반영. Firebase ID 토큰의 name 클레임이 `updateDisplayName` 직후 바로 갱신되지 않을 수 있어, 프론트가 닉네임 확정 시 명시적으로 호출해 친구 요청 등이 가입 직후에도 바로 동작하게 한다. 닉네임 중복이면 409
 - `GET /api/users/me/profile` — 로그인 시 업로드한 프로필 사진을 복원하기 위한 조회. 응답 `{ nickname, avatarUrl }`
 - `PATCH /api/users/me/avatar` `{ avatarUrl: string | null }` → 204 — 프로필 사진 저장/삭제. 클라이언트가 Firebase Storage(`avatars/{uid}` 경로)에 직접 업로드한 뒤 다운로드 URL만 전달하면 서버가 본인 uid 경로인지 검증 후 DB에 기록. `null`이면 사진을 지우고 기본 아이콘으로 되돌림
-- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, level }` (승률은 0~1 float, 분모 0이면 `null`. `level`은 `count(plays)`에서 파생되는 정수, 정확한 구간표는 TODO 참고)
+- `GET /api/users/me` — 내 전적. 응답 `{ totalGames, overallWinRate, liarWinRate, citizenWinRate, score, level }` (승률은 0~1 float, 분모 0이면 `null`. `score`는 승/패 기반 파생 정수(승 +20/패 −10, 하한 0), `level`은 `floor(score/100)+1`. 자세한 배점은 "DB 스키마"의 점수·레벨 참고)
 - `GET /api/users/:uid` — 다른 유저의 전적 (동일 응답 형태)
 - `DELETE /api/users/me` → 204 — **회원탈퇴**. 프론트는 이 엔드포인트 하나만 호출하면 된다(Firebase와 직접 통신 불필요). 백엔드가 `firebase-admin`으로 Firebase Auth 계정을 삭제(서버 권한이라 "최근 로그인 필요" 재인증 제약 없이 처리)하고, 로컬 DB `User` 행도 삭제한다(`onDelete: Cascade`로 `GamePlay`·`Friendship` 함께 삭제) — 게스트 정리 cron과 동일한 삭제 패턴
 
@@ -339,7 +347,7 @@ interface LiarGameLLM {
 - **`ChatMessage` 모델**: `models/chat_message.dart`가 계약(`{ id, senderId, type, text, timestamp }`)과 동일. `senderId`는 uid 또는 `'ai'`/`'system'` 특수값.
 - **투표/판정 서버 소유**: `panels/voting_panel.dart`는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
 - **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, `panels/liar_guess_panel.dart`는 자신에게 온 경우에만 렌더링한다.
-- **`RoomSummary`**: `models/room_summary.dart`가 `{ roomCode, playerCount, maxPlayers }`만 가진다(`title` 없음).
+- **`RoomSummary`**: `models/room_summary.dart`가 `room:publicList` 계약(`{ roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress }`)을 그대로 반영한다.
 - **`player:ready`**: `models/player.dart`의 `isReady` 필드와 `panels/waiting_panel.dart`의 준비 완료 토글로 반영.
 - **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
@@ -360,7 +368,8 @@ interface LiarGameLLM {
 
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
-- **레벨 구간표**: 게임수 기반 레벨을 도입하기로 확정했으나(데이터 모델 섹션 참조), 구체적인 구간(몇 판당 레벨업)은 아직 미정.
+- **점수·레벨 튜닝**: 승 +20/패 −10, 100점당 1레벨로 확정해 구현함(데이터 모델 섹션 참조). 배점·구간 폭은 플레이 데이터를 보고 추후 조정 가능(파생 방식이라 조정 시 과거 기록도 재계산됨).
+- **점수·레벨 프론트 표시 (미연결)**: 백엔드가 `GET /api/users/me`로 `score`·`level`을 이미 내려주고 프론트 `UserStats` 모델도 두 필드를 파싱하지만, 이를 화면에 그리는 UI는 아직 없다(프로필 화면이 사진·닉네임 편집 전용). 프로필/로비에 레벨 배지·점수 진행바를 붙이는 작업은 프론트에서 후속으로 진행한다. 레벨 내 진행도는 `현재 레벨 시작점 = (level-1)×100`, `다음 레벨까지 = score − (level-1)×100 / 100`으로 계산.
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
 - **Storage CORS origin 좁히기**: Firebase Storage 버킷(`liar-game-8ff55.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 - **백엔드 CORS origin 좁히기**: `backend/src/index.ts`의 Express(`app.use(cors())`)와 Socket.IO(`cors: { origin: '*' }`) 둘 다 개발 편의상 전체 허용 중(코드에 TODO 주석으로 이미 표시돼 있음). 배포 도메인이 확정되면 프론트와 단일 origin으로 좁혀야 한다.
