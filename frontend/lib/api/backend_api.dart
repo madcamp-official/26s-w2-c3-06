@@ -99,6 +99,16 @@ class BackendApi {
     _checkOk(res, allow201: true);
   }
 
+  /// 닉네임으로 친구 요청(친구 추가 UI). 서버가 닉네임→uid를 해석한다. 없으면 404.
+  Future<void> sendFriendRequestByNickname(String nickname) async {
+    final res = await http.post(
+      _uri('/api/friends/requests'),
+      headers: await _authHeaders(),
+      body: jsonEncode({'addresseeNickname': nickname}),
+    );
+    _checkOk(res, allow201: true);
+  }
+
   Future<List<FriendRequestSummary>> getPendingFriendRequests() async {
     final res = await http.get(_uri('/api/friends/requests'), headers: await _authHeaders());
     _checkOk(res);
@@ -204,11 +214,13 @@ class FriendSummary {
   final String uid;
   final String nickname;
   final String? avatarUrl;
+  final bool isOnline;
 
   const FriendSummary({
     required this.uid,
     required this.nickname,
     required this.avatarUrl,
+    this.isOnline = false,
   });
 
   factory FriendSummary.fromJson(Map<String, dynamic> json) {
@@ -216,6 +228,7 @@ class FriendSummary {
       uid: json['uid'] as String,
       nickname: json['nickname'] as String,
       avatarUrl: json['avatarUrl'] as String?,
+      isOnline: json['isOnline'] as bool? ?? false,
     );
   }
 }

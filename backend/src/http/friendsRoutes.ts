@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, type AuthedRequest } from './authMiddleware';
 import * as friendRepo from '../db/friendRepo';
+import { findUidByNickname } from '../db/userRepo';
 import * as presence from '../socket/presence';
 
 // PLAN "DB 스키마" 친구 기능(요청/수락/거절/목록) REST API.
@@ -8,13 +9,29 @@ import * as presence from '../socket/presence';
 export const friendsRouter = Router();
 
 friendsRouter.post('/requests', requireAuth, async (req: AuthedRequest, res) => {
-  const { addresseeUid } = req.body as { addresseeUid?: string };
-  if (!addresseeUid) {
-    res.status(400).json({ error: 'addresseeUid가 필요합니다.' });
+  const { addresseeUid, addresseeNickname } = req.body as {
+    addresseeUid?: string;
+    addresseeNickname?: string;
+  };
+  // uid를 직접 주거나, 닉네임으로 대상을 지정할 수 있다(친구 추가 UI는 닉네임 입력).
+  let targetUid = addresseeUid;
+  if (!targetUid && addresseeNickname?.trim()) {
+    targetUid = (await findUidByNickname(addresseeNickname.trim())) ?? undefined;
+    if (!targetUid) {
+      res.status(404).json({ error: '해당 닉네임의 사용자를 찾을 수 없습니다.' });
+      return;
+    }
+  }
+  if (!targetUid) {
+    res.status(400).json({ error: 'addresseeUid 또는 addresseeNickname이 필요합니다.' });
+    return;
+  }
+  if (targetUid === req.uid) {
+    res.status(409).json({ error: '자기 자신에게는 친구 요청을 보낼 수 없습니다.' });
     return;
   }
   try {
-    const friendship = await friendRepo.sendRequest(req.uid!, addresseeUid);
+    const friendship = await friendRepo.sendRequest(req.uid!, targetUid);
     res.status(201).json(friendship);
   } catch (err) {
     if (err instanceof friendRepo.FriendError) {

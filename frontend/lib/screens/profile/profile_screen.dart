@@ -1,9 +1,13 @@
 import 'dart:typed_data';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../theme/pixel_font.dart';
 
+import '../../api/backend_api.dart';
+import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
@@ -50,30 +54,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  void _handleSaveNickname() {
-    final nickname = _nicknameController.text.trim();
-    if (nickname.isEmpty) return;
-    setState(() => UserSession.nickname = nickname);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('닉네임이 저장되었습니다.')));
+  void _snack(String msg) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  void _handleChangePassword() {
-    if (_currentPasswordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('현재 비밀번호를 입력해주세요.')));
-      return;
+  Future<void> _handleSaveNickname() async {
+    final nickname = _nicknameController.text.trim();
+    if (nickname.isEmpty) return;
+    try {
+      // 닉네임 중복 확인 후 Firebase displayName + 로컬 DB 동기화(서버 @unique 제약).
+      final available = await BackendApi.instance.isNicknameAvailable(nickname);
+      if (!available) {
+        _snack('이미 사용 중인 닉네임입니다.');
+        return;
+      }
+      await AuthService.instance.updateNickname(nickname);
+      await BackendApi.instance.syncNickname(nickname);
+      setState(() => UserSession.nickname = nickname);
+      _snack('닉네임이 저장되었습니다.');
+    } on BackendApiException catch (e) {
+      _snack(e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 저장에 실패했습니다.');
+    } catch (e) {
+      _snack('오류: $e');
     }
+  }
+
+  Future<void> _handleChangePassword() async {
     if (_newPasswordController.text.length < 8) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('새 비밀번호는 8자 이상이어야 합니다.')));
+      _snack('새 비밀번호는 8자 이상이어야 합니다.');
       return;
     }
     if (_newPasswordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('새 비밀번호가 일치하지 않습니다.')));
+      _snack('새 비밀번호가 일치하지 않습니다.');
       return;
     }
-    _currentPasswordController.clear();
-    _newPasswordController.clear();
-    _confirmPasswordController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('비밀번호가 변경되었습니다.')));
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final email = user?.email;
+      // 비밀번호 변경은 최근 로그인 필요 — 현재 비밀번호로 재인증 후 변경.
+      if (email != null && _currentPasswordController.text.isNotEmpty) {
+        final cred = EmailAuthProvider.credential(email: email, password: _currentPasswordController.text);
+        await user!.reauthenticateWithCredential(cred);
+      }
+      await user?.updatePassword(_newPasswordController.text);
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+      _snack('비밀번호가 변경되었습니다.');
+    } on FirebaseAuthException catch (e) {
+      _snack('변경 실패: ${e.message ?? e.code}');
+    }
   }
 
   void _goToLoginScreen() {
@@ -81,6 +111,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       MaterialPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
     );
+  }
+
+  Future<void> _handleLogout() async {
+    await AuthService.instance.signOut();
+    if (!mounted) return;
+    _goToLoginScreen();
   }
 
   Future<void> _handlePickPhoto() async {
@@ -93,15 +129,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (file == null) return;
     final bytes = await file.readAsBytes();
     if (!mounted) return;
+    // 즉시 로컬 미리보기 반영 후, Firebase Storage(avatars/{uid})에 업로드하고 URL을 백엔드에 기록.
     setState(() => _profileImageBytes = bytes);
     UserSession.profileImageBytes = bytes;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('프로필 사진이 변경되었습니다.')));
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final storageRef = FirebaseStorage.instance.ref('avatars/$uid');
+      await storageRef.putData(bytes, SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'));
+      final url = await storageRef.getDownloadURL();
+      await BackendApi.instance.updateAvatarUrl(url);
+      _snack('프로필 사진이 변경되었습니다.');
+    } catch (e) {
+      _snack('사진 업로드에 실패했습니다: $e');
+    }
   }
 
-  void _handleRemovePhoto() {
+  Future<void> _handleRemovePhoto() async {
     setState(() => _profileImageBytes = null);
     UserSession.profileImageBytes = null;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await BackendApi.instance.updateAvatarUrl(null);
+      await FirebaseStorage.instance.ref('avatars/$uid').delete().catchError((_) {});
+    } catch (_) {
+      // 삭제 실패는 조용히 무시(다음 저장 시 덮어써짐).
+    }
   }
 
   Future<void> _handleDeleteAccount() async {
@@ -127,14 +181,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       },
     );
     if (confirmed != true) return;
+    try {
+      // 백엔드가 Firebase 계정 삭제까지 함께 처리(전적/프로필/친구 cascade 삭제).
+      await BackendApi.instance.deleteMyAccount();
+      await AuthService.instance.signOut();
+    } catch (e) {
+      _snack('탈퇴 처리 중 오류: $e');
+      return;
+    }
     if (!mounted) return;
     _goToLoginScreen();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isGuest = UserSession.isGuest;
-    final canChangePassword = UserSession.authProvider == AuthProvider.email;
+    final user = FirebaseAuth.instance.currentUser;
+    final isGuest = user?.isAnonymous ?? UserSession.isGuest;
+    // 비밀번호 변경은 이메일/비밀번호(provider 'password') 계정에서만 노출(구글 계정은 비밀번호 없음).
+    final canChangePassword = user?.providerData.any((p) => p.providerId == 'password') ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -266,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 12),
                   AppButton(label: '로그인 / 회원가입', onPressed: _goToLoginScreen),
                 ] else ...[
-                  AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _goToLoginScreen),
+                  AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleLogout),
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,

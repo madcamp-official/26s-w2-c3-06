@@ -1,24 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
-import '../../mock/mock_data.dart';
+import '../../api/backend_api.dart';
+import '../../state/auth_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
 
-class FriendsScreen extends StatefulWidget {
+/// 친구 목록/요청 화면 — 백엔드 REST(/api/friends) 실연동.
+/// 온라인 여부(isOnline)는 서버 소켓 프레젠스 스냅샷으로 내려온다.
+class FriendsScreen extends ConsumerStatefulWidget {
   const FriendsScreen({super.key});
 
   @override
-  State<FriendsScreen> createState() => _FriendsScreenState();
+  ConsumerState<FriendsScreen> createState() => _FriendsScreenState();
 }
 
-class _FriendsScreenState extends State<FriendsScreen> {
+class _FriendsScreenState extends ConsumerState<FriendsScreen> {
   final _addController = TextEditingController();
   int _tab = 0;
-  final List<MockFriendRequest> _requests = List.of(mockFriendRequests);
+  late Future<List<FriendSummary>> _friendsFuture;
+  late Future<List<FriendRequestSummary>> _requestsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
 
   @override
   void dispose() {
@@ -26,20 +37,49 @@ class _FriendsScreenState extends State<FriendsScreen> {
     super.dispose();
   }
 
-  void _handleAddFriend() {
-    final id = _addController.text.trim();
-    if (id.isEmpty) return;
+  void _reload() {
+    setState(() {
+      _friendsFuture = BackendApi.instance.getFriends();
+      _requestsFuture = BackendApi.instance.getPendingFriendRequests();
+    });
+    ref.invalidate(pendingFriendRequestCountProvider);
+  }
+
+  void _snack(String msg) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _handleAddFriend() async {
+    final nickname = _addController.text.trim();
+    if (nickname.isEmpty) return;
     _addController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('"$id"님에게 친구 요청을 보냈습니다.')));
+    try {
+      await BackendApi.instance.sendFriendRequestByNickname(nickname);
+      _snack('"$nickname"님에게 친구 요청을 보냈습니다.');
+    } on BackendApiException catch (e) {
+      _snack(e.statusCode == 404
+          ? '해당 닉네임의 사용자를 찾을 수 없습니다.'
+          : (e.statusCode == 409 ? '이미 친구이거나 요청 중입니다.' : '요청 실패: ${e.message}'));
+    }
   }
 
-  void _acceptRequest(MockFriendRequest request) {
-    setState(() => _requests.remove(request));
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${request.nickname}님과 친구가 되었습니다.')));
+  Future<void> _acceptRequest(FriendRequestSummary r) async {
+    try {
+      await BackendApi.instance.acceptFriendRequest(r.id);
+      _snack('${r.requesterNickname}님과 친구가 되었습니다.');
+      _reload();
+    } catch (_) {
+      _snack('수락에 실패했습니다.');
+    }
   }
 
-  void _declineRequest(MockFriendRequest request) {
-    setState(() => _requests.remove(request));
+  Future<void> _declineRequest(FriendRequestSummary r) async {
+    try {
+      await BackendApi.instance.declineFriendRequest(r.id);
+      _reload();
+    } catch (_) {
+      _snack('거절에 실패했습니다.');
+    }
   }
 
   @override
@@ -56,14 +96,15 @@ class _FriendsScreenState extends State<FriendsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('아이디로 친구 추가', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mutedForeground)),
+                Text('닉네임으로 친구 추가',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mutedForeground)),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
                       child: AppTextField(
                         controller: _addController,
-                        hintText: '상대방 아이디 입력...',
+                        hintText: '상대방 닉네임 입력...',
                         onSubmitted: (_) => _handleAddFriend(),
                       ),
                     ),
@@ -76,7 +117,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   children: [
                     Expanded(
                       child: AppButton(
-                        label: '친구 목록 (${mockFriends.length})',
+                        label: '친구 목록',
                         variant: _tab == 0 ? AppButtonVariant.primary : AppButtonVariant.outlined,
                         onPressed: () => setState(() => _tab = 0),
                       ),
@@ -84,7 +125,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: AppButton(
-                        label: '요청 (${_requests.length})',
+                        label: '받은 요청',
                         variant: _tab == 1 ? AppButtonVariant.primary : AppButtonVariant.outlined,
                         onPressed: () => setState(() => _tab = 1),
                       ),
@@ -92,30 +133,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                if (_tab == 0) ...[
-                  ...mockFriends.map((f) => _FriendTile(friend: f)),
-                  if (mockFriends.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('친구가 없습니다', style: TextStyle(color: AppColors.mutedForeground)),
-                      ),
-                    ),
-                ] else ...[
-                  _SectionLabel('받은 요청 (${_requests.length})'),
-                  ..._requests.map((r) => _RequestTile(
-                        request: r,
-                        onAccept: () => _acceptRequest(r),
-                        onDecline: () => _declineRequest(r),
-                      )),
-                  if (_requests.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('받은 요청이 없습니다', style: TextStyle(color: AppColors.mutedForeground)),
-                      ),
-                    ),
-                ],
+                if (_tab == 0) _friendsList() else _requestsList(),
               ],
             ),
           ),
@@ -123,23 +141,58 @@ class _FriendsScreenState extends State<FriendsScreen> {
       ),
     );
   }
-}
 
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
+  Widget _friendsList() {
+    return FutureBuilder<List<FriendSummary>>(
+      future: _friendsFuture,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
+        }
+        final friends = snap.data ?? const [];
+        if (friends.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: Text('친구가 없습니다', style: TextStyle(color: AppColors.mutedForeground))),
+          );
+        }
+        return Column(children: friends.map((f) => _FriendTile(friend: f)).toList());
+      },
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Text(text, style: const TextStyle(fontSize: 12, color: AppColors.mutedForeground)),
+  Widget _requestsList() {
+    return FutureBuilder<List<FriendRequestSummary>>(
+      future: _requestsFuture,
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
+        }
+        final requests = snap.data ?? const [];
+        if (requests.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: Text('받은 요청이 없습니다', style: TextStyle(color: AppColors.mutedForeground))),
+          );
+        }
+        return Column(
+          children: requests
+              .map((r) => _RequestTile(
+                    request: r,
+                    onAccept: () => _acceptRequest(r),
+                    onDecline: () => _declineRequest(r),
+                  ))
+              .toList(),
+        );
+      },
     );
   }
 }
 
+int _avatarIndexOf(String key) => key.hashCode.abs() % 8;
+
 class _FriendTile extends StatelessWidget {
-  final MockFriend friend;
+  final FriendSummary friend;
 
   const _FriendTile({required this.friend});
 
@@ -155,8 +208,7 @@ class _FriendTile extends StatelessWidget {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                UserAvatar(avatarIndex: friend.avatarIndex, radius: 20),
-                // 접속중인 친구만 초록 점으로 표시한다.
+                UserAvatar(avatarIndex: _avatarIndexOf(friend.uid), radius: 20),
                 if (friend.isOnline)
                   Positioned(
                     right: -1,
@@ -194,7 +246,7 @@ class _FriendTile extends StatelessWidget {
 }
 
 class _RequestTile extends StatelessWidget {
-  final MockFriendRequest request;
+  final FriendRequestSummary request;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
@@ -209,16 +261,10 @@ class _RequestTile extends StatelessWidget {
         decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border, width: 2)),
         child: Row(
           children: [
-            UserAvatar(avatarIndex: request.avatarIndex, radius: 20),
+            UserAvatar(avatarIndex: _avatarIndexOf(request.requesterUid), radius: 20),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(request.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text(request.receivedAt, style: TextStyle(fontSize: 12, color: AppColors.mutedForeground)),
-                ],
-              ),
+              child: Text(request.requesterNickname, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             IconButton(
               onPressed: onAccept,

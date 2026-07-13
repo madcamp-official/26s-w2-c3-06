@@ -51,6 +51,12 @@ export async function isNicknameAvailable(nickname: string, excludeUid?: string)
   return existing.uid === excludeUid;
 }
 
+// 닉네임으로 uid 조회 — 친구 요청을 닉네임으로 보낼 때 대상 uid 해석에 쓴다. 없으면 null.
+export async function findUidByNickname(nickname: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({ where: { nickname }, select: { uid: true } });
+  return user?.uid ?? null;
+}
+
 export async function touchLastActive(uid: string): Promise<void> {
   await prisma.user.update({ where: { uid }, data: { lastActive: new Date() } }).catch(() => {
     // 유저 행이 아직 없으면(예: DB 연동 전 소켓 흐름) 조용히 무시 — 전적 기록 시 upsert로 생성됨.
