@@ -2,17 +2,35 @@ import type { BotTurnContext, TurnCommentContext } from '../types';
 
 // PLAN "LLM 래퍼" 프롬프트 핵심을 담는다. 실제 문안은 튜닝하며 다듬을 예정.
 
-export function wordPairPrompt(category: string | null, usedWords: string[]): string {
-  const categoryLine = category
-    ? `카테고리는 "${category}"이다.`
-    : '적절한 카테고리를 하나 직접 골라라.';
+// category가 null일 때(AI 랜덤 카테고리) 후보 3개를 뽑아 코드에서 무작위로 하나를 고른다.
+// LLM이 직접 하나를 확정해버리면 같은 프롬프트라도 항상 비슷한(가장 "무난한") 답으로 수렴하는
+// 경향이 있어, 후보를 여러 개 받고 실제 무작위 선택은 서버 코드가 해서 다양성을 확보한다.
+export function categoryCandidatesPrompt(usedCategories: string[]): string {
   return [
-    '라이어게임용 제시어 쌍을 만든다.',
-    categoryLine,
-    '같은 카테고리 안에서 연관성은 있지만 서로 다른 두 단어(realWord, liarWord)를 생성하라.',
+    '라이어게임(추리 파티게임)에 쓸 카테고리 후보 3개를 제안하라.',
+    '조건:',
+    '- 서로 다른 3개일 것.',
+    '- "동물", "음식", "직업"처럼 너무 흔하고 뻔한 카테고리는 피하라.',
+    '- 그렇다고 대부분의 사람이 못 알아들을 정도로 생소한 카테고리도 피하라 — 초중고생도 듣자마자',
+    '  감이 오는 수준에서, 약간 의외성 있고 흥미로운 카테고리를 골라라.',
+    usedCategories.length ? `이미 사용한 카테고리는 피하라: ${usedCategories.join(', ')}.` : '',
+    '반드시 JSON만 출력: {"categories": [string, string, string]}',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+// realWord/liarWord 후보 3쌍을 뽑아 코드에서 무작위로 하나를 고른다(카테고리 후보와 동일한 이유).
+export function wordPairPrompt(category: string, usedWords: string[]): string {
+  return [
+    `카테고리 "${category}"의 라이어게임용 제시어 쌍 후보 3개를 만든다.`,
+    '각 후보는 같은 카테고리 안에서 연관성은 있지만 서로 다른 두 단어(realWord, liarWord)여야 한다.',
     '너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아진다 (예: "동물" → 사자/호랑이).',
+    '단어 자체도 너무 흔하고 뻔한 조합("사자/호랑이" 같은 전형적인 예시)은 피하고, 그렇다고 대부분의',
+    '사람이 모를 정도로 생소한 단어도 피하라 — 초중고생도 알 만한 수준에서 살짝 의외성 있는 단어를 써라.',
+    '3개 후보는 서로 겹치지 않게 다양한 단어로 만들어라.',
     usedWords.length ? `이미 사용한 단어는 피하라: ${usedWords.join(', ')}.` : '',
-    '반드시 JSON만 출력: {"category": string, "realWord": string, "liarWord": string}',
+    '반드시 JSON만 출력: {"pairs": [{"realWord": string, "liarWord": string}, {"realWord": string, "liarWord": string}, {"realWord": string, "liarWord": string}]}',
   ]
     .filter(Boolean)
     .join('\n');
@@ -21,11 +39,22 @@ export function wordPairPrompt(category: string | null, usedWords: string[]): st
 export function botTurnPrompt(ctx: BotTurnContext): string {
   const prior = ctx.priorTurns.map((t) => `- ${t.nickname}: ${t.text}`).join('\n') || '(아직 없음)';
   return [
-    `카테고리 "${ctx.category}"에서 너에게 배정된 단어는 "${ctx.assignedWord}"이다.`,
-    '너는 이 단어가 진짜인지 가짜인지, 네가 라이어인지 전혀 모른다 (사람 참가자와 동일 조건).',
-    '단어를 직접 말하지 말고, 너무 완벽하지 않게 자연스러운 한 문장으로 설명하라.',
+    "너는 지금 '라이어게임'이라는 추리 파티게임에 실제 참가자로 함께 플레이 중이다.",
+    `카테고리는 "${ctx.category}"이고, 너에게 배정된 단어는 "${ctx.assignedWord}"이다.`,
+    '너는 이 단어가 진짜 제시어인지 가짜(라이어용) 제시어인지, 네가 라이어인지 전혀 모른다',
+    '(다른 참가자와 동일 조건 — 너만 특별히 아는 정보는 없다).',
+    '',
+    '[설명 작성 규칙]',
+    '- 단어 자체나 그 단어를 바로 연상시키는 결정적 특징(정확한 생김새·용도·직접적인 유사어)은',
+    '  절대 말하지 마라. 네 설명만 듣고 다른 사람이 원래 단어를 바로 맞히면 안 된다.',
+    '- 그 대신 애매하고 간접적인 힌트나 개인적인 경험·느낌을 살짝 섞어서, "나는 이 단어를 잘 알고',
+    '  있다"는 여유와 확신이 은근히 묻어나게 말해라 — 이게 네가 라이어가 아니라는 인상을 슬쩍',
+    '  풍기게 하는 센스다. 단, 이것도 너무 티나게 자신만만하면 안 되고 자연스러워야 한다.',
+    '- 반드시 반말로 써라. 너무 정제되고 완벽한 문장 말고, 사람이 즉흥적으로 말하듯 자연스러운',
+    '  한 문장으로.',
+    '- 이전에 나온 설명들과 내용이 겹치지 않게 하라.',
     `지금까지 나온 설명:\n${prior}`,
-    '설명 문장만 출력하라.',
+    '설명 문장만 출력하라. 다른 말 붙이지 마라.',
   ].join('\n');
 }
 

@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL } from './client';
 import {
+  categoryCandidatesPrompt,
   wordPairPrompt,
   botTurnPrompt,
   turnCommentPrompt,
@@ -16,6 +17,7 @@ export interface LiarGameLLM {
   generateWordPair(
     category: string | null,
     usedWords: string[],
+    usedCategories: string[],
   ): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
@@ -59,13 +61,38 @@ function assertNotRefusal(text: string, maxExpectedLength: number): void {
   }
 }
 
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function parseJsonBlock<T>(raw: string, label: string): T {
+  // 모델이 JSON만 반환하도록 프롬프트했지만, 방어적으로 첫 JSON 블록만 파싱.
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`${label}: JSON 파싱 실패 — ${raw}`);
+  return JSON.parse(match[0]) as T;
+}
+
 const realLLM: LiarGameLLM = {
-  async generateWordPair(category, usedWords) {
-    const raw = await completeText(wordPairPrompt(category, usedWords), 256);
-    // 모델이 JSON만 반환하도록 프롬프트했지만, 방어적으로 첫 JSON 블록만 파싱.
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error(`generateWordPair: JSON 파싱 실패 — ${raw}`);
-    return JSON.parse(match[0]) as { category: string; realWord: string; liarWord: string };
+  async generateWordPair(category, usedWords, usedCategories) {
+    // category가 null(AI 랜덤)이면 먼저 후보 3개를 받아 서버가 무작위로 하나를 고른다 —
+    // 모델에게 직접 하나만 확정해달라고 하면 항상 비슷하게 "무난한" 답으로 수렴하는 경향이 있다.
+    let resolvedCategory = category;
+    if (!resolvedCategory) {
+      const catRaw = await completeText(categoryCandidatesPrompt(usedCategories), 200);
+      const catParsed = parseJsonBlock<{ categories: string[] }>(catRaw, 'categoryCandidates');
+      if (!catParsed.categories?.length) throw new Error('categoryCandidates: 빈 응답');
+      resolvedCategory = pickRandom(catParsed.categories);
+    }
+
+    // 같은 이유로 제시어 쌍도 후보 3개를 받아 서버가 무작위로 하나를 고른다.
+    const raw = await completeText(wordPairPrompt(resolvedCategory, usedWords), 500);
+    const parsed = parseJsonBlock<{ pairs: { realWord: string; liarWord: string }[] }>(
+      raw,
+      'wordPairCandidates',
+    );
+    if (!parsed.pairs?.length) throw new Error('wordPairCandidates: 빈 응답');
+    const chosen = pickRandom(parsed.pairs);
+    return { category: resolvedCategory, realWord: chosen.realWord, liarWord: chosen.liarWord };
   },
 
   async generateBotTurn(ctx) {

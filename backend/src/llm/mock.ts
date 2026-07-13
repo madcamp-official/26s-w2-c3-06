@@ -14,7 +14,7 @@ const DEFAULT_CATEGORY = '동물';
 let counter = 0;
 
 export const mockLLM: LiarGameLLM = {
-  async generateWordPair(category, usedWords) {
+  async generateWordPair(category, usedWords, _usedCategories) {
     const resolvedCategory = category && WORD_POOLS[category] ? category : DEFAULT_CATEGORY;
     let [realWord, liarWord] = WORD_POOLS[resolvedCategory];
     if (usedWords.includes(realWord)) {

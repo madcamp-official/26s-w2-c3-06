@@ -76,7 +76,11 @@ export async function startGame(
   opts: { category: string | null; aiBotCount: number },
 ): Promise<void> {
   const usedWords = room.gameHistory.flatMap((g) => [g.realWord, g.liarWord]);
-  const { category, realWord, liarWord } = await llm.generateWordPair(opts.category, usedWords);
+  const { category, realWord, liarWord } = await llm.generateWordPair(
+    opts.category,
+    usedWords,
+    room.customCategories,
+  );
 
   // 이번 게임에 실제로 사용된 카테고리를 이 방의 재사용 목록에 추가한다(중복 제거).
   // 방장이 직접 입력한 것뿐 아니라 AI가 랜덤 생성한 카테고리(opts.category === null)도 포함한다.
