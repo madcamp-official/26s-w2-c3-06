@@ -27,17 +27,17 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildSystemPill(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
             color: AppColors.accent,
             border: Border.all(color: AppColors.border),
           ),
           child: Text(
             message.text,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.mutedForeground),
+            style: const TextStyle(fontSize: 11, color: AppColors.mutedForeground),
           ),
         ),
       ),
@@ -46,10 +46,10 @@ class ChatBubble extends StatelessWidget {
 
   Widget _buildAiCallout(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: const BoxDecoration(
           color: AppColors.accent,
           border: Border(left: BorderSide(color: AppColors.primary, width: 4)),
@@ -57,12 +57,12 @@ class ChatBubble extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('☕', style: TextStyle(fontSize: 14)),
-            const SizedBox(width: 8),
+            const Text('☕', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 6),
             Expanded(
               child: Text(
                 message.text,
-                style: TextStyle(color: AppColors.primary, fontStyle: FontStyle.italic),
+                style: const TextStyle(color: AppColors.primary, fontStyle: FontStyle.italic, fontSize: 12),
               ),
             ),
           ],
@@ -76,20 +76,20 @@ class ChatBubble extends StatelessWidget {
 
     final avatar = UserAvatar(
       avatarIndex: message.avatarIndex,
-      radius: 16,
+      radius: 13,
       imageBytes: isMine ? UserSession.profileImageBytes : null,
     );
     final bubble = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: isMine ? AppColors.primary.withValues(alpha: 0.12) : AppColors.card,
         border: Border.all(color: isMine ? AppColors.primary : AppColors.border),
       ),
-      child: Text(message.text),
+      child: Text(message.text, style: const TextStyle(fontSize: 13)),
     );
     final nameLabel = Text(
       message.senderNickname,
-      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.mutedForeground),
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppColors.mutedForeground),
     );
 
     final column = Flexible(
@@ -100,7 +100,7 @@ class ChatBubble extends StatelessWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,

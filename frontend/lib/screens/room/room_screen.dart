@@ -58,6 +58,11 @@ class _RoomScreenState extends State<RoomScreen> {
   final Map<String, String> _votes = {};
   String? _votedOutId;
 
+  /// 이번 라운드에 나에게 배정된 제시어. "AI 설명보기" 버튼의 대상이 된다(PLAN.md `explainWordIfUnfamiliar`).
+  String? _myWord;
+  String? _myWordExplanation;
+  bool _isExplainingWord = false;
+
   Timer? _tickTimer;
   int _secondsLeft = 0;
 
@@ -250,6 +255,8 @@ class _RoomScreenState extends State<RoomScreen> {
     _addSystemMessage('🎮 게임이 시작되었습니다!');
     final myWord = 'me' == liar.id ? pair.$2 : pair.$1;
     setState(() {
+      _myWord = myWord;
+      _myWordExplanation = null;
       _messages.add(ChatMessage(
         id: 'myword',
         senderId: 'system',
@@ -259,6 +266,19 @@ class _RoomScreenState extends State<RoomScreen> {
       ));
     });
     _beginTurn();
+  }
+
+  /// "AI 설명보기" 버튼. 낯선 제시어를 받았을 때 AI가 짧은 텍스트 설명을 생성해준다
+  /// (PLAN.md `explainWordIfUnfamiliar`, `round:yourWord` 대상). 라운드당 한 번만 호출한다.
+  Future<void> _explainMyWord() async {
+    if (_myWord == null || _isExplainingWord || _myWordExplanation != null) return;
+    setState(() => _isExplainingWord = true);
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
+    setState(() {
+      _myWordExplanation = mockExplainWord(_myWord!);
+      _isExplainingWord = false;
+    });
   }
 
   // ─── 설명 페이즈 ──────────────────────────────────────────
@@ -696,8 +716,10 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _returnToWaiting() {
     setState(() {
-      _addSystemMessage('게임이 종료되었습니다.');
+      _addSystemMessage('----------------게임이 종료되었습니다.----------------');
       _phase = _Phase.waiting;
+      _myWord = null;
+      _myWordExplanation = null;
       for (var i = 0; i < _humanPlayers.length; i++) {
         _humanPlayers[i] = _humanPlayers[i].copyWith(isReady: false);
       }
@@ -752,29 +774,41 @@ class _RoomScreenState extends State<RoomScreen> {
     final isDesktop = context.isDesktop;
     return Scaffold(
       appBar: AppBar(
-        title: Text(isWaiting ? '🎮 레이니의 방' : '🎮 GAME'),
+        toolbarHeight: 32,
+        titleSpacing: 8,
+        leadingWidth: 36,
+        iconTheme: const IconThemeData(size: 18),
+        title: Text(
+          isWaiting ? '🎮 레이니의 방' : '🎮 GAME',
+          style: PixelFont.body(fontSize: 11, color: AppColors.foreground, fontWeight: FontWeight.bold),
+        ),
         actions: [
           // 데스크탑에서는 나가기 버튼이 좌측 내비게이션 바로 이동한다.
+          // 상단바를 최대한 얇게 유지하기 위해 픽셀 버튼 대신 컴팩트한 아이콘 버튼을 쓴다.
           if (isWaiting && !isDesktop)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: AppButton(label: '방 나가기', fullWidth: false, variant: AppButtonVariant.outlined, onPressed: _handleLeaveRoom),
+            IconButton(
+              tooltip: '방 나가기',
+              onPressed: _handleLeaveRoom,
+              icon: const Icon(Icons.logout, size: 18),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             )
           else if (_phase == _Phase.describing)
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 10),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('$_secondsLeft', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primary)),
+                  Text('$_secondsLeft', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary)),
                   SizedBox(
-                    width: 100,
+                    width: 60,
                     child: LinearProgressIndicator(
                       value: _secondsLeft / _turnSeconds,
                       backgroundColor: AppColors.secondary,
                       color: AppColors.primary,
-                      minHeight: 4,
+                      minHeight: 3,
                     ),
                   ),
                 ],
@@ -795,7 +829,7 @@ class _RoomScreenState extends State<RoomScreen> {
             Expanded(
               child: ResponsiveCenter(
                 maxWidth: 1000,
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                padding: EdgeInsets.fromLTRB(16, isDesktop ? 12 : 6, 16, isDesktop ? 8 : 4),
                 child: isDesktop
                     ? Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -812,7 +846,7 @@ class _RoomScreenState extends State<RoomScreen> {
                           // 채팅/설명 영역에 공간을 더 준다. 현재 차례 안내는 본문 상단에 남아있다.
                           if (isWaiting) ...[
                             _buildPlayerRow(context),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                           ],
                           Expanded(child: _buildMainArea(context)),
                         ],
@@ -887,15 +921,16 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   /// 모바일에서는 플레이어 목록을 좌측 세로 사이드바 대신 상단 가로 스크롤 스트립으로 보여준다.
+  /// 채팅 영역을 최대한 넓게 쓰도록 가능한 한 얇게 표시한다.
   Widget _buildPlayerRow(BuildContext context) {
     return Container(
-      height: 78,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _allPlayers.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        separatorBuilder: (context, index) => const SizedBox(width: 6),
         itemBuilder: (context, index) => _buildPlayerChip(context, index),
       ),
     );
@@ -909,8 +944,8 @@ class _RoomScreenState extends State<RoomScreen> {
     return GestureDetector(
       onTap: player.id == 'me' ? () => _toggleReady('me') : null,
       child: Container(
-        width: 60,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        width: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         decoration: BoxDecoration(
           color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.1) : null,
           border: isCurrentTurn ? Border.all(color: AppColors.primary.withValues(alpha: 0.33)) : null,
@@ -920,19 +955,19 @@ class _RoomScreenState extends State<RoomScreen> {
           children: [
             player.isBot
                 ? Container(
-                    width: 32,
-                    height: 32,
+                    width: 20,
+                    height: 20,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border, width: 1.5)),
-                    child: const Icon(Icons.smart_toy, size: 18, color: AppColors.mutedForeground),
+                    child: const Icon(Icons.smart_toy, size: 12, color: AppColors.mutedForeground),
                   )
-                : UserAvatar(avatarIndex: index, radius: 16),
-            const SizedBox(height: 3),
+                : UserAvatar(avatarIndex: index, radius: 10),
+            const SizedBox(height: 1),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 44),
+              constraints: const BoxConstraints(maxWidth: 40),
               child: Text(
                 player.nickname,
-                style: PixelFont.body(fontSize: 10, color: AppColors.foreground),
+                style: PixelFont.body(fontSize: 8, color: AppColors.foreground, height: 1.0),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
               ),
@@ -941,12 +976,13 @@ class _RoomScreenState extends State<RoomScreen> {
               Text(
                 player.isReady ? '✓준비' : '대기',
                 style: PixelFont.body(
-                  fontSize: 9,
+                  fontSize: 7,
+                  height: 1.0,
                   color: player.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText,
                 ),
               )
             else if (player.isHost)
-              const Text('🦊', style: TextStyle(fontSize: 10)),
+              const Text('🦊', style: TextStyle(fontSize: 8, height: 1.0)),
           ],
         ),
       ),
@@ -969,9 +1005,10 @@ class _RoomScreenState extends State<RoomScreen> {
             color: AppColors.primary,
             child: const Text('ALL DONE!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
           ),
+        if (_myWord != null) _buildWordHelper(context),
         Expanded(
           child: Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
             child: ListView.builder(
               controller: _scrollController,
@@ -980,9 +1017,9 @@ class _RoomScreenState extends State<RoomScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         _buildBottomBar(context),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
           children: [
             Expanded(
@@ -993,6 +1030,7 @@ class _RoomScreenState extends State<RoomScreen> {
                   hintText: _canChat
                       ? (_phase == _Phase.describing ? '설명을 입력하세요...' : '대기방 채팅...')
                       : (_phase == _Phase.describing ? '지금은 당신의 차례가 아닙니다' : '지금은 채팅할 수 없습니다'),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   onSubmitted: (_) => _sendMessage(),
                 ),
               ),
@@ -1002,6 +1040,46 @@ class _RoomScreenState extends State<RoomScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  /// 제시어가 낯설 때 누르는 "AI 설명보기" 버튼과, 누른 뒤 나오는 설명 박스.
+  Widget _buildWordHelper(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: _myWordExplanation != null
+          ? Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border)),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('💡', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _myWordExplanation!,
+                      style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Align(
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                onTap: _isExplainingWord ? null : _explainMyWord,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+                  child: Text(
+                    _isExplainingWord ? '🤖 생각 중...' : '🤖 이 단어가 낯설다면? AI 설명보기',
+                    style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
@@ -1042,27 +1120,35 @@ class _RoomScreenState extends State<RoomScreen> {
     final me = _humanPlayers.firstWhere((p) => p.id == 'me');
     return Row(
       children: [
-        GestureDetector(
-          onTap: widget.isHost ? _openCategoryPicker : null,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '카테고리: $_selectedCategory',
-                  style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
-                ),
-                if (widget.isHost) ...[
-                  const SizedBox(width: 2),
-                  const Icon(Icons.expand_more, size: 14, color: AppColors.mutedForeground),
+        Flexible(
+          child: GestureDetector(
+            onTap: widget.isHost ? _openCategoryPicker : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+              decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '카테고리: $_selectedCategory',
+                      style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                  if (widget.isHost) ...[
+                    const SizedBox(width: 2),
+                    const Icon(Icons.expand_more, size: 14, color: AppColors.mutedForeground),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
+        Text('AI봇', style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
+        const SizedBox(width: 4),
         Container(
           decoration: BoxDecoration(color: AppColors.secondary, border: Border.all(color: AppColors.border)),
           child: Row(
@@ -1070,30 +1156,33 @@ class _RoomScreenState extends State<RoomScreen> {
             children: [
               IconButton(
                 onPressed: widget.isHost ? () => _changeBotCount(-1) : null,
-                icon: const Icon(Icons.remove, size: 16),
+                icon: const Icon(Icons.remove, size: 14),
                 visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
               ),
               SizedBox(
-                width: 18,
-                child: Text('$_botCount', textAlign: TextAlign.center, style: PixelFont.body(fontSize: 12)),
+                width: 14,
+                child: Text('$_botCount', textAlign: TextAlign.center, style: PixelFont.body(fontSize: 11)),
               ),
               IconButton(
                 onPressed: widget.isHost ? () => _changeBotCount(1) : null,
-                icon: const Icon(Icons.add, size: 16),
+                icon: const Icon(Icons.add, size: 14),
                 visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
               ),
             ],
           ),
         ),
         const Spacer(),
         if (widget.isHost)
-          AppButton(label: '▶ 시작', fullWidth: false, onPressed: _canStartGame ? _startGame : null)
+          AppButton(label: '▶ 시작', fullWidth: false, dense: true, onPressed: _canStartGame ? _startGame : null)
         else
           AppButton(
-            label: me.isReady ? '✓준비 완료' : '준비하기',
+            label: me.isReady ? '✓준비완료' : '준비하기',
             fullWidth: false,
+            dense: true,
             variant: me.isReady ? AppButtonVariant.primary : AppButtonVariant.outlined,
             onPressed: () => _toggleReady('me'),
           ),

@@ -13,6 +13,7 @@ class AppTextField extends StatelessWidget {
   final bool obscureText;
   final Widget? suffixIcon;
   final Widget? prefixIcon;
+  final EdgeInsetsGeometry? contentPadding;
 
   const AppTextField({
     super.key,
@@ -27,6 +28,7 @@ class AppTextField extends StatelessWidget {
     this.obscureText = false,
     this.suffixIcon,
     this.prefixIcon,
+    this.contentPadding,
   });
 
   @override
@@ -45,6 +47,7 @@ class AppTextField extends StatelessWidget {
         counterText: '',
         suffixIcon: suffixIcon,
         prefixIcon: prefixIcon,
+        contentPadding: contentPadding,
       ),
     );
   }

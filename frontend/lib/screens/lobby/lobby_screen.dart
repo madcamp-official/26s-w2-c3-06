@@ -97,7 +97,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
         );
       },
     );
-    controller.dispose();
+    // 다이얼로그 닫힘 애니메이션이 끝나기 전에 dispose()하면 TextField가 dispose된 컨트롤러를
+    // 참조하게 되어 에러가 나므로(게스트 로그인 오류와 동일한 원인) 여기서 dispose하지 않는다.
     if (code == null || code.length != 4) return;
     if (!mounted) return;
     _openRoom(code: code, isHost: false);

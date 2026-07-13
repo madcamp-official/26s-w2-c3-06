@@ -95,7 +95,9 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       },
     );
-    nicknameController.dispose();
+    // 다이얼로그의 pop() 직후에도 닫힘 애니메이션이 끝날 때까지 TextField(및 컨트롤러)가
+    // 잠깐 더 화면에 남아있다. 여기서 바로 dispose()하면 "used after being disposed" 에러가
+    // 나므로(게스트 로그인 시 발생하던 오류) 일부러 dispose를 호출하지 않는다.
 
     if (nickname == null || nickname.isEmpty) return;
     if (!mounted) return;

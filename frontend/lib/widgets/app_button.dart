@@ -15,6 +15,9 @@ class AppButton extends StatelessWidget {
   final IconData? icon;
   final bool fullWidth;
 
+  /// 좁은 영역(하단바 등)에 쓰는 컴팩트한 크기. 패딩/글자 크기를 줄인다.
+  final bool dense;
+
   const AppButton({
     super.key,
     required this.label,
@@ -22,6 +25,7 @@ class AppButton extends StatelessWidget {
     this.variant = AppButtonVariant.primary,
     this.icon,
     this.fullWidth = true,
+    this.dense = false,
   });
 
   @override
@@ -33,7 +37,7 @@ class AppButton extends StatelessWidget {
     final enabled = onPressed != null;
 
     final textStyle = PixelFont.body(
-      fontSize: 14,
+      fontSize: dense ? 12 : 14,
       fontWeight: FontWeight.w400,
       color: textColor,
     ).copyWith(fontFamilyFallback: const ['Noto Sans KR']);
@@ -53,9 +57,11 @@ class AppButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.5,
       child: PixelBox(
         width: fullWidth ? double.infinity : null,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        padding: dense
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+            : const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         color: backgroundColor,
-        border: Border.all(color: borderColor, width: 3),
+        border: Border.all(color: borderColor, width: dense ? 2 : 3),
         shadowOffset: enabled ? const Offset(2, 2) : null,
         alignment: Alignment.center,
         child: child,
