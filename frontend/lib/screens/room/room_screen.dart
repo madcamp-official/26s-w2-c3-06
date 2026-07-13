@@ -14,6 +14,7 @@ import '../../state/room_provider.dart';
 import '../../widgets/pixel_dialog.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/pixel_font.dart';
+import '../../widgets/app_alert.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/chat_bubble.dart';
@@ -154,6 +155,33 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  /// 예기치 않게 소켓 연결이 끊겼을 때 — 확인을 눌러야 닫히는 알림창을 띄운 뒤 로비로 나간다.
+  Future<void> _showDisconnectedDialog() async {
+    await showPixelDialog<void>(
+      context: context,
+      maxWidth: 320,
+      builder: (dialogContext) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
+            const SizedBox(height: 12),
+            Text(
+              '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
+              style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
+            ),
+            const SizedBox(height: 18),
+            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+          ],
+        );
+      },
+    );
+    if (!mounted) return;
+    ref.read(roomProvider.notifier).reset();
+    _returnToLobby();
+  }
+
   /// 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)를 채팅 로그에
   /// 묻히지 않도록 큰 알림창으로 한 번에 보여준다.
   Future<void> _showResultDialog(GameResult r) async {
@@ -181,10 +209,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Text(citizensWin ? '🐾' : '🦊', style: const TextStyle(fontSize: 48)),
-            ),
-            const SizedBox(height: 4),
             Text(
               citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
               textAlign: TextAlign.center,
@@ -211,8 +235,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       friends = await BackendApi.instance.getFriends();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('친구 목록을 불러오지 못했습니다.')));
+        showAppAlert(context, '친구 목록을 불러오지 못했습니다.');
       }
       return;
     }
@@ -368,10 +391,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           _startingGame = false;
           _submittingGuess = false;
         });
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(message)));
+        showAppAlert(context, message);
       });
+    });
+    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 확인 알림창을 띄우고 바로 로비로 나간다.
+    ref.listen<AsyncValue<void>>(socketDisconnectedProvider, (prev, next) {
+      if (next.hasValue && !_leaving) {
+        _leaving = true;
+        _showDisconnectedDialog();
+      }
     });
 
     if (s.chatLog.length != _lastChatLen) {
@@ -701,6 +729,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               onPressed: canStart && !_startingGame ? _startGame : null,
             ),
           ] else ...[
+            const SizedBox(height: 10),
+            Text('AI 봇 수: $botCount', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            const SizedBox(height: 4),
+            Text(
+              '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+              style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Text('방장이 게임을 시작하길 기다리는 중...',
                 style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
@@ -766,17 +801,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   deadline: s.phaseDeadline!,
                   style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
                 ),
-              // 방장이 진행이 느릴 때 현재 턴(사람/봇 무관)을 강제로 넘길 수 있다.
-              if (isHost) ...[
-                const SizedBox(width: 8),
-                AppButton(
-                  label: '다음 차례 ▶',
-                  fullWidth: false,
-                  dense: true,
-                  variant: AppButtonVariant.outlined,
-                  onPressed: () => ref.read(roomProvider.notifier).skipTurn(),
-                ),
-              ],
             ],
           ),
         ],
