@@ -29,7 +29,7 @@ AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 1. 방장이 지정(또는 AI 랜덤)한 카테고리로 진짜/가짜 제시어 쌍을 생성
 2. 방장이 선택한 수만큼 AI 봇이 플레이어로 참여해 설명 생성 (봇도 자신이 라이어인지 모름 — 사람과 동일 조건)
 3. **매 턴** 설명이 제출될 때마다 AI가 일부러 헷갈리게 하는 "교란" 코멘트를 닉네임으로 지칭해 단다
-4. 제시어가 낯선 단어로 판단되면 AI가 해당 단어에 대한 텍스트 설명을 함께 제공한다 (이미지 생성은 하지 않음)
+4. 모든 제시어에 대해 AI가 짧은 텍스트 설명을 미리 만들어 함께 내려준다 (난이도 무관, 이미지 생성은 하지 않음) — 유저는 "AI 설명보기" 버튼으로 원할 때 펼쳐 본다
 5. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
 
 **방 UI는 그룹 채팅 형식**으로, 턴 설명·AI 교란 코멘트·시스템 안내·자유 채팅이 하나의 피드에 흐른다. 채팅은 새 게임 시작 시에만 초기화된다(데이터 모델 `chatLog` 참고).
@@ -169,7 +169,7 @@ interface RoomState {
 
 ### DB 스키마 (영구 저장: 유저·전적·친구)
 
-방/게임/라운드 같은 휘발성 상태는 인메모리에 두지만, **유저 프로필·전적·친구 관계는 로컬 Postgres에 Prisma로 영구 저장**한다(현재는 stretch). Firebase Auth는 인증만 담당하고, `uid`를 PK로 삼아 이 DB가 유저 데이터를 소유한다. 아래는 `backend/prisma/schema.prisma`의 영구 저장 모델 설계다.
+방/게임/라운드 같은 휘발성 상태는 인메모리에 두지만, **유저 프로필·전적·친구 관계는 로컬 Postgres에 Prisma로 영구 저장**한다(원래 선택 범위(stretch) 항목이었으나 현재 구현 완료 — "백엔드 구현 현황" 참고). Firebase Auth는 인증만 담당하고, `uid`를 PK로 삼아 이 DB가 유저 데이터를 소유한다. 아래는 `backend/prisma/schema.prisma`의 영구 저장 모델 설계다.
 
 ```prisma
 model User {
@@ -266,7 +266,7 @@ enum FriendshipStatus {
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
-- `round:yourWord` (해당 소켓에만 개별 전송) `{ word }` — 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
+- `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
 - `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
 - `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
@@ -308,7 +308,7 @@ interface LiarGameLLM {
   generateWordPair(category: string | null, usedWords: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWordIfUnfamiliar(word: string): Promise<string | null>;   // 낯선 단어로 판단되면 설명 텍스트, 아니면 null
+  explainWordIfUnfamiliar(word: string): Promise<string | null>;   // 제시어 설명 텍스트. 난이도 무관 모든 단어에 대해 생성(생성 실패 시에만 null)
   judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
 }
 ```
@@ -316,7 +316,7 @@ interface LiarGameLLM {
 - `generateWordPair` 프롬프트 핵심: 같은 카테고리 안에서 연관성은 있지만 다른 두 단어를 생성 (예: 카테고리 "동물" → realWord "사자", liarWord "호랑이") — 너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아짐.
 - `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건).
 - `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 **의도적으로 헷갈리게 만드는** 코멘트를 생성. 실제 라이어가 누구인지는 절대 이 프롬프트에 입력하지 않음 — 정답을 아는 채로 교란하면 너무 정교해져 게임이 망가지므로, 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. 플레이어를 지칭할 때는 항상 닉네임을 사용한다.
-- `explainWordIfUnfamiliar` 프롬프트 핵심: 해당 단어를 모르면 유저가 "AI 설명보기" 버튼을 클릭함. ai가 해당 단어에 대한 짧은 텍스트 설명을 생성. `round:yourWord`에 실린 단어를 대상으로 `game:configure` 직후 호출.
+- `explainWordIfUnfamiliar` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
 - `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정.
 
 ## 백엔드 구현 현황 (backend 브랜치)
