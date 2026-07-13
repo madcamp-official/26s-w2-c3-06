@@ -56,6 +56,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _startingGame = false;
   bool _submittingGuess = false;
 
+  // 제시어에 딸린 AI 설명은 받자마자 바로 노출하지 않고, "설명 보기"를 눌러야 펼쳐지게 한다.
+  bool _showWordExplanation = false;
+
   // 투표 탭에 아무 시각적 피드백이 없어 "버튼이 안 눌린다"고 느껴지던 문제 — 내가 누른
   // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
   String? _myVote;
@@ -165,9 +168,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (r.liarGuessCorrect == null) {
       liarGuessText = '역전승 시도 없음';
     } else if (r.liarGuessCorrect == true) {
-      liarGuessText = '✅ 성공 — 라이어 역전승!';
+      liarGuessText = r.liarGuess == null ? '✅ 성공 — 라이어 역전승!' : '✅ 성공 — "${r.liarGuess}" 정답!';
     } else {
-      liarGuessText = '❌ 실패';
+      liarGuessText = r.liarGuess == null ? '❌ 실패' : '❌ 실패 — "${r.liarGuess}"라고 썼어요';
     }
 
     await showPixelDialog<void>(
@@ -341,6 +344,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       }
       if (next == GamePhase.ended && _submittingGuess) {
         setState(() => _submittingGuess = false);
+      }
+    });
+    // 새 게임(또는 새 제시어)을 받으면 지난 라운드에서 펼쳐뒀던 설명 표시를 접는다.
+    ref.listen<String?>(roomProvider.select((v) => v.myWord), (prev, next) {
+      if (next != prev && _showWordExplanation) {
+        setState(() => _showWordExplanation = false);
       }
     });
     // 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)가 다 갖춰지면
@@ -703,6 +712,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _myWordCard(RoomViewState s) {
     if (s.myWord == null) return const SizedBox.shrink();
+    final hasExplanation = s.myWordExplanation != null;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 8),
@@ -716,9 +726,19 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         children: [
           Text('내 제시어', style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
           Text(s.myWord!, style: PixelFont.title(fontSize: 14, color: AppColors.primary)),
-          if (s.myWordExplanation != null) ...[
+          if (hasExplanation) ...[
             const SizedBox(height: 4),
-            Text(s.myWordExplanation!, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+            HoverTap(
+              onTap: () => setState(() => _showWordExplanation = !_showWordExplanation),
+              child: Text(
+                _showWordExplanation ? '설명 숨기기 ▲' : 'AI 설명 보기 ▼',
+                style: PixelFont.body(fontSize: 10, color: AppColors.primary),
+              ),
+            ),
+            if (_showWordExplanation) ...[
+              const SizedBox(height: 4),
+              Text(s.myWordExplanation!, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+            ],
           ],
         ],
       ),
