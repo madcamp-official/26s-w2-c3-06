@@ -7,7 +7,6 @@ import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
-import '../room/room_screen.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -43,20 +42,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
     setState(() => _requests.remove(request));
   }
 
-  void _joinFriendRoom(String roomTitle) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        settings: const RouteSettings(name: 'room'),
-        builder: (_) => const RoomScreen(roomCode: '1024', isHost: false),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final online = mockFriends.where((f) => f.isOnline).toList();
-    final offline = mockFriends.where((f) => !f.isOnline).toList();
-
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.arrow_back)),
@@ -106,16 +93,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (_tab == 0) ...[
-                  if (online.isNotEmpty) _SectionLabel('온라인 (${online.length})'),
-                  ...online.map((f) => _FriendTile(
-                        friend: f,
-                        onJoin: f.roomName != null ? () => _joinFriendRoom(f.roomName!) : null,
-                      )),
-                  if (offline.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _SectionLabel('오프라인 (${offline.length})'),
-                  ],
-                  ...offline.map((f) => _FriendTile(friend: f, onJoin: null)),
+                  ...mockFriends.map((f) => _FriendTile(friend: f)),
+                  if (mockFriends.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text('친구가 없습니다', style: TextStyle(color: AppColors.mutedForeground)),
+                      ),
+                    ),
                 ] else ...[
                   _SectionLabel('받은 요청 (${_requests.length})'),
                   ..._requests.map((r) => _RequestTile(
@@ -155,9 +140,8 @@ class _SectionLabel extends StatelessWidget {
 
 class _FriendTile extends StatelessWidget {
   final MockFriend friend;
-  final VoidCallback? onJoin;
 
-  const _FriendTile({required this.friend, required this.onJoin});
+  const _FriendTile({required this.friend});
 
   @override
   Widget build(BuildContext context) {
@@ -165,48 +149,14 @@ class _FriendTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          border: Border.all(color: AppColors.border, width: friend.isOnline ? 2 : 1),
-        ),
+        decoration: BoxDecoration(color: AppColors.card, border: Border.all(color: AppColors.border)),
         child: Row(
           children: [
-            Stack(
-              children: [
-                UserAvatar(avatarIndex: friend.avatarIndex, radius: 20),
-                if (friend.isOnline)
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: AppColors.success,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.card, width: 2),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+            UserAvatar(avatarIndex: friend.avatarIndex, radius: 20),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text(
-                    friend.roomName != null ? '🎮 ${friend.roomName}' : (friend.isOnline ? '온라인' : (friend.statusText ?? '오프라인')),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: friend.roomName != null ? AppColors.primary : AppColors.mutedForeground,
-                    ),
-                  ),
-                ],
-              ),
+              child: Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
-            if (onJoin != null) AppButton(label: '참여', fullWidth: false, onPressed: onJoin),
           ],
         ),
       ),

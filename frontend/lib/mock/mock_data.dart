@@ -64,7 +64,12 @@ List<Player> buildMockPlayers({required bool selfIsHost}) {
 
 /// RoomScreen에서 고를 수 있는 기본(하드코딩) 카테고리 목록. 방장이 이 방에서 직접 추가한
 /// 카테고리는 RoomScreen 내부 상태에만 보관되고 방 종료 시 함께 사라진다.
-const mockCategories = <String>['동물', '음식', '스포츠', '영화', '직업', 'K-pop', '랜덤선택'];
+/// "랜덤생성"을 고르면 AI가 카테고리 자체를 생성한다(PLAN.md `category: null` 경로).
+const mockCategories = <String>['동물', '음식', '스포츠', '영화', '직업', 'K-pop', kAiRandomCategory];
+
+/// "랜덤생성" 칩의 이름. 실제 카테고리가 아니라 "AI가 카테고리까지 생성"을 의미하는
+/// 특수 값이라 이름을 상수로 빼서 문자열 오타를 방지한다.
+const kAiRandomCategory = '랜덤생성';
 
 /// 카테고리별 (진짜 제시어, 가짜 제시어) 후보 목록. 실제로는 AI가 생성하지만,
 /// 백엔드 연동 전까지는 이 목데이터 중 아직 이번 게임에서 안 쓴 쌍을 무작위로 골라 흉내 낸다.
@@ -77,7 +82,17 @@ const mockWordPairsByCategory = <String, List<(String, String)>>{
   'K-pop': [('아이돌', '트로트 가수'), ('걸그룹', '보이그룹')],
 };
 
-/// 프리셋에 없는 카테고리(자유 입력·AI 랜덤)일 때 쓰는 대체 제시어 풀.
+/// "랜덤생성"을 골랐을 때 AI가 새로 카테고리까지 만들어내는 것을 흉내 내는 풀.
+/// 프리셋(`mockWordPairsByCategory`)에는 없는 카테고리들이며, 실제로 골라지면
+/// 그 방의 카테고리 목록(`customCategories`)에 추가되어 이후엔 프리셋처럼 다시 고를 수 있다.
+const mockAiGeneratedCategoryPool = <String, List<(String, String)>>{
+  '우주': [('행성', '위성'), ('로켓', '인공위성')],
+  '역사': [('임진왜란', '병자호란'), ('조선', '고려')],
+  '악기': [('피아노', '오르간'), ('바이올린', '첼로')],
+  '탈것': [('자전거', '오토바이'), ('버스', '기차')],
+};
+
+/// 프리셋에 없는 카테고리(자유 입력 등)일 때 쓰는 대체 제시어 풀.
 const mockFallbackWordPairs = <(String, String)>[
   ('사과', '배'),
   ('바다', '호수'),
@@ -142,28 +157,21 @@ const mockTakenEmails = <String>['test@example.com', 'liar@game.com'];
 const mockTakenNicknames = <String>['방장곰', '토끼', '고양이'];
 const mockTakenUserIds = <String>['admin', 'liarking'];
 
+/// PLAN.md `GET /api/friends` 응답 계약(`{ uid, nickname, avatarUrl }`)엔 온라인 여부나
+/// 참여 중인 방 정보가 없어, 프론트에서도 온라인/오프라인 표시나 "참여" 버튼을 두지 않는다.
 class MockFriend {
   final String nickname;
   final int avatarIndex;
-  final bool isOnline;
-  final String? roomName; // 온라인이면서 방에 있을 때만
-  final String? statusText; // 오프라인일 때 "n시간 전" 등
 
-  const MockFriend({
-    required this.nickname,
-    required this.avatarIndex,
-    required this.isOnline,
-    this.roomName,
-    this.statusText,
-  });
+  const MockFriend({required this.nickname, required this.avatarIndex});
 }
 
 /// FriendsScreen "친구 목록" 탭 더미 데이터.
 const mockFriends = <MockFriend>[
-  MockFriend(nickname: '레이니', avatarIndex: 6, isOnline: true, roomName: '레이니의 방'),
-  MockFriend(nickname: '하늘이', avatarIndex: 7, isOnline: true),
-  MockFriend(nickname: '별빛', avatarIndex: 4, isOnline: false, statusText: '오프라인'),
-  MockFriend(nickname: '달토끼', avatarIndex: 5, isOnline: false, statusText: '오프라인'),
+  MockFriend(nickname: '레이니', avatarIndex: 6),
+  MockFriend(nickname: '하늘이', avatarIndex: 7),
+  MockFriend(nickname: '별빛', avatarIndex: 4),
+  MockFriend(nickname: '달토끼', avatarIndex: 5),
 ];
 
 class MockFriendRequest {

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import '../../theme/pixel_font.dart';
 
@@ -41,17 +43,153 @@ class _LobbyScreenState extends State<LobbyScreen> {
     return _publicRooms.where((r) => r.title.contains(query) || r.category.contains(query)).toList();
   }
 
-  void _openRoom({required String code, required bool isHost}) {
-    Navigator.of(context).push(
+  Future<void> _openRoom({
+    required String code,
+    required bool isHost,
+    int maxPlayers = 8,
+    String? initialCategory,
+  }) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         settings: const RouteSettings(name: 'room'),
-        builder: (_) => RoomScreen(roomCode: code, isHost: isHost),
+        builder: (_) => RoomScreen(
+          roomCode: code,
+          isHost: isHost,
+          maxPlayers: maxPlayers,
+          initialCategory: initialCategory,
+        ),
       ),
     );
+    // 방에서 게임을 마치고 돌아오면 갱신된 전적(승률/레벨)이 로비에 바로 반영되도록 다시 그린다.
+    if (!mounted) return;
+    setState(() {});
   }
 
-  void _handleCreateRoom() {
-    _openRoom(code: '8421', isHost: true);
+  String _generateRoomCode() {
+    final random = Random();
+    return (1000 + random.nextInt(9000)).toString();
+  }
+
+  /// 방 만들기 다이얼로그 — 공개/비공개, 인원수, 카테고리를 미리 정한다
+  /// (PLAN.md `room:create` 계약 `{ nickname, visibility, maxPlayers }` + 카테고리 사전 선택).
+  Future<void> _handleCreateRoom() async {
+    var isPublic = true;
+    var maxPlayers = 8;
+    var category = mockCategories.first;
+
+    final confirmed = await showPixelDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      maxWidth: 360,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('🚪 방 만들기', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+                const SizedBox(height: 16),
+                Text('공개 설정', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ChoiceChip(
+                        label: '🌍 공개',
+                        selected: isPublic,
+                        onTap: () => setDialogState(() => isPublic = true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _ChoiceChip(
+                        label: '🔒 비공개',
+                        selected: !isPublic,
+                        onTap: () => setDialogState(() => isPublic = false),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text('인원수 (사람+봇 합산)', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    IconButton(
+                      onPressed: maxPlayers > 3 ? () => setDialogState(() => maxPlayers--) : null,
+                      icon: const Icon(Icons.remove_circle_outline),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '$maxPlayers명',
+                        textAlign: TextAlign.center,
+                        style: PixelFont.title(fontSize: 14, color: AppColors.foreground),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: maxPlayers < 12 ? () => setDialogState(() => maxPlayers++) : null,
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text('카테고리', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: mockCategories.map((c) {
+                    return _ChoiceChip(
+                      label: c,
+                      selected: c == category,
+                      onTap: () => setDialogState(() => category = c),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AppButton(
+                        label: '취소',
+                        variant: AppButtonVariant.outlined,
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AppButton(label: '방 만들기', onPressed: () => Navigator.of(dialogContext).pop(true)),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final code = _generateRoomCode();
+    if (isPublic) {
+      setState(() {
+        _publicRooms.insert(
+          0,
+          RoomSummary(
+            code: code,
+            title: '${UserSession.nickname}의 방',
+            category: category,
+            hostNickname: UserSession.nickname,
+            playerCount: 1,
+            maxPlayers: maxPlayers,
+          ),
+        );
+      });
+    }
+    _openRoom(code: code, isHost: true, maxPlayers: maxPlayers, initialCategory: category);
   }
 
   Future<void> _handleJoinByCode() async {
@@ -205,6 +343,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const _StatsCard(),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -255,6 +395,45 @@ class _LobbyScreenState extends State<LobbyScreen> {
       spacing: 12,
       runSpacing: 12,
       children: [for (final tile in tiles) SizedBox(width: 320, child: tile)],
+    );
+  }
+}
+
+/// 로비 상단의 내 전적 카드 — 프로필 사진·레벨·승률(PLAN.md "로비 — 내 승률·레벨·프로필 사진 표시").
+class _StatsCard extends StatelessWidget {
+  const _StatsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = UserSession.stats;
+    final winRateText = stats.overallWinRate == null ? '기록 없음' : '승률 ${(stats.overallWinRate! * 100).round()}%';
+
+    return PixelBox(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          UserAvatar(avatarIndex: UserSession.avatarIndex, radius: 18, imageBytes: UserSession.profileImageBytes),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  UserSession.nickname,
+                  style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Lv.${stats.level} · 전체 ${stats.totalGames}판 · $winRateText',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -399,9 +578,13 @@ class _PublicRoomTile extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            '${room.emoji} ${room.title}',
-                            style: PixelFont.body(fontSize: 14, color: AppColors.foreground),
+                          Flexible(
+                            child: Text(
+                              '${room.emoji} ${room.title}',
+                              style: PixelFont.body(fontSize: 14, color: AppColors.foreground),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
                           ),
                           const SizedBox(width: 7),
                           _Tag(text: room.category, color: AppColors.secondary, textColor: AppColors.mutedForeground),
@@ -433,6 +616,37 @@ class _PublicRoomTile extends StatelessWidget {
                 if (!disabled) const Icon(Icons.chevron_right, size: 16, color: AppColors.mutedForeground),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 방 만들기 다이얼로그의 공개설정/카테고리 선택용 토글 칩.
+class _ChoiceChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ChoiceChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: PixelBox(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? AppColors.primary : AppColors.secondary,
+        border: Border.all(color: selected ? AppColors.primaryBorder : AppColors.border),
+        shadowOffset: null,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: PixelFont.body(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: selected ? Colors.white : AppColors.foreground,
           ),
         ),
       ),

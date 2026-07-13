@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../mock/mock_data.dart';
 import '../../models/chat_message.dart';
 import '../../models/player.dart';
+import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/pixel_font.dart';
 import '../../utils/breakpoints.dart';
@@ -27,7 +28,20 @@ class RoomScreen extends StatefulWidget {
   final String roomCode;
   final bool isHost;
 
-  const RoomScreen({super.key, required this.roomCode, this.isHost = false});
+  /// 방장이 방 만들기 다이얼로그에서 지정한 최대 인원(사람+봇 합산, PLAN.md `maxPlayers`).
+  /// 코드로 입장하는 경우(방장이 아님)엔 알 수 없으니 host 쪽 기본값으로 둔다.
+  final int maxPlayers;
+
+  /// 방장이 방 만들기 다이얼로그에서 미리 골라둔 카테고리. 없으면 기본 카테고리를 쓴다.
+  final String? initialCategory;
+
+  const RoomScreen({
+    super.key,
+    required this.roomCode,
+    this.isHost = false,
+    this.maxPlayers = 8,
+    this.initialCategory,
+  });
 
   @override
   State<RoomScreen> createState() => _RoomScreenState();
@@ -70,7 +84,7 @@ class _RoomScreenState extends State<RoomScreen> {
   void initState() {
     super.initState();
     _humanPlayers = List.of(buildMockPlayers(selfIsHost: widget.isHost));
-    _selectedCategory = mockCategories.first;
+    _selectedCategory = widget.initialCategory ?? mockCategories.first;
     final other = _humanPlayers.firstWhere((p) => p.id != 'me');
     _addSystemMessage('🎉 방에 입장했습니다!');
     _addChatMessage(other.id, '다들 준비됐어요? 😄');
@@ -119,7 +133,10 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _changeBotCount(int delta) {
     if (_phase != _Phase.waiting) return;
-    setState(() => _botCount = (_botCount + delta).clamp(0, 4));
+    // PLAN.md: 봇 수 자체엔 시스템상 상한이 없고, 사람+봇 합이 방 만들기 때 정한 maxPlayers를
+    // 넘을 수 없다는 것만 제약이다.
+    final maxBots = (widget.maxPlayers - _humanPlayers.length).clamp(0, widget.maxPlayers);
+    setState(() => _botCount = (_botCount + delta).clamp(0, maxBots));
   }
 
   // ─── 카테고리 설정 ─────────────────────────────────────────
@@ -162,13 +179,14 @@ class _RoomScreenState extends State<RoomScreen> {
     });
   }
 
-  void _addSystemMessage(String text) {
+  void _addSystemMessage(String text, {bool highlight = false}) {
     _messages.add(ChatMessage(
       id: 'sys-${_messages.length}-${DateTime.now().microsecondsSinceEpoch}',
       senderId: 'system',
       senderNickname: '시스템',
       text: text,
       type: ChatMessageType.system,
+      highlight: highlight,
     ));
     _scrollToBottom();
   }
@@ -229,8 +247,25 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _startGame() {
     if (!_canStartGame) return;
-    final category = _selectedCategory!;
-    final pairPool = mockWordPairsByCategory[category] ?? mockFallbackWordPairs;
+
+    // "랜덤생성"은 실제 카테고리가 아니라 "AI가 카테고리까지 생성"을 뜻한다(PLAN.md category: null 경로).
+    // 실제로 생성된 카테고리는 이 방의 카테고리 목록에 추가돼 이후엔 프리셋처럼 다시 고를 수 있다.
+    var category = _selectedCategory!;
+    final bool wasAiGenerated;
+    final List<(String, String)> pairPool;
+    if (category == kAiRandomCategory) {
+      final unusedCategories = mockAiGeneratedCategoryPool.keys.where((c) => !_availableCategories.contains(c)).toList();
+      final candidates = unusedCategories.isNotEmpty ? unusedCategories : mockAiGeneratedCategoryPool.keys.toList();
+      category = candidates[_random.nextInt(candidates.length)];
+      pairPool = mockAiGeneratedCategoryPool[category]!;
+      if (!_customCategories.contains(category)) {
+        _customCategories.add(category);
+      }
+      wasAiGenerated = true;
+    } else {
+      pairPool = mockWordPairsByCategory[category] ?? mockFallbackWordPairs;
+      wasAiGenerated = false;
+    }
     final unused = pairPool.where((p) => !_usedWordPairs.contains('$category:${p.$1}')).toList();
     final options = unused.isNotEmpty ? unused : pairPool;
     final pair = options[_random.nextInt(options.length)];
@@ -252,7 +287,11 @@ class _RoomScreenState extends State<RoomScreen> {
       _votedOutId = null;
       _phase = _Phase.describing;
     });
-    _addSystemMessage('🎮 게임이 시작되었습니다!');
+    // _messages.clear() 이후에 추가해야 안내 메시지가 지워지지 않는다.
+    if (wasAiGenerated) {
+      _addSystemMessage('🎲 AI가 카테고리를 생성했습니다: $category', highlight: true);
+    }
+    _addSystemMessage('🎮 게임이 시작되었습니다!', highlight: true);
     final myWord = 'me' == liar.id ? pair.$2 : pair.$1;
     setState(() {
       _myWord = myWord;
@@ -287,7 +326,7 @@ class _RoomScreenState extends State<RoomScreen> {
     if (_currentTurnIndex >= _turnOrder.length) {
       _tickTimer?.cancel();
       setState(() => _phase = _Phase.allDone);
-      _addSystemMessage('모든 플레이어가 설명했습니다.');
+      _addSystemMessage('모든 플레이어가 설명했습니다. 투표를 해주세요', highlight: true);
       // 전원 설명이 끝나면 잠시 후 투표창이 자동으로 열린다.
       Timer(const Duration(milliseconds: 1200), () {
         if (!mounted || _phase != _Phase.allDone) return;
@@ -567,6 +606,12 @@ class _RoomScreenState extends State<RoomScreen> {
     final scores = <String, int>{
       for (final p in _participants) p.id: (p.id == _liarId) == !citizensWin ? 100 : -50,
     };
+
+    // PLAN.md의 GamePlay 1행 추가에 해당 — 이 판 결과를 내 전적에 반영한다(라이어/시민 승률·레벨).
+    final meWasLiar = _liarId == 'me';
+    final meWon = meWasLiar == !citizensWin;
+    UserSession.stats = UserSession.stats.recordGame(won: meWon, wasLiar: meWasLiar);
+
     var countdown = 10;
 
     showPixelDialog(
@@ -716,7 +761,7 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _returnToWaiting() {
     setState(() {
-      _addSystemMessage('--------게임이 종료되었습니다.--------');
+      _addSystemMessage('--------게임이 종료되었습니다.--------', highlight: true);
       _phase = _Phase.waiting;
       _myWord = null;
       _myWordExplanation = null;
@@ -866,7 +911,10 @@ class _RoomScreenState extends State<RoomScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('PLAYERS (${_allPlayers.length})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground)),
+          Text(
+            'PLAYERS (${_allPlayers.length}/${widget.maxPlayers})',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedForeground),
+          ),
           const SizedBox(height: 8),
           ..._allPlayers.asMap().entries.map((entry) {
             final player = entry.value;
