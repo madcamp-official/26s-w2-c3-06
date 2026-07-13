@@ -284,6 +284,22 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
     final pendingRequests = ref.watch(pendingFriendRequestCountProvider).value ?? 0;
     final isDesktop = context.isDesktop;
 
+    // 친구가 방으로 초대하면(room:invited) 스낵바로 알리고, "입장"을 누르면 해당 방으로 들어간다.
+    ref.listen(roomInviteProvider, (prev, next) {
+      final invite = next.value;
+      if (invite == null || !mounted) return;
+      final label = invite.title.isEmpty ? '${invite.roomCode}번 방' : invite.title;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('${invite.fromNickname}님이 ${invite.emoji} $label(으)로 초대했어요'),
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(label: '입장', onPressed: () => _joinAndEnter(invite.roomCode)),
+          ),
+        );
+    });
+
     return Scaffold(
       body: SafeArea(
         child: isDesktop

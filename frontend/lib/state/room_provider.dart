@@ -535,6 +535,11 @@ final roomErrorProvider = StreamProvider<String>((ref) {
   return SocketService.instance.onRoomError;
 });
 
+/// room:invited도 1회성 알림이라 별도 스트림으로 노출. 로비가 구독해 초대 스낵바를 띄운다.
+final roomInviteProvider = StreamProvider<RoomInvite>((ref) {
+  return SocketService.instance.onRoomInvited;
+});
+
 /// 앱 시작 시(새로고침 포함) 저장된 활성 방 코드가 있는지 확인 — AuthGate가 로비 대신
 /// 방으로 바로 복귀를 시도할지 판단하는 데 쓴다.
 final savedRoomCodeProvider = FutureProvider<String?>((ref) {

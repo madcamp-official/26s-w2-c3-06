@@ -24,6 +24,7 @@ class SocketService {
   final _roomPlayerListUpdatedCtrl = StreamController<List<Player>>.broadcast();
   final _roomErrorCtrl = StreamController<String>.broadcast();
   final _roomClosedCtrl = StreamController<void>.broadcast();
+  final _roomInvitedCtrl = StreamController<RoomInvite>.broadcast();
   final _chatMessageCtrl = StreamController<ChatMessage>.broadcast();
   final _draftConfigUpdatedCtrl = StreamController<DraftConfig>.broadcast();
   final _customCategoriesUpdatedCtrl = StreamController<List<String>>.broadcast();
@@ -46,6 +47,7 @@ class SocketService {
   Stream<List<Player>> get onRoomPlayerListUpdated => _roomPlayerListUpdatedCtrl.stream;
   Stream<String> get onRoomError => _roomErrorCtrl.stream;
   Stream<void> get onRoomClosed => _roomClosedCtrl.stream;
+  Stream<RoomInvite> get onRoomInvited => _roomInvitedCtrl.stream;
   Stream<ChatMessage> get onChatMessage => _chatMessageCtrl.stream;
   Stream<DraftConfig> get onDraftConfigUpdated => _draftConfigUpdatedCtrl.stream;
   Stream<List<String>> get onCustomCategoriesUpdated => _customCategoriesUpdatedCtrl.stream;
@@ -98,6 +100,7 @@ class SocketService {
     });
     socket.on('room:error', (data) => _roomErrorCtrl.add(_map(data)['message'] as String? ?? '알 수 없는 오류'));
     socket.on('room:closed', (_) => _roomClosedCtrl.add(null));
+    socket.on('room:invited', (data) => _roomInvitedCtrl.add(RoomInvite.fromJson(_map(data))));
 
     socket.on('chat:message', (data) => _chatMessageCtrl.add(ChatMessage.fromJson(_map(data))));
     socket.on(
@@ -220,6 +223,7 @@ class SocketService {
     _roomPlayerListUpdatedCtrl.close();
     _roomErrorCtrl.close();
     _roomClosedCtrl.close();
+    _roomInvitedCtrl.close();
     _chatMessageCtrl.close();
     _draftConfigUpdatedCtrl.close();
     _customCategoriesUpdatedCtrl.close();
@@ -249,6 +253,35 @@ class DraftConfig {
     return DraftConfig(
       category: json['category'] as String?,
       aiBotCount: json['aiBotCount'] as int? ?? 0,
+    );
+  }
+}
+
+/// room:invited 페이로드: `{ roomCode, title, emoji, fromUid, fromNickname }`.
+/// 친구가 자기 방으로 초대했을 때 온라인 상태인 대상 소켓에 도착한다. 로비에서 수신해
+/// 알림을 띄우고, 수락 시 해당 roomCode로 입장한다.
+class RoomInvite {
+  final String roomCode;
+  final String title;
+  final String emoji;
+  final String fromUid;
+  final String fromNickname;
+
+  const RoomInvite({
+    required this.roomCode,
+    required this.title,
+    required this.emoji,
+    required this.fromUid,
+    required this.fromNickname,
+  });
+
+  factory RoomInvite.fromJson(Map<String, dynamic> json) {
+    return RoomInvite(
+      roomCode: json['roomCode'] as String,
+      title: (json['title'] as String?) ?? '',
+      emoji: (json['emoji'] as String?) ?? '🎮',
+      fromUid: (json['fromUid'] as String?) ?? '',
+      fromNickname: (json['fromNickname'] as String?) ?? '',
     );
   }
 }
@@ -370,7 +403,8 @@ class GameStarted {
 }
 
 /// round:yourWord 페이로드: `{ word, explanation? }`.
-/// `explanation`은 AI가 생소한 단어라고 판단했을 때만 내려오는 부가 설명이다.
+/// `explanation`은 서버가 모든 제시어에 대해 난이도와 무관하게 미리 생성해 함께 내려주는
+/// 부가 설명이다(생성 실패 시에만 생략). 클라이언트는 "AI 설명보기"로 원할 때 펼쳐 본다.
 class YourWord {
   final String word;
   final String? explanation;
