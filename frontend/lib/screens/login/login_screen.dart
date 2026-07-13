@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
+import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_button.dart';
@@ -249,7 +250,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 24),
-        GestureDetector(
+        HoverTap(
           onTap: () => setState(() => _showAuthOptions = false),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -312,7 +313,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               AppButton(label: '로그인', onPressed: _handleEmailLogin),
               const SizedBox(height: 16),
               Center(
-                child: GestureDetector(
+                child: HoverTap(
                   onTap: _handleSignUp,
                   child: Text.rich(
                     TextSpan(
@@ -345,7 +346,7 @@ class _GoogleAuthButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return HoverTap(
       onTap: onPressed,
       child: PixelBox(
         width: double.infinity,

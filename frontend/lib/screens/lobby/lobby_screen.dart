@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../models/room_summary.dart';
+import '../../widgets/hover_tap.dart';
 import '../../services/user_session.dart';
 import '../../state/auth_provider.dart';
 import '../../state/room_provider.dart';
@@ -490,7 +491,7 @@ class _IconBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return HoverTap(
       onTap: onTap,
       child: Stack(
         clipBehavior: Clip.none,
@@ -540,7 +541,7 @@ class _HeaderPixelButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return HoverTap(
       onTap: onTap,
       child: PixelBox(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -578,7 +579,7 @@ class _PublicRoomTile extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Opacity(
         opacity: disabled ? 0.6 : 1,
-        child: GestureDetector(
+        child: HoverTap(
           onTap: disabled ? null : onTap,
           child: PixelBox(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -645,7 +646,7 @@ class _ChoiceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return HoverTap(
       onTap: onTap,
       child: PixelBox(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

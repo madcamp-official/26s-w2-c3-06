@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../theme/pixel_font.dart';
 
 import '../../api/backend_api.dart';
+import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
 import '../../services/user_session.dart';
 import '../../theme/app_colors.dart';
@@ -237,7 +238,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Positioned(
                         right: -6,
                         bottom: -6,
-                        child: GestureDetector(
+                        child: HoverTap(
                           onTap: _handlePickPhoto,
                           child: Container(
                             padding: const EdgeInsets.all(6),

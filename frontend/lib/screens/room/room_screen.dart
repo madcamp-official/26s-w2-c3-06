@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/chat_message.dart';
 import '../../models/game_phase.dart';
 import '../../models/player.dart';
+import '../../widgets/hover_tap.dart';
 import '../../services/auth_service.dart';
 import '../../state/room_provider.dart';
 import '../../theme/app_colors.dart';
@@ -173,7 +174,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
-          GestureDetector(
+          HoverTap(
             onTap: _leave,
             child: const Icon(Icons.exit_to_app, color: AppColors.mutedForeground),
           ),
@@ -486,7 +487,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             spacing: 6,
             runSpacing: 6,
             children: candidates.map((p) {
-              return GestureDetector(
+              return HoverTap(
                 onTap: () => ref.read(roomProvider.notifier).castVote(p.id),
                 child: PixelBox(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -601,7 +602,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(
+          HoverTap(
             onTap: () => _sendChatOrDescription(s),
             child: PixelBox(
               padding: const EdgeInsets.all(10),

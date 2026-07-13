@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/pixel_font.dart';
+import 'hover_tap.dart';
 import 'pixel_box.dart';
 
 /// [AppNavRail]에 들어가는 개별 아이콘 항목.
@@ -60,7 +61,7 @@ class _RailIconButton extends StatelessWidget {
     final enabled = item.onTap != null;
     return Opacity(
       opacity: enabled ? 1 : 0.5,
-      child: GestureDetector(
+      child: HoverTap(
         onTap: item.onTap,
         child: Column(
           mainAxisSize: MainAxisSize.min,
