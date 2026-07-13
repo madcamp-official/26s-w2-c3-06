@@ -339,22 +339,22 @@ interface LiarGameLLM {
 
 ## 프론트-백엔드 연결 정합성
 
-> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 아래 세부 항목은 `frontend-2` 레이아웃 기준이라 **계약(이벤트·필드)은 그대로 유효하지만 파일 경로는 다르다** — 통합 브랜치에는 `screens/room/panels/*.dart`가 별도로 없고, 방 화면이 `screens/room/room_screen.dart` 한 파일로 합쳐져 페이즈별 패널을 내부에서 분기한다.
+> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 방 화면은 별도 `panels/*.dart` 없이 `screens/room/room_screen.dart` 한 파일에서 페이즈별로 분기하며, 아래 세부 항목도 이 통합 구조 기준으로 기술한다.
 
 `frontend-2` 브랜치가 이 문서의 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 아래와 같이 정리됐다.
 
 - **네트워킹/상태 의존성**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod` 추가. `services/socket_service.dart`(소켓 송수신 전담), `services/auth_service.dart`(Firebase Auth), `state/room_provider.dart`(Riverpod, 방/게임 상태) 신설. 활성 방 코드 저장용으로 `services/room_session_store.dart`(SharedPreferences)를 추가했고, 기존 `services/user_session.dart`(닉네임 등 static 전역)는 그대로 유지된다(둘은 역할이 달라 대체 관계가 아님).
-- **단일 `RoomScreen` + 페이즈 패널**: `screens/room/room_screen.dart` 하나로 통일. 채팅 리스트는 고정하고 하단만 `screens/room/panels/{waiting,describing,voting,liar_guess,result_card}.dart`로 교체해, 게임 채팅과 방 채팅이 하나의 피드로 유지된다.
+- **단일 `RoomScreen` + 페이즈 분기**: `screens/room/room_screen.dart` 한 파일로 통일. 채팅 리스트는 고정하고 하단 영역만 현재 페이즈(대기/설명/토론/투표/역전승/결과)에 따라 room_screen.dart 내부에서 분기해 그려, 게임 채팅과 방 채팅이 하나의 피드로 유지된다.
 - **`ChatMessage` 모델**: `models/chat_message.dart`가 계약(`{ id, senderId, type, text, timestamp }`)과 동일. `senderId`는 uid 또는 `'ai'`/`'system'` 특수값.
-- **투표/판정 서버 소유**: `panels/voting_panel.dart`는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
-- **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, `panels/liar_guess_panel.dart`는 자신에게 온 경우에만 렌더링한다.
+- **투표/판정 서버 소유**: 투표 페이즈 UI(room_screen.dart 내부)는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
+- **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, room_screen.dart는 역전승 프롬프트를 자신에게 온 경우에만 렌더링한다.
 - **`RoomSummary`**: `models/room_summary.dart`가 `room:publicList` 계약(`{ roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress }`)을 그대로 반영한다.
-- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 `panels/waiting_panel.dart`의 준비 완료 토글로 반영.
+- **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영.
 - **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
 - **`maxPlayers` 방 생성 UI**: `screens/lobby/lobby_screen.dart`에 슬라이더로 지정, `createRoom()`이 이 값을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
-- **`discussion:skip`**: `panels/describing_panel.dart`의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
+- **`discussion:skip`**: room_screen.dart 토론 페이즈의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
 
 위 정리는 정적 코드 검토 기준이며, 런타임 동작(빌드/실행)은 별도로 확인해야 한다.
 
