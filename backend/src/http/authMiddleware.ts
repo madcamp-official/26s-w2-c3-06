@@ -52,7 +52,6 @@ export async function requireAuth(
     }
     next();
   } catch (err) {
-    // TODO(temp-debug): 배포 환경 토큰 검증 실패 원인 확인용 임시 로그 — 원인 파악 후 제거.
     console.error('[http] verifyIdToken 실패', err);
     res.status(401).json({ error: 'unauthorized: 유효하지 않은 토큰' });
   }
