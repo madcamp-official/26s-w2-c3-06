@@ -362,8 +362,20 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       if (next == GamePhase.voting && prev != GamePhase.voting) {
         setState(() => _myVote = null);
       }
-      if (next == GamePhase.describing && _startingGame) {
-        setState(() => _startingGame = false);
+      if (next == GamePhase.describing && prev != GamePhase.describing) {
+        // 게임이 시작되면 서버가 draftConfig를 category:null/aiBotCount:0으로 초기화한다.
+        // 방장의 로컬 드래프트(_selectedChip 등)는 이 리셋과 무관하게 이전 값이 남아있어서,
+        // 다음 대기방에서 다른 참가자는(서버가 보낸) "AI 랜덤"을 보는데 방장 화면만 직전
+        // 선택이 그대로 남아있다가 그 값으로 게임이 다시 시작되는 어긋남이 있었다 —
+        // 여기서 함께 리셋해 다음 대기방 진입 시 서버 draftConfig로 다시 시드되게 한다.
+        setState(() {
+          _startingGame = false;
+          _hostDraftSeeded = false;
+          _selectedChip = null;
+          _aiRandom = false;
+          _botCount = 0;
+          _customCategoryController.clear();
+        });
       }
       if (next == GamePhase.ended && _submittingGuess) {
         setState(() => _submittingGuess = false);
