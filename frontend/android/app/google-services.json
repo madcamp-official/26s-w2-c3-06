@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "372020945949",
+    "project_id": "l-ai-r-game",
+    "storage_bucket": "l-ai-r-game.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:372020945949:android:2c060dd5065e474e6112f4",
+        "android_client_info": {
+          "package_name": "com.example.madcamp_w2_frontend"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "372020945949-2q1jvvrc7u3leicba6vd0htfa3f2k0et.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1D0_PTxOxx_hw6pRZLxVw4G2gIT9P4yE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "372020945949-2q1jvvrc7u3leicba6vd0htfa3f2k0et.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -37,11 +37,11 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'TODO-FIREBASE-ANDROID-API-KEY',
-    appId: 'TODO-FIREBASE-ANDROID-APP-ID',
-    messagingSenderId: 'TODO-FIREBASE-MESSAGING-SENDER-ID',
-    projectId: 'TODO-FIREBASE-PROJECT-ID',
-    storageBucket: 'TODO-FIREBASE-PROJECT-ID.appspot.com',
+    apiKey: 'AIzaSyC1D0_PTxOxx_hw6pRZLxVw4G2gIT9P4yE',
+    appId: '1:372020945949:android:2c060dd5065e474e6112f4',
+    messagingSenderId: '372020945949',
+    projectId: 'l-ai-r-game',
+    storageBucket: 'l-ai-r-game.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
