@@ -19,6 +19,15 @@ import '../../widgets/responsive_center.dart';
 import '../../widgets/user_avatar.dart';
 import '../login/login_screen.dart';
 
+final _specialCharPattern = RegExp(r'''[!@#$%^&*(),.?":{}|<>_\-\[\]/\\;+=~`]''');
+
+bool _isPasswordValid(String password) {
+  return password.length >= 8 &&
+      RegExp(r'[A-Za-z]').hasMatch(password) &&
+      RegExp(r'\d').hasMatch(password) &&
+      _specialCharPattern.hasMatch(password);
+}
+
 /// 프로필 사진/닉네임을 수정하는 화면.
 /// 게스트는 닉네임/사진만 바꿀 수 있고, 대신 계정을 만들 수 있는 진입점을 제공한다.
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -34,6 +43,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Uint8List? _profileImageBytes;
   String? _avatarUrl;
   UserStats? _stats;
+
+  // 비밀번호 변경 — 이메일/비밀번호로 가입한 계정만 노출한다(AuthService.canChangePassword).
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmNewPasswordController = TextEditingController();
+  bool _changingPassword = false;
 
   @override
   void initState() {
@@ -54,6 +69,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void dispose() {
     _nicknameController.dispose();
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmNewPasswordController.dispose();
     super.dispose();
   }
 
@@ -77,6 +95,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       _snack(e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 저장에 실패했습니다.');
     } catch (e) {
       _snack('오류: $e');
+    }
+  }
+
+  Future<void> _handleChangePassword() async {
+    final current = _currentPasswordController.text;
+    final next = _newPasswordController.text;
+    final confirm = _confirmNewPasswordController.text;
+    if (current.isEmpty || next.isEmpty) return;
+    if (!_isPasswordValid(next)) {
+      _snack('새 비밀번호는 영문, 숫자, 특수문자를 포함해 8자 이상이어야 합니다.');
+      return;
+    }
+    if (next != confirm) {
+      _snack('새 비밀번호가 일치하지 않습니다.');
+      return;
+    }
+    setState(() => _changingPassword = true);
+    try {
+      await AuthService.instance.changePassword(currentPassword: current, newPassword: next);
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmNewPasswordController.clear();
+      _snack('비밀번호가 변경되었습니다.');
+    } on FirebaseAuthException catch (e) {
+      _snack(e.code == 'wrong-password' || e.code == 'invalid-credential'
+          ? '현재 비밀번호가 올바르지 않습니다.'
+          : '비밀번호 변경에 실패했습니다: ${e.message ?? e.code}');
+    } catch (e) {
+      _snack('오류: $e');
+    } finally {
+      if (mounted) setState(() => _changingPassword = false);
     }
   }
 
@@ -276,6 +325,42 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ],
                   ),
                 ),
+                // 비밀번호 변경은 이메일/비밀번호로 가입한 계정만 가능하다 — 구글 로그인
+                // 계정은 애초에 Firebase에 등록된 비밀번호가 없다.
+                if (!isGuest && AuthService.instance.canChangePassword) ...[
+                  const SizedBox(height: 16),
+                  _FieldSection(
+                    label: 'PASSWORD',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        AppTextField(
+                          controller: _currentPasswordController,
+                          label: '현재 비밀번호',
+                          obscureText: true,
+                        ),
+                        const SizedBox(height: 10),
+                        AppTextField(
+                          controller: _newPasswordController,
+                          label: '새 비밀번호',
+                          obscureText: true,
+                        ),
+                        const SizedBox(height: 10),
+                        AppTextField(
+                          controller: _confirmNewPasswordController,
+                          label: '새 비밀번호 확인',
+                          obscureText: true,
+                        ),
+                        const SizedBox(height: 12),
+                        AppButton(
+                          label: '비밀번호 변경',
+                          loading: _changingPassword,
+                          onPressed: _changingPassword ? null : _handleChangePassword,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 if (isGuest) ...[
                   AppButton(label: '로그아웃', variant: AppButtonVariant.outlined, onPressed: _handleGuestLogout),
