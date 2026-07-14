@@ -39,7 +39,7 @@ class AppNavRail extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 20),
       child: Column(
         children: [
-          const Text('🤖', style: TextStyle(fontSize: 28)),
+          Image.asset('images/logo.png', width: 56),
           const SizedBox(height: 20),
           for (final item in items) ...[
             _RailIconButton(item: item),
@@ -100,7 +100,7 @@ class _RailIconButton extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            Text(item.label, style: PixelFont.body(fontSize: 9, color: AppColors.mutedForeground)),
+            Text(item.label, style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground)),
           ],
         ),
       ),

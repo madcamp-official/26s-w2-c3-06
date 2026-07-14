@@ -247,7 +247,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         const SizedBox(height: 64),
-        Image.asset('images/logo.png', width: 220),
+        Image.asset('images/logo.png', width: 280),
         const SizedBox(height: 36),
         AppButton(
           label: '🔑 로그인 / 회원가입',
