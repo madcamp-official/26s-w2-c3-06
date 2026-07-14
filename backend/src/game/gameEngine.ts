@@ -643,6 +643,7 @@ function finalizeGame(
   awardExp(expEntries).catch((err) => console.error('[gameEngine] EXP 지급 실패', err));
 
   io.to(room.roomCode).emit('game:ended', {});
+  broadcastChat(io, room, 'system', 'system', '---- 게임이 종료되었습니다 ----');
 
   game.phase = 'ended';
   room.gameHistory.push(game);

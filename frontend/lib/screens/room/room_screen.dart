@@ -57,6 +57,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _startingGame = false;
   bool _submittingGuess = false;
 
+  // 제시어에 딸린 AI 설명은 받자마자 바로 노출하지 않고, "설명 보기"를 눌러야 펼쳐지게 한다.
+  bool _showWordExplanation = false;
+
   // 투표 탭에 아무 시각적 피드백이 없어 "버튼이 안 눌린다"고 느껴지던 문제 — 내가 누른
   // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
   String? _myVote;
@@ -235,6 +238,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             ),
             const SizedBox(height: 20),
             _ResultRow(label: '지목된 사람', value: accusedText),
+            // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
+            // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
+            if (!r.wasLiar) _ResultRow(label: '진짜 라이어', value: r.liarNickname),
             _ResultRow(label: '실제 제시어', value: r.realWord),
             _ResultRow(label: '라이어 제시어', value: r.liarWord),
             _ResultRow(label: '라이어 역전승', value: liarGuessText),
@@ -589,12 +595,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   Text('카테고리 선택', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
                   const SizedBox(height: 12),
                   GridView.count(
-                    crossAxisCount: 2,
+                    crossAxisCount: 4,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 2.6,
+                    mainAxisSpacing: 6,
+                    crossAxisSpacing: 6,
+                    childAspectRatio: 1.3,
                     children: [
                       ...chipCategories.map((c) {
                         final selected = !_aiRandom && _selectedChip == c;
@@ -606,8 +612,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                             child: Center(
                               child: Text(
                                 c,
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
                                 style: PixelFont.body(
-                                  fontSize: 13,
+                                  fontSize: 11,
                                   color: selected ? Colors.white : AppColors.foreground,
                                 ),
                               ),
@@ -622,9 +630,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                           border: Border.all(color: _aiRandom ? AppColors.primary : AppColors.border, width: 2),
                           child: Center(
                             child: Text(
-                              '🎲 AI 랜덤',
+                              '🎲 랜덤',
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
                               style: PixelFont.body(
-                                fontSize: 13,
+                                fontSize: 11,
                                 color: _aiRandom ? Colors.white : AppColors.foreground,
                               ),
                             ),
@@ -684,6 +694,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       }
       if (next == GamePhase.ended && _submittingGuess) {
         setState(() => _submittingGuess = false);
+      }
+    });
+    // 새 게임(또는 새 제시어)을 받으면 지난 라운드에서 펼쳐뒀던 설명 표시를 접는다.
+    ref.listen<String?>(roomProvider.select((v) => v.myWord), (prev, next) {
+      if (next != prev && _showWordExplanation) {
+        setState(() => _showWordExplanation = false);
       }
     });
     // 투표가 집계되면(누가 라이어로 지목됐는지) 바로 팝업으로 알린다 — 그 사람이 실제
@@ -910,64 +926,54 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final cards = <Widget>[
       for (final p in s.players)
         _PlayerProfileCard(
-          avatar: UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 20, imageUrl: _avatarUrlFor(p.id)),
+          avatar: UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 13, imageUrl: _avatarUrlFor(p.id)),
           nickname: p.nickname,
           isMe: p.id == _myUid,
-          statusText: !isWaiting ? null : (p.id == s.hostId ? '👑 방장' : (p.isReady ? '✓ 준비' : '대기')),
+          statusText: !isWaiting ? null : (p.id == s.hostId ? '👑방장' : (p.isReady ? '✓준비' : '대기')),
           statusColor: p.id == s.hostId
               ? AppColors.primary
               : (p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText),
         ),
       for (var i = 0; i < botCount; i++)
         _PlayerProfileCard(
-          avatar: UserAvatar(avatarIndex: 0, radius: 20, isBot: true),
-          nickname: 'AI 봇 ${i + 1}',
+          avatar: UserAvatar(avatarIndex: 0, radius: 13, isBot: true),
+          nickname: '봇${i + 1}',
           isMe: false,
-          statusText: isWaiting ? '✓ 준비' : null,
+          statusText: isWaiting ? '✓준비' : null,
           statusColor: AppColors.readyBadgeText,
         ),
     ];
 
-    return SizedBox(
-      height: 78,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        itemCount: cards.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) => cards[i],
+    // 카드 높이를 고정 SizedBox로 강제하면(전에 78px로 고정했던 것) 폰트 렌더링에 따라
+    // 내용이 살짝 넘칠 수 있어(RenderFlex overflow) 실제로 겪었던 문제였다. 대신
+    // SingleChildScrollView+Row로 감싸 컨테이너 높이가 카드 내용에 맞게 자연스럽게
+    // 정해지도록 해서 오버플로우 위험 자체를 없앤다.
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        children: [
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(width: 6),
+            cards[i],
+          ],
+        ],
       ),
     );
   }
 
   Widget _chatFeed(RoomViewState s) {
-    // 내 제시어는 서버가 다른 사람에게 새지 않도록 채팅으로 브로드캐스트하지 않는(각자
-    // round:yourWord로만 받는) 값이라, 실제 채팅 로그 항목이 아니라 이 화면에서만 시스템
-    // 메시지처럼 합성해 맨 위에 끼워 보여준다("제시어 표시 방식" 참고).
-    final myWord = s.myWord;
-    final items = <ChatMessage>[
-      if (myWord != null)
-        ChatMessage(
-          id: 'my-word',
-          senderId: 'system',
-          type: ChatMessageType.system,
-          text: s.myWordExplanation == null
-              ? '당신의 제시어는: $myWord'
-              : '당신의 제시어는: $myWord\n💡 ${s.myWordExplanation}',
-        ),
-      ...s.chatLog,
-    ];
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      itemCount: items.length,
+      itemCount: s.chatLog.length,
       itemBuilder: (_, i) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: ChatBubble(
-          message: _displayMessage(items[i], s),
+          message: _displayMessage(s.chatLog[i], s),
           myUid: _myUid,
           senderAvatarUrl: () {
-            final m = items[i];
+            final m = s.chatLog[i];
             if (m.isAi || m.isSystem) return null;
             return _avatarUrlFor(m.senderId);
           }(),
@@ -976,9 +982,49 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
+  /// 내 제시어 카드 — 채팅 로그에 섞이지 않고 채팅 입력창 바로 위(컨텍스트 패널)에 고정
+  /// 표시된다. AI 설명이 있으면 눌러서 펼쳐볼 수 있다.
+  Widget _myWordCard(RoomViewState s) {
+    if (s.myWord == null) return const SizedBox.shrink();
+    final hasExplanation = s.myWordExplanation != null;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.secondary,
+        border: Border.all(color: AppColors.border, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('내 제시어', style: PixelFont.body(fontSize: 10, color: AppColors.mutedForeground)),
+          Text(s.myWord!, style: PixelFont.title(fontSize: 14, color: AppColors.primary)),
+          if (hasExplanation) ...[
+            const SizedBox(height: 4),
+            HoverTap(
+              onTap: () => setState(() => _showWordExplanation = !_showWordExplanation),
+              child: Text(
+                _showWordExplanation ? '설명 숨기기 ▲' : 'AI 설명 보기 ▼',
+                style: PixelFont.body(fontSize: 10, color: AppColors.primary),
+              ),
+            ),
+            if (_showWordExplanation) ...[
+              const SizedBox(height: 4),
+              Text(s.myWordExplanation!, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
   /// 서버 메시지는 senderNickname/avatarIndex가 비어 있으므로 참가자 목록으로 해석해 채워 준다.
+  /// highlight(게임 시작/종료 강조)도 서버 계약엔 없어, 시스템 메시지 문구로 여기서 판별한다.
   ChatMessage _displayMessage(ChatMessage m, RoomViewState s) {
     final nickname = m.isAi ? 'AI' : (m.isSystem ? '시스템' : s.nicknameOf(m.senderId));
+    final isGameStartOrEnd = m.isSystem &&
+        (m.text.startsWith('새 게임이 시작되었습니다') || m.text.startsWith('---- 게임이 종료되었습니다'));
     return ChatMessage(
       id: m.id,
       senderId: m.senderId,
@@ -986,7 +1032,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       avatarIndex: _avatarIndexFor(m.senderId, s),
       text: m.text,
       type: m.type,
-      highlight: m.highlight,
+      highlight: isGameStartOrEnd,
       timestamp: m.timestamp,
     );
   }
@@ -1030,7 +1076,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final enough = s.players.length + botCount >= _minParticipants;
     final canStart = isHost && allReady && enough;
 
-    final selectedChip = isHost ? _selectedChip : s.draftCategory;
+    // 방장이 프리셋 칩이 아니라 직접 입력으로 카테고리를 골랐으면 _selectedChip은 null로
+    // 비워두고 _customCategoryController에만 값이 남는다(_pushDraft와 동일한 우선순위) —
+    // 여기서도 그 순서를 그대로 따라야 방장 화면에 "선택 안 함"으로 잘못 보이지 않는다.
+    final customCategory = _customCategoryController.text.trim();
+    final selectedChip = isHost
+        ? (customCategory.isNotEmpty ? customCategory : _selectedChip)
+        : s.draftCategory;
     final aiRandom = isHost ? _aiRandom : s.draftCategory == null;
 
     return _panelBox(
@@ -1046,46 +1098,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             ),
           // 참가자 프로필(아바타·준비 상태)은 화면 상단(_playerProfileRow)으로 옮겨졌다.
           // 방장은 서버가 참여 즉시 준비 완료로 고정해두므로(봇과 동일 규칙) 준비 토글을
-          // 보여주지 않는다. 방장이 아닌 참가자만 직접 준비 상태를 토글한다.
-          if (me != null && !isHost)
-            AppButton(
-              label: me.isReady ? '준비 완료 ✓' : '준비하기',
-              variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
-              dense: true,
-              onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
-            ),
+          // 보여주지 않는다. 방장이 아닌 참가자만 직접 준비 상태를 토글하고, 이 버튼은
+          // 방장 화면의 "시작 ▶" 버튼과 같은 자리(가로 한 줄의 맨 끝)에 놓인다.
           if (isHost) ...[
             const SizedBox(height: 10),
-            Text('AI 봇 수: $botCount', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount - 1).clamp(0, 8));
-                    _pushDraft();
-                  },
-                  icon: const Icon(Icons.remove_circle_outline),
-                ),
-                Text('$_botCount', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
-                IconButton(
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount + 1).clamp(0, 8));
-                    _pushDraft();
-                  },
-                  icon: const Icon(Icons.add_circle_outline),
-                ),
-              ],
-            ),
-            Text('카테고리', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-            const SizedBox(height: 4),
-            AppButton(
-              label: '카테고리 선택: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
-              variant: AppButtonVariant.outlined,
-              dense: true,
-              onPressed: _openCategoryPicker,
-            ),
-            const SizedBox(height: 6),
             if (!allReady)
               Text('모든 참가자가 준비 완료해야 시작할 수 있어요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground))
@@ -1093,18 +1109,77 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             const SizedBox(height: 6),
-            AppButton(
-              label: '게임 시작 ▶',
-              loading: _startingGame,
-              onPressed: canStart && !_startingGame ? _startGame : null,
+            // 카테고리 선택 - AI 봇 수 조절 - 게임 시작을 한 줄에 가로로 나열한다.
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: AppButton(
+                    label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
+                    variant: AppButtonVariant.outlined,
+                    dense: true,
+                    onPressed: _openCategoryPicker,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () {
+                    setState(() => _botCount = (_botCount - 1).clamp(0, 8));
+                    _pushDraft();
+                  },
+                  icon: const Icon(Icons.remove_circle_outline, size: 18),
+                ),
+                Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () {
+                    setState(() => _botCount = (_botCount + 1).clamp(0, 8));
+                    _pushDraft();
+                  },
+                  icon: const Icon(Icons.add_circle_outline, size: 18),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  flex: 2,
+                  child: AppButton(
+                    label: '시작 ▶',
+                    dense: true,
+                    loading: _startingGame,
+                    onPressed: canStart && !_startingGame ? _startGame : null,
+                  ),
+                ),
+              ],
             ),
           ] else ...[
             const SizedBox(height: 10),
-            Text('AI 봇 수: $botCount', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-            const SizedBox(height: 4),
-            Text(
-              '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
-              style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+            // 방장이 아닌 참가자 화면도 위로 쌓지 않고 가로 한 줄로 나열한다.
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+                    style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                if (me != null) ...[
+                  const SizedBox(width: 4),
+                  Expanded(
+                    flex: 2,
+                    child: AppButton(
+                      label: me.isReady ? '준비완료 ✓' : '준비하기',
+                      variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                      dense: true,
+                      onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ],
@@ -1116,18 +1191,25 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final myTurn = s.isMyTurn(_myUid);
     final turnNick = s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!);
     return _panelBox(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
-                style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+          _myWordCard(s),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
+                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              ),
+              if (s.phaseDeadline != null)
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
+                ),
+            ],
           ),
-          if (s.phaseDeadline != null)
-            CountdownText(
-              deadline: s.phaseDeadline!,
-              style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
-            ),
         ],
       ),
     );
@@ -1135,8 +1217,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _discussionPanel(RoomViewState s) {
     return _panelBox(
-      // 타이머·시간 조절(-10초/+10초)은 상단바로 옮겨졌다(_discussionTimerRow 참고).
-      child: Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _myWordCard(s),
+          // 타이머·시간 조절(-10초/+10초)은 상단바로 옮겨졌다(_discussionTimerRow 참고).
+          Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+        ],
+      ),
     );
   }
 
@@ -1198,7 +1287,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   Widget _inputBar(RoomViewState s) {
     // 대기/종료 페이즈엔 하단 컨텍스트 패널에 컨트롤이 있으니 자유 채팅만 노출.
     final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
-    final hint = describingMyTurn ? '제시어 설명 입력...' : '메시지 입력...';
+    // 설명 페이즈에서는 지금 차례인 사람만 입력할 수 있다 — 다른 참가자가 자유 채팅으로
+    // 끼어들면 설명이 채팅에 묻히거나 눈치를 주는 용도로 악용될 수 있어서 막는다.
+    final describingNotMyTurn = s.phase == GamePhase.describing && !s.isMyTurn(_myUid);
+    final canChat = !describingNotMyTurn;
+    final hint = describingMyTurn
+        ? '제시어 설명 입력...'
+        : (describingNotMyTurn
+            ? '${s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!)}님이 설명 중...'
+            : '메시지 입력...');
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
       child: Row(
@@ -1208,16 +1305,20 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               controller: _chatController,
               focusNode: _chatFocusNode,
               hintText: hint,
-              onSubmitted: (_) => _sendChatOrDescription(s),
+              enabled: canChat,
+              onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
             ),
           ),
           const SizedBox(width: 8),
-          HoverTap(
-            onTap: () => _sendChatOrDescription(s),
-            child: PixelBox(
-              padding: const EdgeInsets.all(10),
-              color: AppColors.primary,
-              child: const Icon(Icons.send, size: 18, color: AppColors.primaryForeground),
+          Opacity(
+            opacity: canChat ? 1 : 0.4,
+            child: HoverTap(
+              onTap: canChat ? () => _sendChatOrDescription(s) : null,
+              child: PixelBox(
+                padding: const EdgeInsets.all(10),
+                color: AppColors.primary,
+                child: const Icon(Icons.send, size: 18, color: AppColors.primaryForeground),
+              ),
             ),
           ),
         ],
@@ -1274,29 +1375,29 @@ class _PlayerProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PixelBox(
-      width: 64,
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      width: 50,
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
       color: isMe ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-      border: Border.all(color: isMe ? AppColors.primary : AppColors.border, width: isMe ? 3 : 2),
+      border: Border.all(color: isMe ? AppColors.primary : AppColors.border, width: isMe ? 2 : 1.5),
       shadowOffset: null,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           avatar,
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             isMe ? '나' : nickname,
-            style: PixelFont.body(fontSize: 10, color: AppColors.foreground, height: 1.0),
+            style: PixelFont.body(fontSize: 9, color: AppColors.foreground, height: 1.0),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
-          if (statusText != null) ...[
-            const SizedBox(height: 2),
+          if (statusText != null)
             Text(
               statusText!,
-              style: PixelFont.body(fontSize: 9, height: 1.0, color: statusColor ?? AppColors.mutedForeground),
+              style: PixelFont.body(fontSize: 8, height: 1.0, color: statusColor ?? AppColors.mutedForeground),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
-          ],
         ],
       ),
     );
