@@ -240,12 +240,14 @@ class FriendSummary {
   final String uid;
   final String nickname;
   final String? avatarUrl;
+  final int level;
   final bool isOnline;
 
   const FriendSummary({
     required this.uid,
     required this.nickname,
     required this.avatarUrl,
+    this.level = 1,
     this.isOnline = false,
   });
 
@@ -254,6 +256,7 @@ class FriendSummary {
       uid: json['uid'] as String,
       nickname: json['nickname'] as String,
       avatarUrl: json['avatarUrl'] as String?,
+      level: (json['level'] as num?)?.toInt() ?? 1,
       isOnline: json['isOnline'] as bool? ?? false,
     );
   }

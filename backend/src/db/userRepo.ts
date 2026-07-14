@@ -111,7 +111,7 @@ function levelThreshold(level: number): number {
   return 100 * (level - 1) + 15 * (level - 1) * (level - 2);
 }
 
-function deriveLevel(exp: number): number {
+export function deriveLevel(exp: number): number {
   let level = 1;
   while (levelThreshold(level + 1) <= exp) level++;
   return level;

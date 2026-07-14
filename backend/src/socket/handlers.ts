@@ -49,6 +49,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
         title: room.title,
         emoji: room.emoji,
         visibility: room.visibility,
+        maxPlayers: room.maxPlayers,
         players: room.players,
         customCategories: room.customCategories,
         draftConfig: room.draftConfig,
@@ -83,6 +84,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       title: room.title,
       emoji: room.emoji,
       visibility: room.visibility,
+      maxPlayers: room.maxPlayers,
       players: room.players,
       customCategories: room.customCategories,
       draftConfig: room.draftConfig,
@@ -143,6 +145,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       title: room.title,
       emoji: room.emoji,
       visibility: room.visibility,
+      maxPlayers: room.maxPlayers,
       players: room.players,
       customCategories: room.customCategories,
       chatLog: room.chatLog,
@@ -152,6 +155,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
     gameEngine.resendYourWord(io, room, uid);
     gameEngine.resendLiarGuessPromptIfPending(io, room, uid);
+    gameEngine.resendDiscussionAdjustStateIfPending(io, room, uid);
   });
 
   // 명시적 나가기 — 즉시 퇴장 처리(방장이 나가면 방 폭파, 아니면 남은 인원 유지).
@@ -256,7 +260,10 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     }
     try {
       await gameEngine.startGame(io, room, payload);
-      const resetConfig = { category: null, aiBotCount: 0 };
+      // 카테고리는 리셋하지 않고 이번에 실제로 플레이된 값(AI 랜덤이었다면 확정된 결과)을
+      // 그대로 남겨, 게임이 끝나고 대기방으로 돌아왔을 때 방장·참가자 모두 직전 게임과
+      // 같은 카테고리가 기본으로 보이게 한다. 봇 수는 매 게임 새로 정하는 값이라 초기화.
+      const resetConfig = { category: room.currentGame?.category ?? null, aiBotCount: 0 };
       roomManager.setDraftConfig(room, resetConfig);
       io.to(room.roomCode).emit('game:draftConfigUpdated', resetConfig);
       // 로비 카드의 "진행중" 표시가 실시간으로 반영되도록.
@@ -273,12 +280,19 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     void gameEngine.submitDescription(io, room, uid, payload.text.trim());
   });
 
-  // 방장이 토론 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다.
-  socket.on('discussion:skip', () => {
+  // 토론 시간 ±10초 조절. 방장 전용 권한이 아니라 참가자 누구나 누를 수 있지만, 한 명당
+  // 단축·연장 각각 한 번씩만 허용(gameEngine이 uid별로 추적). deltaSec은 프론트 버튼
+  // (±10초)이 보내는 값만 신뢰 — 임의의 값으로 시간을 조작하지 못하도록 화이트리스트로 검증.
+  socket.on('discussion:adjustTime', (payload: { deltaSec: number }) => {
     const room = currentRoom();
     if (!room) return;
-    if (!roomManager.isHost(room, uid)) return;
-    gameEngine.skipDiscussion(io, room);
+    if (
+      payload.deltaSec !== gameEngine.DISCUSSION_TIME_ADJUST_SEC &&
+      payload.deltaSec !== -gameEngine.DISCUSSION_TIME_ADJUST_SEC
+    ) {
+      return;
+    }
+    gameEngine.adjustDiscussionTime(io, room, uid, payload.deltaSec);
   });
 
   socket.on('vote:cast', (payload: { votedPlayerId: string }) => {

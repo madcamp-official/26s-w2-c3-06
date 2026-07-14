@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, type AuthedRequest } from './authMiddleware';
 import * as friendRepo from '../db/friendRepo';
-import { findUidByNickname, isAnonymousUser } from '../db/userRepo';
+import { deriveLevel, findUidByNickname, isAnonymousUser } from '../db/userRepo';
 import * as presence from '../socket/presence';
 
 // PLAN "DB 스키마" 친구 기능(요청/수락/거절/목록) REST API.
@@ -85,8 +85,15 @@ friendsRouter.post('/requests/:id/decline', requireAuth, async (req: AuthedReque
 
 friendsRouter.get('/', requireAuth, async (req: AuthedRequest, res) => {
   const friends = await friendRepo.listFriends(req.uid!);
-  // 접속 여부(isOnline)를 현재 소켓 프레젠스 스냅샷으로 덧붙인다 — 방 초대 가능 여부/온라인 표시용.
-  const withPresence = friends.map((f) => ({ ...f, isOnline: presence.isOnline(f.uid) }));
+  // 접속 여부(isOnline)를 현재 소켓 프레젠스 스냅샷으로 덧붙이고, exp는 레벨로 파생해 보낸다
+  // (친구 목록 화면에 레벨 표시용 — exp 원값 자체는 굳이 노출할 필요 없음).
+  const withPresence = friends.map((f) => ({
+    uid: f.uid,
+    nickname: f.nickname,
+    avatarUrl: f.avatarUrl,
+    level: deriveLevel(f.exp),
+    isOnline: presence.isOnline(f.uid),
+  }));
   res.json({ friends: withPresence });
 });
 

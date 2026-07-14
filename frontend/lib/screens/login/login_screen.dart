@@ -223,11 +223,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             )
           : null,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: ResponsiveCenter(
-            maxWidth: 400,
-            child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
-          ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: ResponsiveCenter(
+                    maxWidth: 400,
+                    child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -237,19 +246,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const SizedBox(height: 96),
-        const Text('🤖', textAlign: TextAlign.center, style: TextStyle(fontSize: 72, height: 1)),
-        const SizedBox(height: 8),
-        Text(
-          'L-AI-R',
-          textAlign: TextAlign.center,
-          style: PixelFont.title(fontSize: 18, color: AppColors.primary, letterSpacing: 2),
-        ),
-        Text(
-          'GAME',
-          textAlign: TextAlign.center,
-          style: PixelFont.title(fontSize: 18, color: AppColors.foreground, letterSpacing: 2),
-        ),
+        const SizedBox(height: 64),
+        Image.asset('images/logo.png', width: 280),
         const SizedBox(height: 36),
         AppButton(
           label: '🔑 로그인 / 회원가입',
@@ -302,7 +300,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('LOGIN', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+              Text('LOGIN', style: PixelFont.title(fontSize: 22, color: AppColors.foreground)),
               const SizedBox(height: 6),
               Text(
                 '계속하려면 로그인하세요',
@@ -387,7 +385,7 @@ class _GoogleAuthButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('G', style: PixelFont.title(fontSize: 18, color: AppColors.google)),
+            Image.asset('images/google_logo.png', width: 20, height: 20),
             const SizedBox(width: 10),
             Text('Google로 계속하기', style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
           ],
