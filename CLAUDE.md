@@ -22,13 +22,8 @@
 
 `dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
 
-`backend`와 `frontend` 브랜치 간에는 직접 merge하지 않는다.
-
-- `milleion`(백엔드 담당)은 2026-07-13부터 `backend` 브랜치 대신 `dev`에서 직접 작업한다(`backend`는 그 시점 상태로 병합·보존되어 더 이상 갱신하지 않음). 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
-- `ireyhye`(프론트엔드 담당)는 계속 `frontend` 브랜치에서 작업하고, `frontend` → `dev` PR로 `dev`에 통합한다.
+- 2026-07-14부터 `backend`/`frontend`/`frontend-2` 브랜치는 더 이상 사용하지 않는다(원격에 이력으로만 보존, 갱신 안 함). `milleion`(백엔드 담당)·`ireyhye`(프론트엔드 담당) 모두 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
 
 # Branch Sync
 
-작업 중 로컬이 `origin/<branch>`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin <branch>`로 로컬을 최신화한다. `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.
-
-`ireyhye`가 작업한 `frontend`가 PR로 `dev`에 들어와 로컬 `dev`가 갱신된 경우, `milleion`은 그 변경을 반영하기 위해 다시 `git pull origin dev`로 최신화하면 된다(별도 병합 대상 브랜치 없음).
+작업 중 로컬이 `origin/dev`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin dev`로 로컬을 최신화한다. `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.

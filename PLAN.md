@@ -13,8 +13,9 @@
   - [Socket.IO 이벤트 계약 (MVP)](#socketio-이벤트-계약-mvp)
   - [REST API (전적·친구)](#rest-api-전적친구)
 - [LLM 래퍼 (`backend/src/llm/wrapper.ts`)](#llm-래퍼-backendsrcllmwrapperts)
-- [백엔드 구현 현황 (backend 브랜치)](#백엔드-구현-현황-backend-브랜치)
-- [프론트-백엔드 연결 정합성](#프론트-백엔드-연결-정합성)
+- [구현 현황](#구현-현황)
+  - [백엔드](#백엔드)
+  - [프론트엔드](#프론트엔드)
 - [MVP 제외 (stretch)](#mvp-제외-stretch)
 - [TODO / 향후 과제](#todo--향후-과제)
 - [검증 계획](#검증-계획)
@@ -408,22 +409,23 @@ interface LiarGameLLM {
 - `explainWord` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
 - `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정. **LLM 판정만으로는 사소한 오타조차 오답 처리되는 경우가 있어**(예: "펜싱"을 "팬싱"으로 표기), `wrapper.ts`가 LLM을 호출하기 전에 `textMatch.ts`의 편집 거리 기반 결정적 체크(`isFuzzyMatch`)를 먼저 통과시킨다 — 짧은 단어는 편집 거리 1까지, 긴 단어는 길이의 20%까지 오타로 인정하고 통과하면 LLM 호출 없이 바로 정답 처리, 통과 못 하면(번역·동의어 등 표기가 많이 다른 경우) 기존처럼 LLM에게 맡긴다. LLM 호출 자체가 실패했을 때의 폴백도 완전 일치 대신 이 유사 일치로 처리.
 
-## 백엔드 구현 현황 (backend 브랜치)
+## 구현 현황
 
-이 문서의 MVP Socket.IO 계약과 "DB 스키마"(원래 선택 항목이었던 유저 전적·친구)까지 구현 완료됨(`milleion`은 2026-07-13부터 `dev`에서 직접 작업, 그 이전 이력은 `backend` 브랜치에 동결 보존). 실제 Firebase 서비스 계정 키·Anthropic/OpenAI API 키로 동작 검증 완료(방 생성→게임 진행→투표→결과→종료까지 end-to-end, DB 기록 포함).
+`backend`/`frontend`/`frontend-2`로 나뉘어 있던 개발 브랜치는 모두 `dev`에 병합됐고, 이후로는 백엔드·프론트 모두 `dev`에서 함께 작업한다(과거 브랜치는 더 이상 갱신되지 않는 이력으로만 남아 있음). 아래는 현재 `dev` 기준 구현 현황이다.
+
+### 백엔드
+
+이 문서의 MVP Socket.IO 계약과 "DB 스키마"(원래 선택 항목이었던 유저 전적·친구)까지 구현 완료됨. 실제 Firebase 서비스 계정 키·Anthropic/OpenAI API 키로 동작 검증 완료(방 생성→게임 진행→투표→결과→종료까지 end-to-end, DB 기록 포함).
 
 - **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Anthropic/OpenAI 이중 provider, 다섯 함수 전부, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(6시간마다)
 - **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 라이어 다수 선택)뿐
-- **프론트 연동도 완료**: `frontend-2` 브랜치가 이 문서의 백엔드 계약에 맞춰 실연동을 마쳤고, 이후 픽셀아트 UI 프론트(`frontend` 계열)와 백엔드를 하나로 합친 **풀스택 `backend` 브랜치**에서 통합이 완료됐다. 자세한 내용은 "프론트-백엔드 연결 정합성" 참고.
 
-## 프론트-백엔드 연결 정합성
+### 프론트엔드
 
-> **통합 브랜치(`backend`)**: 픽셀아트 UI 프론트(`frontend`)를 백엔드에 실연동해 `backend` 브랜치에 backend/ + frontend/ 풀스택으로 합쳤다. 서비스/상태 계층(socket_service·room_provider·auth_service·backend_api)은 `frontend-2`에서 이식하고, 화면(login/signup/lobby/profile/friends/room)은 픽셀 UI를 유지한 채 서버 권위 방식으로 재작성했다. `room_screen`은 로컬 시뮬레이션을 전면 제거하고 roomProvider 상태만 그린다. 백엔드 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅. 방 화면은 별도 `panels/*.dart` 없이 `screens/room/room_screen.dart` 한 파일에서 페이즈별로 분기하며, 아래 세부 항목도 이 통합 구조 기준으로 기술한다.
-
-`frontend-2` 브랜치가 이 문서의 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 아래와 같이 정리됐다.
+픽셀아트 UI 프론트가 위 백엔드 계약(Socket.IO 이벤트·REST API)에 맞춰 실연동을 완료했다. 애초에 mock 데이터 기반 골격이던 프론트가 서버 권위 방식으로 정리됐다. 백엔드 쪽 프론트 연동용 추가분: 방 `title`/`emoji`, 공개방 목록 메타, 친구 온라인 프레젠스(`isOnline`)와 `friend:invite`/`room:invited`, 닉네임 기반 친구 요청, Flutter 웹 정적 호스팅.
 
 - **네트워킹/상태 의존성**: `frontend/pubspec.yaml`에 `socket_io_client`, `firebase_core`/`firebase_auth`, `flutter_riverpod` 추가. `services/socket_service.dart`(소켓 송수신 전담), `services/auth_service.dart`(Firebase Auth), `state/room_provider.dart`(Riverpod, 방/게임 상태) 신설. 활성 방 코드 저장용으로 `services/room_session_store.dart`(SharedPreferences)를 추가했고, 기존 `services/user_session.dart`(닉네임 등 static 전역)는 그대로 유지된다(둘은 역할이 달라 대체 관계가 아님).
-- **단일 `RoomScreen` + 페이즈 분기**: `screens/room/room_screen.dart` 한 파일로 통일. 채팅 리스트는 고정하고 하단 영역만 현재 페이즈(대기/설명/토론/투표/역전승/결과)에 따라 room_screen.dart 내부에서 분기해 그려, 게임 채팅과 방 채팅이 하나의 피드로 유지된다.
+- **단일 `RoomScreen` + 페이즈 분기**: `screens/room/room_screen.dart` 한 파일로 통일. 별도 `panels/*.dart` 없이 채팅 리스트는 고정하고 하단 영역만 현재 페이즈(대기/설명/토론/투표/역전승/결과)에 따라 room_screen.dart 내부에서 분기해 그려, 게임 채팅과 방 채팅이 하나의 피드로 유지된다. 로컬 시뮬레이션은 전면 제거하고 roomProvider 상태만 그린다.
 - **`ChatMessage` 모델**: `models/chat_message.dart`가 계약(`{ id, senderId, type, text, timestamp }`)과 동일. `senderId`는 uid 또는 `'ai'`/`'system'` 특수값.
 - **투표/판정 서버 소유**: 투표 페이즈 UI(room_screen.dart 내부)는 `vote:cast { votedPlayerId }`만 보내고, 결과는 `round:resolved`/`round:finalResult` 수신값을 그대로 반영한다(클라이언트 판정 로직 없음).
 - **개별 전송 이벤트**: `socket_service.dart`가 `round:yourWord`→`onYourWord`, `liar:guessPrompt`→`onLiarGuessPrompt`를 개별 처리하고, room_screen.dart는 역전승 프롬프트를 자신에게 온 경우에만 렌더링한다.
