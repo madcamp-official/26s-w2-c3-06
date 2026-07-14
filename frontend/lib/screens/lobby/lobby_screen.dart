@@ -420,7 +420,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
           Row(
             children: [
               Expanded(
-                child: Text('LOBBY', style: PixelFont.title(fontSize: 12, color: AppColors.foreground)),
+                child: Text('LOBBY', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
               ),
               _HeaderPixelButton(
                 label: '코드 입장',
@@ -508,14 +508,14 @@ class _StatsCard extends ConsumerWidget {
               children: [
                 Text(
                   nickname,
-                  style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                  style: PixelFont.body(fontSize: 17, color: AppColors.foreground, fontWeight: FontWeight.bold),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
                 const SizedBox(height: 2),
                 Text(
                   detail,
-                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground),
+                  style: PixelFont.body(fontSize: 14, color: AppColors.mutedForeground),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
@@ -541,7 +541,10 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text('🤖 L-AI-R GAME', style: PixelFont.title(fontSize: 15, color: AppColors.foreground)),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Image.asset('images/logo.png', height: 38),
+            ),
           ),
           _IconBox(
             onTap: onFriends,
