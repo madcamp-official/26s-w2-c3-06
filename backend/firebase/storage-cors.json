@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://l-ai-r-game.madcamp-kaist.org",
+      "https://l-ai-r-game.up.railway.app",
+      "http://localhost:3000"
+    ],
+    "method": ["GET", "PUT", "POST", "HEAD"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": ["Content-Type", "x-goog-meta-*"]
+  }
+]

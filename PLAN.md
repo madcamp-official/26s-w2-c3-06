@@ -476,10 +476,10 @@ interface LiarGameLLM {
 위 "MVP 제외(stretch)"가 **기능 백로그**라면, 여기는 아직 방향을 못 박지 못한 **미결 결정·후속 작업**을 모아둔다.
 
 - **커스텀 카테고리 악용 방지**: 방장이 자유 입력으로 추가하는 카테고리에 별도 검증이 없다. 부적절한 입력에 대한 최소 필터링이 필요한지 검토.
-- **Storage CORS origin 좁히기**: Firebase Storage 버킷(`l-ai-r-game.firebasestorage.app`)의 CORS 설정이 현재 `origin: ["*"]`(전체 허용)로 되어 있다. 업로드 자체는 Storage Rules(로그인 + 본인 uid만 허용)로 막혀 있어 당장 위험하진 않지만, 배포 도메인이 확정되면 `gsutil cors set`으로 그 도메인만 허용하도록 좁혀야 한다.
 
 ---
 
+- **Storage CORS origin 좁히기 — ✅ 완료**: Firebase Storage 버킷(`l-ai-r-game.firebasestorage.app`)의 CORS를 배포 도메인 2개 + 로컬 개발용 `http://localhost:3000`으로 좁혔다(`gsutil cors set`, 설정 파일은 `backend/firebase/storage-cors.json`에 참고용으로 보관 — storage.rules와 마찬가지로 자동 배포되지 않으니 수정 시 다시 수동으로 `gsutil cors set` 실행 필요). **단, 중요한 한계가 있다**: 이 버킷 CORS는 원본 GCS API(`storage.googleapis.com`)에는 적용되지만, Flutter 앱이 실제로 쓰는 Firebase SDK 엔드포인트(`firebasestorage.googleapis.com`)는 버킷 CORS 설정을 무시하고 항상 `Access-Control-Allow-Origin: *`를 반환한다(Firebase 자체의 알려진 동작, 프로젝트 설정과 무관). 즉 이 작업은 SDK 경유 업로드/다운로드 경로의 실질적 보안 강화 효과는 없고, 진짜 방어선은 여전히 아래 Storage Rules(로그인 + 본인 uid 확인)뿐이다.
 - **경험치 지급 정책 — ✅ 완료**: [경험치(EXP) 및 레벨 정책](#경험치exp-및-레벨-정책)의 역할·승패·투표 대상·역전승·참여도까지 반영하는 세분화된 규칙을 백엔드에 반영했다. 지급액 계산은 `userRepo.ts`의 순수 함수 `computeExpAward()`(정책 표 baseExp + 참여도·반복플레이 보정)가 담당하고, `gameEngine.ts`의 `finalizeGame`이 게임 종료 시점의 인메모리 상태(투표 내역·지목·역전승·라운드별 설명 제출 여부)에서 인자를 채워 호출한 뒤 `User.exp`에 즉시 누적한다. 레벨 구간 공식(`100×(L−1) + 15×(L−1)×(L−2)`) 자체는 변경 없음. 향후 지급액 조정은 `computeExpAward` 한 곳만 고치면 된다(단, EXP는 누적 저장값이라 과거 기록 소급 재계산은 하지 않는다).
 - **경험치·레벨 프론트 표시 — ✅ 완료**: 백엔드가 `GET /api/users/me`로 누적 `exp`(저장값)와 계산된 `level`(파생값)을 내려주고, 로비 전적 카드에서 `Lv.{level} ({exp} EXP)` 형태로 표시한다(`lobby_screen.dart`). 프로필 화면에도 레벨 배지와 레벨 내 진행바(`_LevelBadge`)를 표시한다 — 진행도 계산은 `현재 레벨 시작점(누적 경험치) = 100×(level−1) + 15×(level−1)×(level−2)`, `다음 레벨까지 필요 증분 경험치 = 100 + (level−1)×30`, `진행도 = (exp − 현재_레벨_시작점) / 다음_레벨까지_필요_증분`으로 계산(`UserStats.levelProgress`/`expToNextLevel`).
 - **백엔드 CORS origin 좁히기 — ✅ 완료**: `backend/src/index.ts`의 Express(`cors()`)와 Socket.IO(`cors.origin`) 둘 다 배포 도메인(`l-ai-r-game.madcamp-kaist.org`, `l-ai-r-game.up.railway.app`)과 로컬 개발용 `localhost:*`만 허용하도록 좁혔다. Origin 헤더가 없는 요청(네이티브 앱, 서버 간 호출)은 브라우저 CORS와 무관하므로 그대로 허용.
