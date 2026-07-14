@@ -490,9 +490,10 @@ interface LiarGameLLM {
 백엔드(Node/Express)와 프론트엔드(Flutter Web 빌드 결과물)를 **Railway 서비스 1개로 통합 배포**한다. 처음엔 2개로 분리하는 대안도 검토했으나(프론트는 CDN/정적 호스팅, 백엔드는 별도), 백엔드가 게임 상태와 로비 방 정보를 메모리에 들고 있어 서비스 분리 시 상태 동기화가 복잡해지므로, 1서비스 통합으로 결정.
 
 ### 빌드 방식
-Dockerfile 멀티스테이지 빌드:
-1. **1단계(Builder)**: Flutter SDK 이미지에서 `flutter build web`을 실행해 정적 파일(`build/web/`) 생성
-2. **2단계(Runtime)**: Node 이미지에서 1단계 결과물을 복사한 후 Express 서버 실행
+리포 루트의 `Dockerfile`(빌드 컨텍스트도 루트 — backend/frontend 양쪽을 모두 COPY해야 하므로)이 멀티스테이지로 빌드한다:
+1. **백엔드 스테이지**: Node 이미지에서 `npm ci` → `prisma generate` → `npm run build`(tsc)
+2. **프론트 스테이지**: Flutter SDK 이미지(`ghcr.io/cirruslabs/flutter`)에서 `flutter build web --release`로 정적 파일(`frontend/build/web/`) 생성
+3. **런타임 스테이지**: Node 이미지에 백엔드 빌드 결과(`dist/`, `prisma/`, `node_modules/`)와 프론트 빌드 결과(`frontend/build/web/`)를 함께 복사해 Express 서버 실행. 컨테이너 시작은 `backend/docker-entrypoint.sh`가 담당 — `FIREBASE_SERVICE_ACCOUNT_JSON` 환경변수가 있으면 파일로 풀어써서 `GOOGLE_APPLICATION_CREDENTIALS`를 설정하고(Railway처럼 파일 업로드가 안 되는 환경 대응), `prisma migrate deploy` 실행 후 서버를 기동한다.
 
 Express에는 `express.static()` 미들웨어와 SPA catch-all 라우트를 추가해, 백엔드가 프론트 정적 파일을 함께 서빙한다. 이를 통해 프론트엔드 라우팅과 API 요청이 단일 origin에서 처리되므로 CORS 설정이 단순해짐.
 
