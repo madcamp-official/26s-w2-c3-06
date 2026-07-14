@@ -385,7 +385,7 @@ class _GoogleAuthButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('G', style: PixelFont.title(fontSize: 18, color: AppColors.google)),
+            Image.asset('images/google_logo.png', width: 20, height: 20),
             const SizedBox(width: 10),
             Text('Google로 계속하기', style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
           ],
