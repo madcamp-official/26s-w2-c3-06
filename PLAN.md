@@ -411,14 +411,14 @@ interface LiarGameLLM {
 
 ## 구현 현황
 
-`backend`/`frontend`/`frontend-2`로 나뉘어 있던 개발 브랜치는 모두 `dev`에 병합됐고, 이후로는 백엔드·프론트 모두 `dev`에서 함께 작업한다(과거 브랜치는 더 이상 갱신되지 않는 이력으로만 남아 있음). 아래는 현재 `dev` 기준 구현 현황이다.
+백엔드·프론트 모두 `dev` 브랜치에서 함께 작업한다. 아래는 현재 `dev` 기준 구현 현황이다.
 
 ### 백엔드
 
 이 문서의 MVP Socket.IO 계약과 "DB 스키마"(원래 선택 항목이었던 유저 전적·친구)까지 구현 완료됨. 실제 Firebase 서비스 계정 키·Anthropic/OpenAI API 키로 동작 검증 완료(방 생성→게임 진행→투표→결과→종료까지 end-to-end, DB 기록 포함).
 
 - **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Anthropic/OpenAI 이중 provider, 다섯 함수 전부, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(6시간마다)
-- **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 라이어 다수 선택)뿐
+- **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 다중 LLM 프로바이더 동시 지원, 라이어 다수 선택)뿐
 
 ### 프론트엔드
 
