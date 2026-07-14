@@ -535,13 +535,12 @@ function finalizeGame(
   // (시도 자체가 없었으면 undefined → null).
   io.to(room.roomCode).emit('round:finalResult', { ...result, liarGuess: game.liarGuess ?? null });
 
-  // 반복 플레이 악용 방지(PLAN): 정상 게임은 최소 3명 + 모든 참가자가 최소 한 번 이상 설명 제출.
-  // 무효 게임이면 repeatMatchMultiplier=0으로 전원 0 EXP가 된다(봇은 항상 자동 설명하므로,
-  // 사실상 사람이 자기 차례 설명을 한 번도 안 낸 경우에만 무효가 된다).
+  // 반복 플레이 악용 방지(PLAN): 정상 게임은 최소 3명이면 충분 — 일부가 설명을 제출하지
+  // 않아도 정상 게임으로 인정한다(설명 제출 여부는 개인별 참여도 보정에서 따로 반영됨).
+  // 무효 게임이면 repeatMatchMultiplier=0으로 전원 0 EXP가 된다.
   const submittedAll = (id: string): boolean =>
     game.rounds.every((r) => r.turns.some((t) => t.playerId === id));
-  const gameValid =
-    game.participantIds.length >= 3 && game.participantIds.every((id) => submittedAll(id));
+  const gameValid = game.participantIds.length >= 3;
 
   const winnerIsLiar = result.winner === 'liar';
   const humanIds = game.participantIds.filter((id) => !isBotId(id));

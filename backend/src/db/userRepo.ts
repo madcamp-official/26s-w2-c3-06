@@ -142,10 +142,11 @@ function baseExp(i: ExpAwardInput): number {
 }
 
 // 최종 EXP = max(0, floor(baseExp × 참여도 보정 × 반복플레이 보정)). PLAN 계산식과 동일.
-// - 참여도: 설명 제출 + 투표 완료 1.0, 투표 미완료 0.5, 설명 미제출 0
+// - 참여도: 설명 제출 + 투표 완료 둘 다 1.0, 둘 중 하나만 0.5, 둘 다 안 함 0
 // - 반복플레이: 정상 게임 1, 무효 게임 0
 export function computeExpAward(i: ExpAwardInput): number {
-  const participationMultiplier = !i.submittedAllDescriptions ? 0 : i.voted ? 1 : 0.5;
+  const participationCount = (i.submittedAllDescriptions ? 1 : 0) + (i.voted ? 1 : 0);
+  const participationMultiplier = participationCount === 2 ? 1 : participationCount === 1 ? 0.5 : 0;
   const repeatMatchMultiplier = i.gameValid ? 1 : 0;
   return Math.max(0, Math.floor(baseExp(i) * participationMultiplier * repeatMatchMultiplier));
 }
