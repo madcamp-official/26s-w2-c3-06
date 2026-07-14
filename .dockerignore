@@ -1,0 +1,26 @@
+# 루트 빌드 컨텍스트(Docker/Dockerfile) 전용 — 각 서브프로젝트의 .gitignore와 별개로,
+# 이미지 빌드에 불필요한 대용량/캐시 디렉터리를 컨텍스트 업로드에서 제외한다.
+
+.git/
+.claude/
+*.md
+
+# 백엔드
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/.env.local
+backend/firebase-service-account.json
+backend/*.log
+
+# 프론트(Flutter) — 빌드는 컨테이너 안에서 새로 하므로 로컬 산출물/캐시는 제외
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.pub-cache/
+frontend/android/.gradle/
+frontend/ios/Pods/
+frontend/ios/.symlinks/
+
+.DS_Store
