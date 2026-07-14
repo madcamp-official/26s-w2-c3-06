@@ -336,7 +336,6 @@ finalExp = max(0, floor(baseExp × participationMultiplier × repeatMatchMultipl
 - `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
 - `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
 - `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
-- `turn:skip` `{}` — 호스트 전용. 설명 페이즈에서 현재 턴(사람이든 생각 중인 봇이든)을 시간 초과와 동일하게 처리해 강제로 다음 사람에게 넘긴다. 설명 페이즈가 아니거나 호스트가 아니면 무시
 - `discussion:skip` `{}` — 호스트 전용. 토론 페이즈에서 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다(남은 토론 타이머 취소 후 `vote:started`). 토론 페이즈가 아니거나 호스트가 아니면 무시
 - `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
@@ -436,7 +435,6 @@ interface LiarGameLLM {
 - **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
 - **`discussion:skip`**: room_screen.dart 토론 페이즈의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
-- **`turn:skip`**: 이벤트 계약과 백엔드(`gameEngine.skipTurn`)·프론트 배관(`socket_service.dart`의 `skipTurn()`, `room_provider.dart`)은 남아 있으나, room_screen.dart의 방장 전용 "다음 차례 ▶" UI 버튼은 제거됨(호출 진입점 없음).
 - **데스크탑 레이아웃**: lobby_screen과 동일하게 `context.isDesktop`일 때 좌측 `AppNavRail`로 나가기/초대(방장·회원만) 버튼이 이동하고, 헤더에서는 숨겨진다.
 
 위 정리는 정적 코드 검토 기준이며, 런타임 동작(빌드/실행)은 별도로 확인해야 한다.

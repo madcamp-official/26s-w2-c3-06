@@ -273,14 +273,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     void gameEngine.submitDescription(io, room, uid, payload.text.trim());
   });
 
-  // 방장이 현재 턴(제출 대기 중인 사람/생각 중인 봇)을 강제로 다음 사람에게 넘긴다.
-  socket.on('turn:skip', () => {
-    const room = currentRoom();
-    if (!room) return;
-    if (!roomManager.isHost(room, uid)) return;
-    gameEngine.skipTurn(io, room);
-  });
-
   // 방장이 토론 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다.
   socket.on('discussion:skip', () => {
     const room = currentRoom();

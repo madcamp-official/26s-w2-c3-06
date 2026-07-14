@@ -334,19 +334,6 @@ async function generateAndBroadcastComment(
   }
 }
 
-// 방장이 현재 턴(사람/봇 무관)을 강제로 다음 사람에게 넘긴다 — 시간 초과와 동일하게
-// 처리한다(제출 안 한 채로 빈 턴 취급). 사람 턴이면 대기 중이던 타이머를 취소하고,
-// 봇 턴(생각 중)이면 별도 타이머가 없지만 runBotTurn/handleTurnTimeout 쪽에서 이미
-// 진행된 턴 인덱스와 다르면 스스로 무시하도록 재검증하므로 안전하다.
-export function skipTurn(io: Server, room: RoomState): void {
-  const game = room.currentGame;
-  if (!game || game.phase !== 'describing') return;
-  const timer = turnTimers.get(room.roomCode);
-  if (timer) clearTimeout(timer);
-  turnTimers.delete(room.roomCode);
-  advanceTurn(io, room);
-}
-
 function advanceTurn(io: Server, room: RoomState): void {
   const idx = (turnIndexByRoom.get(room.roomCode) ?? 0) + 1;
   turnIndexByRoom.set(room.roomCode, idx);

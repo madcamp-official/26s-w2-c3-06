@@ -211,11 +211,6 @@ class SocketService {
     _socket?.emit('turn:submitDescription', {'text': text});
   }
 
-  /// 방장이 현재 턴(제출 대기 중인 사람/생각 중인 봇)을 강제로 다음 사람에게 넘긴다.
-  void skipTurn() {
-    _socket?.emit('turn:skip', {});
-  }
-
   /// 방장이 토론 제한시간을 기다리지 않고 곧바로 투표로 넘어간다.
   void skipDiscussion() {
     _socket?.emit('discussion:skip', {});
