@@ -34,7 +34,18 @@ class RoomScreen extends ConsumerStatefulWidget {
   ConsumerState<RoomScreen> createState() => _RoomScreenState();
 }
 
-const _presetCategories = <String>['음식', '동물', '영화', '스포츠', '직업', '나라'];
+const _presetCategories = <String>[
+  '음식', '동물', '영화', '스포츠', '직업', '나라',
+  '반려동물', '해양동물', '조류', '곤충', '공룡', '학교', '군대', '주방', '놀이공원', '편의점',
+  '공항', '캠핑장', '은행', '병원', '영화관', '도서관', '백화점', '지하철역', '호텔',
+  '가전제품', '학용품', '악기', '청소용품', '가구',
+  '디즈니', '지브리', '마블', '한국영화', '유명웹툰', '해외영화', '공포영화',
+  '수도', '위인', '색깔', '랜드마크',
+  '10년대 인기곡', '20년대 인기곡', '가수', '걸그룹',
+  '소스', '빵', '자동차브랜드', '라면', '축구선수', '한국 드라마', '해외 드라마', '과자',
+  '한글자', '사자성어', '탈 것', '취미', '넷플릭스', '브랜드', '신체', '아이스크림',
+  '해산물', '운동', '냉동식품', '과일', '대학교', '일식',
+];
 const _minParticipants = 3;
 
 class _RoomScreenState extends ConsumerState<RoomScreen> {
@@ -559,6 +570,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.background,
+      // 카테고리가 60개 넘게 늘어나면서 시트 안에 다 안 들어가 스크롤이 필요해졌다 —
+      // isScrollControlled로 시트가 기본 절반 높이 제한을 넘어설 수 있게 하고, 그리드만
+      // Expanded+스크롤 가능하게 해서 제목/직접입력/확인 버튼은 항상 보이게 고정한다.
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (sheetContext) {
         return StatefulBuilder(
@@ -580,28 +595,28 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 top: 12,
                 bottom: MediaQuery.of(context).viewInsets.bottom + 16,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.75,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('카테고리 선택', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
-                  const SizedBox(height: 12),
-                  GridView.count(
-                    crossAxisCount: 4,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 6,
-                    crossAxisSpacing: 6,
-                    childAspectRatio: 1.3,
-                    children: [
+                    const SizedBox(height: 12),
+                    Text('카테고리 선택', style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: GridView.count(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 6,
+                        crossAxisSpacing: 6,
+                        childAspectRatio: 1.3,
+                        children: [
                       ...chipCategories.map((c) {
                         final selected = !_aiRandom && _selectedChip == c;
                         return HoverTap(
@@ -641,26 +656,28 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  AppTextField(
-                    controller: _customCategoryController,
-                    hintText: '직접 입력',
-                    onChanged: (v) {
-                      setState(() {
-                        if (v.trim().isNotEmpty) {
-                          _selectedChip = null;
-                          _aiRandom = false;
-                        }
-                      });
-                      setSheetState(() {});
-                      _pushDraft();
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  AppButton(label: '확인', onPressed: () => Navigator.of(sheetContext).pop()),
-                ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      controller: _customCategoryController,
+                      hintText: '직접 입력',
+                      onChanged: (v) {
+                        setState(() {
+                          if (v.trim().isNotEmpty) {
+                            _selectedChip = null;
+                            _aiRandom = false;
+                          }
+                        });
+                        setSheetState(() {});
+                        _pushDraft();
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    AppButton(label: '확인', onPressed: () => Navigator.of(sheetContext).pop()),
+                  ],
+                ),
               ),
             );
           },
