@@ -135,12 +135,13 @@ finalExp = max(0, floor(baseExp × participationMultiplier × repeatMatchMultipl
 
 ### 인증/유저 관리 흐름
 
-#### 화면 구조 (5개)
+#### 화면 구조 (6개)
 1. **메인 페이지** — 로그인/회원가입 버튼 + 게스트로 계속하기 버튼
 2. **로그인/회원가입 페이지** — 통합 인증 폼
 3. **로비** — 공개방/비공개방 진입, 내 승률·레벨·프로필 사진 표시, 로그아웃 버튼, 개인정보 수정 페이지 진입점
 4. **개인정보 수정 페이지** — 닉네임 변경, 프로필 사진(아바타) 변경, 로그아웃/계정 탈퇴 버튼
-5. **방 페이지(게임 진행)** — 로그인/로그아웃 버튼 없음 (의도적 설계, 아래 "계정 전환 충돌 회피" 참고)
+5. **친구 관리 페이지** — 로비에서 Navigator.push로 진입하는 친구 목록 조회·친구 요청(닉네임 기반) 관리 페이지
+6. **방 페이지(게임 진행)** — 로그인/로그아웃 버튼 없음 (의도적 설계, 아래 "계정 전환 충돌 회피" 참고)
 
 #### 게스트(익명) 흐름
 메인에서 "게스트로 계속하기" 클릭 → 닉네임 입력 화면 → `signInAnonymously()` 호출 → 로비 진입. 닉네임은 이 시점에 저장(Firebase `displayName` 또는 자체 DB 프로필).
@@ -437,7 +438,7 @@ interface LiarGameLLM {
 - **`RoomSummary`**: `models/room_summary.dart`가 `room:publicList` 계약(`{ roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress }`)을 그대로 반영한다.
 - **`player:ready`**: `models/player.dart`의 `isReady` 필드와 room_screen.dart 대기 페이즈의 준비 완료 토글로 반영. 방장은 이 토글 자체를 보지 않는다(서버가 `isReady: true`로 고정해두므로 항상 준비된 것으로 취급) — 방장이 아닌 참가자 전원이 준비를 마치면 방장이 "게임 시작"을 눌러 시작한다.
 - **`friend:invite`/`room:invited`**: room_screen.dart 헤더 우측 상단에 방장 전용(게스트 제외) "친구 초대" 버튼을 두고, 누르면 접속 중인 친구 목록 다이얼로그를 띄운다. 목록의 "초대" 버튼이 `friend:invite`를 보내고, 상대는 로비에서 `room:invited` 수신 스낵바(+"입장" 액션)로 받는다.
-- **`game:draftConfig`/`draftConfigUpdated`**: `waiting_panel.dart`가 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
+- **`game:draftConfig`/`draftConfigUpdated`**: room_screen.dart의 대기 페이즈 섹션에서 방장 입력 시 실시간으로 emit하고, 비방장은 서버가 보낸 값을 읽기 전용으로 표시.
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
 - **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
