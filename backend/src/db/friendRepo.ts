@@ -33,7 +33,7 @@ export async function sendRequest(requesterId: string, addresseeId: string) {
   if (existing.requesterId === addresseeId) {
     return prisma.friendship.update({
       where: { id: existing.id },
-      data: { status: FriendshipStatus.accepted, respondedAt: new Date() },
+      data: { status: FriendshipStatus.accepted },
     });
   }
   throw new FriendError('이미 요청을 보냈습니다.');
@@ -43,7 +43,6 @@ export async function listPendingRequests(userId: string) {
   return prisma.friendship.findMany({
     where: { addresseeId: userId, status: FriendshipStatus.pending },
     include: { requester: { select: { uid: true, nickname: true, avatarUrl: true } } },
-    orderBy: { createdAt: 'desc' },
   });
 }
 
@@ -63,7 +62,7 @@ export async function respondToRequest(
   }
   return prisma.friendship.update({
     where: { id: requestId },
-    data: { status: FriendshipStatus.accepted, respondedAt: new Date() },
+    data: { status: FriendshipStatus.accepted },
   });
 }
 
