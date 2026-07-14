@@ -18,9 +18,9 @@
 
 커밋 후, 그리고 브랜치 merge 후의 push는 별도 허가 요청 없이 바로 수행한다.
 
-# PR Policy
+# Merge Policy
 
-`dev` → `main` PR을 올릴 때는 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 제외하고 올린다.
+`dev` → `main`은 GitHub PR을 올리지 않고 **로컬에서 직접 `git merge`한 뒤 바로 push**한다(`git checkout main && git merge dev --no-ff` 방식). 병합 시 `CLAUDE.md`, `.claude/` 등 Claude 관련 파일은 `git rm --cached`로 제외하고 커밋한다.
 
 - 2026-07-14부터 `backend`/`frontend`/`frontend-2` 브랜치는 더 이상 사용하지 않는다(원격에 이력으로만 보존, 갱신 안 함). `milleion`(백엔드 담당)·`ireyhye`(프론트엔드 담당) 모두 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
 
