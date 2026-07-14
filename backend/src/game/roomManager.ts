@@ -130,6 +130,16 @@ export function listPublicRooms(): PublicRoomSummary[] {
 
 const DEFAULT_ROOM_EMOJI = '🎮';
 
+// 같은 uid가 이미 방장으로 있는(아직 안 나간) 방이 있는지 찾는다. 더블클릭 등으로
+// room:create가 짧은 시간 안에 두 번 들어와도 방이 2개 생기고, 방장이 그중 하나만
+// 나가도 나머지 하나는 socketIndex에서 더 이상 안 잡혀 고아로 남는 문제를 막는 데 쓴다.
+function findActiveRoomHostedBy(uid: string): RoomState | undefined {
+  for (const room of rooms.values()) {
+    if (room.hostId === uid) return room;
+  }
+  return undefined;
+}
+
 export function createRoom(opts: {
   socketId: string;
   uid: string;
@@ -139,6 +149,14 @@ export function createRoom(opts: {
   title?: string;
   emoji?: string;
 }): RoomState {
+  const existing = findActiveRoomHostedBy(opts.uid);
+  if (existing) {
+    // 새 방을 또 만들지 않고 이미 만든 방을 그대로 돌려준다(멱등 처리).
+    socketIndex.set(opts.socketId, { roomCode: existing.roomCode, uid: opts.uid });
+    uidSocketIndex.set(opts.uid, opts.socketId);
+    return existing;
+  }
+
   const roomCode = generateRoomCode();
   // 방장은 봇과 마찬가지로 참여 즉시 준비 완료로 고정한다 — 프론트가 방장에게는
   // 준비 토글 UI 자체를 보여주지 않고 항상 준비된 것으로 취급하므로, 서버 상태도

@@ -34,6 +34,11 @@ class LobbyScreen extends ConsumerStatefulWidget {
 class _LobbyScreenState extends ConsumerState<LobbyScreen> {
   final _searchController = TextEditingController();
 
+  // "방 만들기"를 빠르게 연속으로 눌러도(더블클릭 등) 다이얼로그가 두 번 열리고 방이 두 개
+  // 생기는 일이 없도록 막는다. 서버도 같은 uid의 중복 room:create를 멱등 처리하지만,
+  // 애초에 다이얼로그가 중복으로 뜨지 않게 프론트에서도 막아둔다.
+  bool _creatingRoom = false;
+
   @override
   void initState() {
     super.initState();
@@ -111,6 +116,16 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
 
   /// 방 만들기 다이얼로그 — 공개/비공개, 인원수. 카테고리는 방 안 대기방에서 방장이 고른다.
   Future<void> _handleCreateRoom() async {
+    if (_creatingRoom) return;
+    _creatingRoom = true;
+    try {
+      await _showCreateRoomDialog();
+    } finally {
+      _creatingRoom = false;
+    }
+  }
+
+  Future<void> _showCreateRoomDialog() async {
     var isPublic = true;
     var maxPlayers = 8;
     final defaultTitle = '${UserSession.nickname}의 방';
@@ -420,7 +435,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
           Row(
             children: [
               Expanded(
-                child: Text('LOBBY', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                child: Text('LOBBY', style: PixelFont.title(fontSize: isDesktop ? 24 : 16, color: AppColors.foreground)),
               ),
               _HeaderPixelButton(
                 label: '코드 입장',
@@ -543,7 +558,7 @@ class _Header extends StatelessWidget {
           Expanded(
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Image.asset('images/logo.png', height: 38),
+              child: Image.asset('images/logo.png', height: 46),
             ),
           ),
           _IconBox(
