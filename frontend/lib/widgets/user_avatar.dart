@@ -14,6 +14,9 @@ class UserAvatar extends StatelessWidget {
   final String? imageUrl;
   final Color? borderColor;
 
+  /// AI 봇 참가자용 — 사진이 없을 때 사람 실루엣 대신 🤖 이모지를 보여준다.
+  final bool isBot;
+
   const UserAvatar({
     super.key,
     required this.avatarIndex,
@@ -21,6 +24,7 @@ class UserAvatar extends StatelessWidget {
     this.imageBytes,
     this.imageUrl,
     this.borderColor,
+    this.isBot = false,
   });
 
   @override
@@ -28,7 +32,9 @@ class UserAvatar extends StatelessWidget {
     final size = radius * 2;
     final borderRadius = BorderRadius.circular(size * 0.16);
     final Widget content;
-    final placeholder = Icon(Icons.person, size: size * 0.6, color: AppColors.mutedForeground);
+    final placeholder = isBot
+        ? Text('🤖', style: TextStyle(fontSize: size * 0.55))
+        : Icon(Icons.person, size: size * 0.6, color: AppColors.mutedForeground);
     if (imageBytes != null) {
       content = Image.memory(imageBytes!, width: size, height: size, fit: BoxFit.cover);
     } else if (imageUrl != null && imageUrl!.isNotEmpty) {

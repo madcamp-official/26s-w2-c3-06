@@ -32,6 +32,7 @@ class SocketService {
   final _yourWordCtrl = StreamController<YourWord>.broadcast();
   final _turnStartedCtrl = StreamController<TurnStarted>.broadcast();
   final _discussionStartedCtrl = StreamController<int>.broadcast();
+  final _discussionAdjustStateCtrl = StreamController<DiscussionAdjustState>.broadcast();
   final _voteStartedCtrl = StreamController<int>.broadcast();
   final _voteProgressCtrl = StreamController<VoteProgress>.broadcast();
   final _roundResolvedCtrl = StreamController<RoundResolved>.broadcast();
@@ -56,6 +57,7 @@ class SocketService {
   Stream<YourWord> get onYourWord => _yourWordCtrl.stream;
   Stream<TurnStarted> get onTurnStarted => _turnStartedCtrl.stream;
   Stream<int> get onDiscussionStarted => _discussionStartedCtrl.stream;
+  Stream<DiscussionAdjustState> get onDiscussionAdjustState => _discussionAdjustStateCtrl.stream;
   Stream<int> get onVoteStarted => _voteStartedCtrl.stream;
   Stream<VoteProgress> get onVoteProgress => _voteProgressCtrl.stream;
   Stream<RoundResolved> get onRoundResolved => _roundResolvedCtrl.stream;
@@ -127,6 +129,10 @@ class SocketService {
     socket.on(
       'discussion:started',
       (data) => _discussionStartedCtrl.add(_map(data)['timeLimitSec'] as int),
+    );
+    socket.on(
+      'discussion:myAdjustState',
+      (data) => _discussionAdjustStateCtrl.add(DiscussionAdjustState.fromJson(_map(data))),
     );
     socket.on('vote:started', (data) => _voteStartedCtrl.add(_map(data)['timeLimitSec'] as int));
     socket.on('vote:progress', (data) => _voteProgressCtrl.add(VoteProgress.fromJson(_map(data))));
@@ -211,9 +217,9 @@ class SocketService {
     _socket?.emit('turn:submitDescription', {'text': text});
   }
 
-  /// 방장이 토론 제한시간을 기다리지 않고 곧바로 투표로 넘어간다.
-  void skipDiscussion() {
-    _socket?.emit('discussion:skip', {});
+  /// 토론 시간을 ±10초 조절한다. 방장 전용이 아니라 누구나 호출할 수 있다.
+  void adjustDiscussionTime(int deltaSec) {
+    _socket?.emit('discussion:adjustTime', {'deltaSec': deltaSec});
   }
 
   void castVote(String votedPlayerId) {
@@ -305,6 +311,7 @@ class RoomSnapshot {
   final String title;
   final String emoji;
   final String visibility;
+  final int maxPlayers;
   final List<Player> players;
 
   /// 이 방에서 지금까지 사용된 카테고리(방장 입력·AI 랜덤 포함). 다음 게임 선택지로 제시한다.
@@ -317,6 +324,7 @@ class RoomSnapshot {
     this.title = '',
     this.emoji = '🎮',
     required this.visibility,
+    required this.maxPlayers,
     required this.players,
     required this.customCategories,
     required this.draftConfig,
@@ -329,6 +337,7 @@ class RoomSnapshot {
       title: (json['title'] as String?) ?? '',
       emoji: (json['emoji'] as String?) ?? '🎮',
       visibility: json['visibility'] as String,
+      maxPlayers: (json['maxPlayers'] as num?)?.toInt() ?? 0,
       players: (json['players'] as List)
           .map((e) => Player.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -347,6 +356,7 @@ class RoomRejoinedSnapshot {
   final String title;
   final String emoji;
   final String visibility;
+  final int maxPlayers;
   final List<Player> players;
   final List<String> customCategories;
   final List<ChatMessage> chatLog;
@@ -359,6 +369,7 @@ class RoomRejoinedSnapshot {
     this.title = '',
     this.emoji = '🎮',
     required this.visibility,
+    required this.maxPlayers,
     required this.players,
     required this.customCategories,
     required this.chatLog,
@@ -373,6 +384,7 @@ class RoomRejoinedSnapshot {
       title: (json['title'] as String?) ?? '',
       emoji: (json['emoji'] as String?) ?? '🎮',
       visibility: json['visibility'] as String,
+      maxPlayers: (json['maxPlayers'] as num?)?.toInt() ?? 0,
       players: (json['players'] as List)
           .map((e) => Player.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -441,6 +453,22 @@ class TurnStarted {
     return TurnStarted(
       playerId: json['playerId'] as String,
       timeLimitSec: json['timeLimitSec'] as int,
+    );
+  }
+}
+
+/// discussion:myAdjustState 페이로드: `{ canShorten, canExtend }`. 방 전체가 아니라
+/// 내 소켓에만 오는 개인화된 상태 — 토론 단축/연장 버튼을 각각 한 번씩만 쓸 수 있어서다.
+class DiscussionAdjustState {
+  final bool canShorten;
+  final bool canExtend;
+
+  const DiscussionAdjustState({required this.canShorten, required this.canExtend});
+
+  factory DiscussionAdjustState.fromJson(Map<String, dynamic> json) {
+    return DiscussionAdjustState(
+      canShorten: json['canShorten'] as bool? ?? true,
+      canExtend: json['canExtend'] as bool? ?? true,
     );
   }
 }

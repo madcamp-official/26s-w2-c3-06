@@ -12,10 +12,14 @@ import { awardExp, computeExpAward } from '../db/userRepo';
 //
 // 타이머 초 값은 PLAN에 명시되어 있지 않아 이 스캐폴드에서 합리적 기본값으로 잡았다. 튜닝 대상.
 export const TURN_TIME_LIMIT_SEC = 60;
-export const DISCUSSION_TIME_LIMIT_SEC = 30;
+export const DISCUSSION_TIME_LIMIT_SEC = 40;
 export const VOTE_TIME_LIMIT_SEC = 30;
 export const LIAR_GUESS_TIME_LIMIT_SEC = 30;
 const BOT_THINK_DELAY_MS = 1500;
+// 토론 시간 단축/연장 버튼 한 번에 조절되는 폭. 참가자 누구나 누를 수 있다(방장 전용 아님).
+export const DISCUSSION_TIME_ADJUST_SEC = 10;
+// 단축을 남용해 0초/음수로 만들지 못하도록 최소 남은 시간.
+const DISCUSSION_MIN_REMAINING_SEC = 5;
 
 // 문서화된 GameState/Round는 그대로 두고, 타이머 핸들·봇 목록 같은 휘발성 런타임 부가정보는
 // roomCode로 키잉한 모듈 내부 맵으로 별도 관리한다(직렬화 대상 타입을 오염시키지 않기 위함).
@@ -27,6 +31,14 @@ const botsByRoom = new Map<string, BotInfo[]>();
 const turnIndexByRoom = new Map<string, number>();
 const turnTimers = new Map<string, NodeJS.Timeout>();
 const phaseTimers = new Map<string, NodeJS.Timeout>();
+// 토론 종료 예정 시각(ms epoch). +10/-10초 조절 시 남은 시간을 다시 계산하는 데 쓴다.
+const discussionDeadlineByRoom = new Map<string, number>();
+// 이번 토론 페이즈에서 단축/연장 버튼을 이미 쓴 uid들 — 참가자별로 각각 한 번씩만 허용한다.
+interface DiscussionAdjustUsage {
+  extended: Set<string>;
+  shortened: Set<string>;
+}
+const discussionAdjustUsageByRoom = new Map<string, DiscussionAdjustUsage>();
 
 function isBotId(id: string): boolean {
   return id.startsWith('bot-');
@@ -39,6 +51,8 @@ function clearRoomTimers(roomCode: string): void {
   const t2 = phaseTimers.get(roomCode);
   if (t2) clearTimeout(t2);
   phaseTimers.delete(roomCode);
+  discussionDeadlineByRoom.delete(roomCode);
+  discussionAdjustUsageByRoom.delete(roomCode);
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -354,19 +368,72 @@ function endDescribingPhase(io: Server, room: RoomState): void {
   // 모드로 전환할 수 있게 한다 (이전엔 system 채팅 텍스트로만 암시됐음).
   io.to(room.roomCode).emit('discussion:started', { timeLimitSec: DISCUSSION_TIME_LIMIT_SEC });
   broadcastChat(io, room, 'system', 'system', '모든 설명이 끝났습니다. 잠시 자유롭게 토론해보세요.');
+  discussionDeadlineByRoom.set(room.roomCode, Date.now() + DISCUSSION_TIME_LIMIT_SEC * 1000);
   const timer = setTimeout(() => startVoting(io, room), DISCUSSION_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
+
+  // 새 토론 페이즈이므로 단축/연장 사용 이력을 초기화하고, 참가자 각자에게 "아직 둘 다
+  // 쓸 수 있음" 상태를 개인 소켓으로 보낸다(전원 동일한 방송이 아니라 uid별로 달라야 함).
+  discussionAdjustUsageByRoom.set(room.roomCode, { extended: new Set(), shortened: new Set() });
+  for (const player of room.players) {
+    emitDiscussionAdjustState(io, room, player.id);
+  }
 }
 
-// 방장이 토론 제한시간을 기다리지 않고 곧바로 투표로 넘어간다.
-// 토론 페이즈가 아닐 때(설명 중·이미 투표 중 등) 호출되면 조용히 무시한다.
-export function skipDiscussion(io: Server, room: RoomState): void {
+function emitDiscussionAdjustState(io: Server, room: RoomState, uid: string): void {
+  const usage = discussionAdjustUsageByRoom.get(room.roomCode);
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (!socketId) return;
+  io.to(socketId).emit('discussion:myAdjustState', {
+    canShorten: !usage?.shortened.has(uid),
+    canExtend: !usage?.extended.has(uid),
+  });
+}
+
+// 재접속(room:rejoin) 시 본인이 이미 단축/연장을 썼는지 다시 알려준다 — 새로고침해도
+// 한도가 초기화된 것처럼 보이지 않게(실제 한도는 서버가 어차피 강제하지만, 버튼이 계속
+// 눌리는 것처럼 보이는 UI 혼란을 막기 위함).
+export function resendDiscussionAdjustStateIfPending(io: Server, room: RoomState, uid: string): void {
+  if (room.currentGame?.phase !== 'discussion') return;
+  emitDiscussionAdjustState(io, room, uid);
+}
+
+// 토론 시간을 ±10초 조절한다. 방장 전용이 아니라 누구나 누를 수 있지만(방장의 "투표로
+// 넘어가기" 전용 권한은 없앰), 참가자 한 명당 단축·연장 각각 한 번씩만 허용한다.
+// 허용된 조절은 discussion:started로 다시 브로드캐스트해(같은 이벤트를 재사용) 모든
+// 클라이언트가 CountdownText의 남은 시간을 동일하게 다시 계산하게 한다.
+export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, deltaSec: number): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'discussion') return;
+
+  const usage = discussionAdjustUsageByRoom.get(room.roomCode) ?? {
+    extended: new Set<string>(),
+    shortened: new Set<string>(),
+  };
+  discussionAdjustUsageByRoom.set(room.roomCode, usage);
+
+  const usedSet = deltaSec > 0 ? usage.extended : usage.shortened;
+  if (usedSet.has(uid)) {
+    // 이미 쓴 방향으로 또 요청 — 조용히 무시하되, 버튼이 계속 눌리는 것처럼 보이지
+    // 않도록 현재 상태를 다시 보내준다.
+    emitDiscussionAdjustState(io, room, uid);
+    return;
+  }
+  usedSet.add(uid);
+
+  const deadline = discussionDeadlineByRoom.get(room.roomCode) ?? Date.now();
+  const remainingSec = (deadline - Date.now()) / 1000;
+  const nextRemainingSec = Math.max(DISCUSSION_MIN_REMAINING_SEC, remainingSec + deltaSec);
+
   const timer = phaseTimers.get(room.roomCode);
   if (timer) clearTimeout(timer);
-  phaseTimers.delete(room.roomCode);
-  startVoting(io, room);
+  discussionDeadlineByRoom.set(room.roomCode, Date.now() + nextRemainingSec * 1000);
+  phaseTimers.set(
+    room.roomCode,
+    setTimeout(() => startVoting(io, room), nextRemainingSec * 1000),
+  );
+  io.to(room.roomCode).emit('discussion:started', { timeLimitSec: Math.round(nextRemainingSec) });
+  emitDiscussionAdjustState(io, room, uid);
 }
 
 // ── 투표 페이즈 ──
@@ -394,10 +461,11 @@ function startVoting(io: Server, room: RoomState): void {
 }
 
 // 익명 투표, 서버 내부 집계 전용 (PLAN: 개인별 선택은 어떤 클라이언트에도 전송 안 함).
+// 투표 대상은 제한시간(VOTE_TIME_LIMIT_SEC) 안에서는 자유롭게 바꿀 수 있고(재투표 시 기존
+// 선택을 덮어씀), 전원이 투표를 마치면 30초를 다 기다리지 않고 바로 종료한다.
 export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
-  if (game.votes[voterId]) return; // 이미 투표함 (idempotent)
   if (!game.participantIds.includes(votedPlayerId)) return;
 
   game.votes[voterId] = votedPlayerId;
