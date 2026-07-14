@@ -130,6 +130,26 @@ class AuthService {
     await user.reload();
   }
 
+  /// 이메일/비밀번호로 가입한 계정만 비밀번호를 바꿀 수 있다. 구글 로그인 계정은
+  /// 애초에 비밀번호가 없어(providerData에 'password'가 없음) 바꿀 대상이 없다.
+  bool get canChangePassword =>
+      _auth.currentUser?.providerData.any((p) => p.providerId == 'password') ?? false;
+
+  /// 비밀번호 변경. Firebase는 민감한 작업 전에 최근 로그인을 요구하므로, 현재
+  /// 비밀번호로 먼저 재인증한 뒤 새 비밀번호로 바꾼다.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) {
+      throw FirebaseAuthException(code: 'no-current-user', message: '로그인 정보를 확인할 수 없습니다.');
+    }
+    final credential = EmailAuthProvider.credential(email: user.email!, password: currentPassword);
+    await user.reauthenticateWithCredential(credential);
+    await user.updatePassword(newPassword);
+  }
+
   bool _isAlreadyInUse(String code) =>
       code == 'credential-already-in-use' || code == 'email-already-in-use';
 
