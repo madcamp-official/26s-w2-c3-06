@@ -248,7 +248,26 @@ class _FriendTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          friend.nickname,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: AppColors.primary, border: Border.all(color: AppColors.primaryBorder)),
+                        child: Text(
+                          'Lv.${friend.level}',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
                   Text(
                     friend.isOnline ? '온라인' : '오프라인',
                     style: TextStyle(fontSize: 12, color: friend.isOnline ? AppColors.success : AppColors.mutedForeground),

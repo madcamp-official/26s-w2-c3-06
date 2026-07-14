@@ -74,8 +74,8 @@ export async function listFriends(userId: string) {
       OR: [{ requesterId: userId }, { addresseeId: userId }],
     },
     include: {
-      requester: { select: { uid: true, nickname: true, avatarUrl: true } },
-      addressee: { select: { uid: true, nickname: true, avatarUrl: true } },
+      requester: { select: { uid: true, nickname: true, avatarUrl: true, exp: true } },
+      addressee: { select: { uid: true, nickname: true, avatarUrl: true, exp: true } },
     },
   });
   return rows.map((r) => (r.requesterId === userId ? r.addressee : r.requester));
