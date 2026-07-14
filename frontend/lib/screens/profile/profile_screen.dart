@@ -216,13 +216,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     });
     UserSession.profileImageBytes = null;
     ref.read(avatarUrlProvider.notifier).set(null);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
     try {
       await BackendApi.instance.updateAvatarUrl(null);
-      await FirebaseStorage.instance.ref('avatars/$uid').delete().catchError((_) {});
-    } catch (_) {
-      // 삭제 실패는 조용히 무시(다음 저장 시 덮어써짐).
+      _snack('프로필 사진이 삭제되었습니다.');
+    } catch (e) {
+      _snack('사진 삭제에 실패했습니다: $e');
+    }
+    // Storage 파일 정리는 best-effort — avatars/{uid}는 다음 업로드 시 덮어써지므로
+    // 여기서 실패해도 사용자에게 보이는 상태(DB의 avatarUrl)와는 무관하다.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      FirebaseStorage.instance
+          .ref('avatars/$uid')
+          .delete()
+          .catchError((e) => debugPrint('[profile] Storage 사진 삭제 실패: $e'));
     }
   }
 

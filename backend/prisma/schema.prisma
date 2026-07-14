@@ -43,8 +43,6 @@ model Friendship {
   requester   User             @relation("requester", fields: [requesterId], references: [uid], onDelete: Cascade)
   addressee   User             @relation("addressee", fields: [addresseeId], references: [uid], onDelete: Cascade)
   status      FriendshipStatus @default(pending)
-  createdAt   DateTime         @default(now())
-  respondedAt DateTime?
 
   @@unique([requesterId, addresseeId]) // 같은 쌍 중복 요청 방지
   @@index([addresseeId]) // 받은 요청 조회용
