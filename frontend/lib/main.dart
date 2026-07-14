@@ -86,7 +86,12 @@ class _AuthGateState extends ConsumerState<AuthGate> {
           // 이 uid를 온라인으로 취급해 친구 목록에서 오프라인으로 안 바뀌는 문제가 있었다.
           // authStateChanges가 null을 emit하는 시점(=signOut 직후)에 명시적으로 끊어준다.
           if (_restoredForUser) {
-            ref.read(roomProvider.notifier).disconnectSocket();
+            // build() 도중 다른 provider(roomProvider) 상태를 바로 바꾸면 안 되므로
+            // ("Tried to modify a provider while the widget tree was building"),
+            // 다음 프레임으로 미룬다.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              ref.read(roomProvider.notifier).disconnectSocket();
+            });
           }
           _restoredForUser = false;
           return const LoginScreen();
