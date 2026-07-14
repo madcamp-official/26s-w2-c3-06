@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/backend_api.dart';
-import '../../mock/mock_data.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_alert.dart';
@@ -12,6 +11,7 @@ import '../../widgets/app_text_field.dart';
 import '../../widgets/responsive_center.dart';
 
 final _specialCharPattern = RegExp(r'''[!@#$%^&*(),.?":{}|<>_\-\[\]/\\;+=~`]''');
+final _emailFormatPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
 bool _isPasswordValid(String password) {
   return password.length >= 8 &&
@@ -38,10 +38,16 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
 
-  bool? _emailAvailable;
   bool? _nicknameAvailable;
-  bool _isCheckingEmail = false;
   bool _isCheckingNickname = false;
+
+  // 사전 확인(닉네임 중복확인 버튼)이 "사용 가능"이라고 했더라도, 실제 가입 시도
+  // (Firebase/백엔드)에서 뒤늦게 밝혀지는 진짜 중복이 있을 수 있다(레이스 컨디션,
+  // 또는 이메일처럼 애초에 사전 확인이 불가능한 경우). 그 결과를 여기 담아 빨간 글씨로
+  // 필드 바로 아래에 보여준다 — 회원가입 실패 팝업만 뜨고 "왜"인지 필드에는 안 보이던
+  // 문제를 고친 것.
+  String? _emailError;
+  String? _nicknameError;
 
   @override
   void initState() {
@@ -66,24 +72,6 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
-  }
-
-  // [MOCK] 백엔드에 이메일 사전 중복확인 엔드포인트가 없다(가입 시 Firebase가 email-already-in-use로
-  // 처리). 형식 확인 + mock 목록 대조만 하며, 최종 판정은 _handleSignUp의 가입 시도에서 이뤄진다.
-  Future<void> _checkEmail() async {
-    final value = _emailController.text.trim();
-    if (value.isEmpty) return;
-    setState(() {
-      _isCheckingEmail = true;
-      _emailAvailable = null;
-    });
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    final taken = mockTakenEmails.any((e) => e.toLowerCase() == value.toLowerCase());
-    setState(() {
-      _isCheckingEmail = false;
-      _emailAvailable = !taken;
-    });
   }
 
   // 닉네임 중복확인 — 백엔드 GET /api/users/nickname-availability 실연동.
@@ -113,7 +101,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
 
   bool get _canSubmit =>
       !_submitting &&
-      _emailAvailable == true &&
+      _emailFormatPattern.hasMatch(_emailController.text.trim()) &&
       _nicknameAvailable == true &&
       _isPasswordValid(_passwordController.text) &&
       _confirmController.text == _passwordController.text;
@@ -123,7 +111,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
     final nickname = _nicknameController.text.trim();
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _emailError = null;
+      _nicknameError = null;
+    });
     try {
       await AuthService.instance.signUpOrLinkWithEmail(
         email: email,
@@ -131,7 +123,19 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         nickname: nickname,
       );
       // 가입 직후 로컬 DB에 닉네임 즉시 반영(친구 요청 등이 바로 동작하도록).
-      await BackendApi.instance.syncNickname(nickname);
+      try {
+        await BackendApi.instance.syncNickname(nickname);
+      } on BackendApiException catch (e) {
+        // Firebase 계정은 이미 만들어졌다 — 그 사이 다른 사람이 닉네임을 선점한 경우
+        // (사전 확인 이후의 레이스 컨디션)만 여기서 걸린다. 계정은 유지한 채 닉네임만
+        // 다시 고르게 한다(다음 저장 시도는 프로필 화면에서 가능).
+        if (mounted) {
+          setState(() {
+            _nicknameError = e.statusCode == 409 ? '이미 사용 중인 닉네임입니다.' : '닉네임 저장에 실패했습니다: ${e.message}';
+          });
+        }
+        return;
+      }
       if (!mounted) return;
       // 로그인 상태가 됐으므로 최상위 AuthGate가 로비로 전환·세션 복원한다.
       if (widget.pushedFromProfile) {
@@ -142,7 +146,10 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         Navigator.of(context).pop();
       }
     } on FirebaseAuthException catch (e) {
-      if (mounted) {
+      if (!mounted) return;
+      if (e.code == 'email-already-in-use') {
+        setState(() => _emailError = '이미 가입된 이메일입니다.');
+      } else {
         showAppAlert(context, '가입 실패: ${e.message ?? e.code}');
       }
     } catch (e) {
@@ -175,16 +182,14 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     child: Text('계정 만들기', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
                   ),
                   const SizedBox(height: 24),
-                  _CheckableField(
+                  AppTextField(
                     controller: _emailController,
                     label: '이메일',
                     hintText: 'you@example.com',
                     keyboardType: TextInputType.emailAddress,
-                    isChecking: _isCheckingEmail,
-                    available: _emailAvailable,
-                    onCheck: _checkEmail,
-                    onChanged: () => setState(() => _emailAvailable = null),
+                    onChanged: (_) => setState(() => _emailError = null),
                   ),
+                  if (_emailError != null) _InlineError(_emailError!),
                   const SizedBox(height: 16),
                   _CheckableField(
                     controller: _nicknameController,
@@ -193,8 +198,12 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     isChecking: _isCheckingNickname,
                     available: _nicknameAvailable,
                     onCheck: _checkNickname,
-                    onChanged: () => setState(() => _nicknameAvailable = null),
+                    onChanged: () => setState(() {
+                      _nicknameAvailable = null;
+                      _nicknameError = null;
+                    }),
                   ),
+                  if (_nicknameError != null) _InlineError(_nicknameError!),
                   const SizedBox(height: 16),
                   AppTextField(
                     controller: _passwordController,
@@ -250,11 +259,33 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   }
 }
 
+/// 필드 바로 아래 빨간 글씨로 붙는 에러 한 줄(가입 시도에서 뒤늦게 밝혀진 중복 등).
+class _InlineError extends StatelessWidget {
+  final String message;
+
+  const _InlineError(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          const Icon(Icons.cancel, size: 14, color: AppColors.error),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(message, style: const TextStyle(fontSize: 12, color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CheckableField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String hintText;
-  final TextInputType keyboardType;
   final bool isChecking;
   final bool? available;
   final VoidCallback onCheck;
@@ -264,7 +295,6 @@ class _CheckableField extends StatelessWidget {
     required this.controller,
     required this.label,
     required this.hintText,
-    this.keyboardType = TextInputType.text,
     required this.isChecking,
     required this.available,
     required this.onCheck,
@@ -284,7 +314,6 @@ class _CheckableField extends StatelessWidget {
                 controller: controller,
                 label: label,
                 hintText: hintText,
-                keyboardType: keyboardType,
                 onChanged: (_) => onChanged(),
               ),
             ),
