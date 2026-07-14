@@ -32,7 +32,9 @@ export async function socketAuthMiddleware(
     socket.data.uid = decoded.uid;
     socket.data.isAnonymous = decoded.firebase?.sign_in_provider === 'anonymous';
     next();
-  } catch {
+  } catch (err) {
+    // TODO(temp-debug): 배포 환경 토큰 검증 실패 원인 확인용 임시 로그 — 원인 파악 후 제거.
+    console.error('[socket] verifyIdToken 실패', err);
     next(new Error('unauthorized: 유효하지 않은 토큰'));
   }
 }
