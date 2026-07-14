@@ -15,6 +15,7 @@ import 'services/user_session.dart';
 import 'state/auth_provider.dart';
 import 'state/room_provider.dart';
 import 'theme/app_theme.dart';
+import 'utils/breakpoints.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,16 @@ class MyApp extends StatelessWidget {
       title: '라이어 게임',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      // 데스크탑 화면은 글자가 상대적으로 작아 보여 전체 텍스트를 살짝 확대한다.
+      // 모바일 앱 UI는 건드리지 않도록 데스크탑 너비일 때만 배율을 올린다.
+      builder: (context, child) {
+        final mediaQuery = MediaQuery.of(context);
+        if (mediaQuery.size.width < kDesktopBreakpoint) return child!;
+        return MediaQuery(
+          data: mediaQuery.copyWith(textScaler: const TextScaler.linear(1.15)),
+          child: child!,
+        );
+      },
       home: const AuthGate(),
     );
   }
