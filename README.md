@@ -97,7 +97,7 @@
 
 ## 아키텍처
 
-Flutter(iOS/Android/Web) 클라이언트가 `socket_io_client`로 Node/Express + Socket.IO 백엔드에 온라인 방 단위로 접속한다. 백엔드는 방/게임/라운드 상태를 인메모리로 관리하며, 소켓 handshake 시 Firebase Auth ID 토큰을 검증한다. 게임 진행 중 필요한 시점(제시어 쌍 생성, 봇 턴 생성, 매 턴 교란 코멘트)마다 백엔드가 Anthropic Claude API를 호출하는 LLM 래퍼를 통해 결과를 받아 Socket.IO로 실시간 브로드캐스트한다. 상세 이벤트 계약과 데이터 모델은 [PLAN.md](./PLAN.md) 참고.
+Flutter(iOS/Android/Web) 클라이언트가 `socket_io_client`로 Node/Express + Socket.IO 백엔드에 온라인 방 단위로 접속한다. 백엔드는 방/게임/라운드 상태를 인메모리로 관리하며, 소켓 handshake 시 Firebase Auth ID 토큰을 검증한다. 게임 진행 중 필요한 시점(제시어 쌍 생성, 봇 턴 생성, 매 턴 교란 코멘트)마다 백엔드가 Anthropic Claude API 또는 OpenAI API(환경변수 `LLM_PROVIDER`로 전환)를 호출하는 LLM 래퍼를 통해 결과를 받아 Socket.IO로 실시간 브로드캐스트한다. 상세 이벤트 계약과 데이터 모델은 [PLAN.md](./PLAN.md) 참고.
 
 ---
 
@@ -145,10 +145,10 @@ npm run dev   # 또는 python main.py 등
 
 | 분류 | 사용 기술 |
 |---|---|
-| 핵심 기술 | Flutter, Node.js + Express + Socket.IO, Anthropic Claude API |
+| 핵심 기술 | Flutter, Node.js + Express + Socket.IO, Anthropic Claude API / OpenAI API |
 | 실행 환경 | iOS / Android / Web (Flutter 단일 코드베이스) |
 | 데이터 저장 | 인메모리(방/게임/라운드 상태), 로컬 DB PostgreSQL+Prisma(유저 프로필·전적·친구, 선택 구현) |
-| 외부 API / 서비스 | Firebase Authentication(인증 전용), Anthropic Claude API |
+| 외부 API / 서비스 | Firebase Authentication(인증 전용), Anthropic Claude API / OpenAI API(`LLM_PROVIDER`로 전환) |
 | 기타 | `socket_io_client`(Flutter), `firebase-admin`(백엔드 토큰 검증), Prisma(ORM), Riverpod(상태관리) |
 
 ---
