@@ -454,6 +454,10 @@ function startVoting(io: Server, room: RoomState): void {
   for (const bot of bots) {
     const delay = 500 + Math.random() * (VOTE_TIME_LIMIT_SEC * 1000 * 0.5);
     setTimeout(() => {
+      // 이 방에서 같은 봇 인스턴스로 새 게임이 이미 시작됐다면(빠른 재시작 시 이전 게임의
+      // 예약된 봇 투표가 남아있을 수 있음), 지금 진행 중인 게임에 잘못 투표되는 것을 막는다
+      // — 그렇지 않으면 새 게임의 투표수가 조기에 채워져 타이머가 갑자기 사라지는 버그가 생긴다.
+      if (room.currentGame !== game) return;
       const target = pickRandom(game.participantIds.filter((id) => id !== bot.id));
       castVote(io, room, bot.id, target);
     }, delay);
