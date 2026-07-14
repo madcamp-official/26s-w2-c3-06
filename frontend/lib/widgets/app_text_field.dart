@@ -15,6 +15,7 @@ class AppTextField extends StatelessWidget {
   final Widget? suffixIcon;
   final Widget? prefixIcon;
   final EdgeInsetsGeometry? contentPadding;
+  final bool enabled;
 
   const AppTextField({
     super.key,
@@ -31,6 +32,7 @@ class AppTextField extends StatelessWidget {
     this.suffixIcon,
     this.prefixIcon,
     this.contentPadding,
+    this.enabled = true,
   });
 
   @override
@@ -44,6 +46,7 @@ class AppTextField extends StatelessWidget {
       onSubmitted: onSubmitted,
       onChanged: onChanged,
       obscureText: obscureText,
+      enabled: enabled,
       decoration: InputDecoration(
         labelText: label,
         hintText: hintText,

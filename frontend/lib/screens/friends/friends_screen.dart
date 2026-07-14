@@ -30,7 +30,12 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    // 최초 로드는 initState(=build 도중) 단계라 ref.invalidate를 바로 호출하면 안 된다
+    // ("setState() or markNeedsBuild() called during build") — 목록만 채우고, 배지 갱신은
+    // 다음 프레임으로 미룬다.
+    _friendsFuture = BackendApi.instance.getFriends();
+    _requestsFuture = BackendApi.instance.getPendingFriendRequests();
+    WidgetsBinding.instance.addPostFrameCallback((_) => ref.invalidate(pendingFriendRequestCountProvider));
   }
 
   @override
@@ -243,7 +248,26 @@ class _FriendTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(friend.nickname, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          friend.nickname,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(color: AppColors.primary, border: Border.all(color: AppColors.primaryBorder)),
+                        child: Text(
+                          'Lv.${friend.level}',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
                   Text(
                     friend.isOnline ? '온라인' : '오프라인',
                     style: TextStyle(fontSize: 12, color: friend.isOnline ? AppColors.success : AppColors.mutedForeground),

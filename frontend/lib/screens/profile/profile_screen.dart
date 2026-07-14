@@ -135,10 +135,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  Future<void> _handleLogout() async {
+  Future<void> _performLogout() async {
     await AuthService.instance.signOut();
     if (!mounted) return;
     _backToRoot();
+  }
+
+  /// 회원 로그아웃도 실수로 바로 나가지지 않도록 확인 창을 한 번 띄운다.
+  Future<void> _handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          icon: const Icon(Icons.warning_amber_rounded, color: AppColors.destructive, size: 36),
+          title: const Text('로그아웃하시겠어요?'),
+          content: const Text('정말 로그아웃하시겠어요?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.destructive),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('로그아웃'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    await _performLogout();
   }
 
   /// 게스트 로그아웃은 회원 로그아웃과 같은 signOut()이지만, 익명 계정은 같은 uid로
@@ -167,7 +194,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       },
     );
     if (confirmed != true) return;
-    await _handleLogout();
+    await _performLogout();
   }
 
   /// 게스트가 "로그인 / 회원가입"을 눌렀을 때. 로그아웃(세션 파괴) 없이 로그인 화면을

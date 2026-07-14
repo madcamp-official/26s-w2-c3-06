@@ -81,6 +81,11 @@ class RoomViewState {
   final int? votesInCount;
   final int? totalVoteCount;
 
+  /// 토론 단축/연장(±10초) 버튼을 내가 이미 썼는지 — 참가자 한 명당 각각 한 번씩만
+  /// 허용되고, discussion:myAdjustState(개인화된 이벤트)로 서버가 갱신해준다.
+  final bool canShortenDiscussion;
+  final bool canExtendDiscussion;
+
   final RoundResolved? roundResolved;
 
   /// null이 아니면 "나"에게 역전승 기회가 온 것(liar:guessPrompt는 지목된 소켓에만 전송됨).
@@ -120,6 +125,8 @@ class RoomViewState {
     this.voteTimeLimitSec,
     this.votesInCount,
     this.totalVoteCount,
+    this.canShortenDiscussion = true,
+    this.canExtendDiscussion = true,
     this.roundResolved,
     this.liarGuessTimeLimitSec,
     this.phaseDeadline,
@@ -186,6 +193,8 @@ class RoomViewState {
     int? voteTimeLimitSec,
     int? votesInCount,
     int? totalVoteCount,
+    bool? canShortenDiscussion,
+    bool? canExtendDiscussion,
     RoundResolved? roundResolved,
     bool clearRoundResolved = false,
     int? liarGuessTimeLimitSec,
@@ -222,6 +231,8 @@ class RoomViewState {
       voteTimeLimitSec: voteTimeLimitSec ?? this.voteTimeLimitSec,
       votesInCount: votesInCount ?? this.votesInCount,
       totalVoteCount: totalVoteCount ?? this.totalVoteCount,
+      canShortenDiscussion: canShortenDiscussion ?? this.canShortenDiscussion,
+      canExtendDiscussion: canExtendDiscussion ?? this.canExtendDiscussion,
       roundResolved: clearRoundResolved ? null : (roundResolved ?? this.roundResolved),
       liarGuessTimeLimitSec: clearLiarGuessTimeLimitSec
           ? null
@@ -310,10 +321,17 @@ class RoomNotifier extends Notifier<RoomViewState> {
     });
     _socket.onDiscussionStarted.listen((timeLimitSec) {
       // 설명 페이즈 종료 — "현재 턴" 배너/입력창을 내린다.
+      // (같은 이벤트가 ±10초 조절 때도 재사용되므로 phase는 매번 다시 세팅해도 무해하다.)
       state = state.copyWith(
         phase: GamePhase.discussion,
         clearCurrentTurnPlayerId: true,
         phaseDeadline: _deadlineFrom(timeLimitSec),
+      );
+    });
+    _socket.onDiscussionAdjustState.listen((adjust) {
+      state = state.copyWith(
+        canShortenDiscussion: adjust.canShorten,
+        canExtendDiscussion: adjust.canExtend,
       );
     });
     _socket.onVoteStarted.listen((timeLimitSec) {
@@ -360,6 +378,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
       title: snapshot.title,
       emoji: snapshot.emoji,
       visibility: snapshot.visibility,
+      maxPlayers: snapshot.maxPlayers,
       players: snapshot.players,
       phase: GamePhase.waiting,
       draftCategory: snapshot.draftConfig.category,
@@ -384,6 +403,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
         title: snapshot.title,
         emoji: snapshot.emoji,
         visibility: snapshot.visibility,
+        maxPlayers: snapshot.maxPlayers,
         players: snapshot.players,
         participants: const [],
         chatLog: snapshot.chatLog,
@@ -434,6 +454,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
       title: snapshot.title,
       emoji: snapshot.emoji,
       visibility: snapshot.visibility,
+      maxPlayers: snapshot.maxPlayers,
       players: snapshot.players,
       participants: game.participants,
       chatLog: snapshot.chatLog,
@@ -516,7 +537,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
 
   void submitDescription(String text) => _socket.submitDescription(text);
 
-  void skipDiscussion() => _socket.skipDiscussion();
+  void adjustDiscussionTime(int deltaSec) => _socket.adjustDiscussionTime(deltaSec);
 
   void castVote(String votedPlayerId) => _socket.castVote(votedPlayerId);
 
