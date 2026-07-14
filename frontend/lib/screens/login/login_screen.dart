@@ -223,11 +223,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             )
           : null,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: ResponsiveCenter(
-            maxWidth: 400,
-            child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
-          ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: ResponsiveCenter(
+                    maxWidth: 400,
+                    child: _showAuthOptions ? _buildAuthOptions(context) : _buildInitial(context),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -302,7 +311,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('LOGIN', style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
+              Text('LOGIN', style: PixelFont.title(fontSize: 22, color: AppColors.foreground)),
               const SizedBox(height: 6),
               Text(
                 '계속하려면 로그인하세요',

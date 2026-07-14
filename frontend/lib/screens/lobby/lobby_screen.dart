@@ -541,7 +541,7 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text('🤖 L-AI-R GAME', style: PixelFont.title(fontSize: 11, color: AppColors.foreground)),
+            child: Text('🤖 L-AI-R GAME', style: PixelFont.title(fontSize: 15, color: AppColors.foreground)),
           ),
           _IconBox(
             onTap: onFriends,
