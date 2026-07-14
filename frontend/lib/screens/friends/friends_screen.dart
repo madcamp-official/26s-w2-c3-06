@@ -30,7 +30,12 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    // 최초 로드는 initState(=build 도중) 단계라 ref.invalidate를 바로 호출하면 안 된다
+    // ("setState() or markNeedsBuild() called during build") — 목록만 채우고, 배지 갱신은
+    // 다음 프레임으로 미룬다.
+    _friendsFuture = BackendApi.instance.getFriends();
+    _requestsFuture = BackendApi.instance.getPendingFriendRequests();
+    WidgetsBinding.instance.addPostFrameCallback((_) => ref.invalidate(pendingFriendRequestCountProvider));
   }
 
   @override
