@@ -22,6 +22,27 @@ export async function upsertUser(opts: {
   });
 }
 
+// requireAuth의 "로컬 DB에 User 행이 아직 없는 신규 유저 프로비저닝" 전용. Firebase ID 토큰의
+// name 클레임은 updateDisplayName 직후 즉시 갱신되지 않아(다음 토큰 갱신 전까지 캐시됨), 이미
+// 존재하는 유저에게 upsertUser처럼 nickname을 매번 덮어쓰면 방금 바꾼 닉네임이 오래된 토큰의
+// name 클레임으로 되돌아가버린다. 존재하지 않을 때만 생성하고, 이미 있으면 손대지 않는다
+// (실제 닉네임 변경은 PUT /api/users/me의 upsertUser가 전담).
+export async function ensureUserExists(opts: {
+  uid: string;
+  nickname: string;
+  isAnonymous: boolean;
+}) {
+  return prisma.user.upsert({
+    where: { uid: opts.uid },
+    update: { lastActive: new Date() },
+    create: {
+      uid: opts.uid,
+      nickname: opts.nickname,
+      isAnonymous: opts.isAnonymous,
+    },
+  });
+}
+
 export interface UserProfile {
   nickname: string;
   avatarUrl: string | null;

@@ -13,8 +13,17 @@ import { friendsRouter } from './http/friendsRoutes';
 import { startGuestCleanupCron } from './cron/guestCleanup';
 
 const app = express();
-// TODO: 배포 시 프론트와 단일 origin이면 제한. 개발 중에는 전체 허용(Socket.IO cors 설정과 동일 기조).
-app.use(cors());
+
+// 배포 도메인만 허용(Express CORS·Socket.IO CORS 공통). 네이티브 앱(Android/iOS)·서버 간
+// 호출은 브라우저가 아니라 Origin 헤더 자체가 없으므로 항상 허용해도 안전하다.
+const PROD_ORIGINS = ['https://l-ai-r-game.madcamp-kaist.org', 'https://l-ai-r-game.up.railway.app'];
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (PROD_ORIGINS.includes(origin)) return true;
+  return /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+}
+
+app.use(cors({ origin: (origin, callback) => callback(null, isAllowedOrigin(origin)) }));
 app.use(express.json());
 
 // 헬스체크 (배포 상태 확인용)
@@ -54,8 +63,7 @@ if (fs.existsSync(path.join(webDir, 'index.html'))) {
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  // TODO: 배포 시 프론트와 단일 origin이면 제한. 개발 중에는 전체 허용.
-  cors: { origin: '*' },
+  cors: { origin: (origin, callback) => callback(null, isAllowedOrigin(origin)) },
 });
 
 io.use(socketAuthMiddleware);
