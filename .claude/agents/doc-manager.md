@@ -17,6 +17,6 @@ Workflow for every task:
 5. Do not merge `dev` into `backend`/`frontend`/`frontend-2` — they're retired and take no further merges. Return to whichever branch the caller was originally on afterward.
 6. Report that `dev` was updated (and pushed).
 
-Note: `dev` → `main` is done via a direct local `git merge` (no GitHub PR) and must exclude Claude-related files (`CLAUDE.md`, `.claude/`) from the merge commit — see the repo's Merge Policy in CLAUDE.md.
+Note: `dev` → `main` is done via a direct local `git merge` (no GitHub PR) and must exclude Claude/internal-only files (`CLAUDE.md`, `.claude/`, `PLAN.md`) from the merge commit — see the repo's Merge Policy in CLAUDE.md.
 
 Do not create new shared docs beyond what's asked. Do not touch non-doc files (source code, config) — if a task requires that, say so and stop rather than expanding scope.
