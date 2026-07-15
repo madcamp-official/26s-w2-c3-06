@@ -645,9 +645,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final notifier = ref.read(roomProvider.notifier);
     if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
       notifier.submitDescription(text);
-    } else {
-      notifier.sendChat(text);
+      _chatController.clear();
+      // 설명을 제출하면 곧바로 다음 사람 turn:started가 와서 입력창이 차단(readOnly)된다.
+      // 이때 포커스를 다시 잡아두면 "포커스된 채 readOnly 토글"(위 ref.listen 참고)로
+      // 이어지므로, 차단될 것이 확실한 이 경로에서는 포커스를 미리 풀어둔다.
+      _chatFocusNode.unfocus();
+      return;
     }
+    notifier.sendChat(text);
     _chatController.clear();
     // 엔터로 전송한 뒤에도 계속 이어서 칠 수 있도록 입력창 포커스를 다시 잡아준다
     // (웹에서는 onSubmitted 처리 중 포커스가 풀리는 경우가 있어 명시적으로 복원).
@@ -664,7 +669,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   void _refocusChat() {
     _chatFocusNode.unfocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _chatFocusNode.requestFocus();
+      if (!mounted) return;
+      // 전송 처리 사이에 남의 턴이 시작돼 입력창이 차단됐다면 다시 포커스를 잡지 않는다
+      // — 차단(readOnly) 상태의 입력창에 포커스를 남겨두는 것 자체가 위험 경로다.
+      final s = ref.read(roomProvider);
+      final blocked = s.phase == GamePhase.describing &&
+          s.currentTurnPlayerId != null &&
+          !s.isMyTurn(_myUid);
+      if (!blocked) _chatFocusNode.requestFocus();
     });
   }
 
@@ -910,6 +922,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         _showTurnToast('${s.nicknameOf(next)}님 차례예요', isMine: false);
       }
     });
+    // 채팅 입력창이 차단 상태(readOnly — _inputBar의 canChat 참고)로 바뀌기 "직전"에
+    // 포커스를 먼저 풀어준다. 웹에서 포커스가 살아있는 입력창의 readOnly가 서버 이벤트
+    // (남의 턴 시작)로 토글되면 브라우저 input 연결이 영구히 끊겨, 이후 차단이 풀린 뒤
+    // 입력창을 탭해도(포커스 사이클은 정상으로 보이지만 DOM input이 재생성되지 않아)
+    // 새로고침 전까지 타이핑이 안 먹는다 — 헤드리스 크롬 2게임 연속 자동 플레이로 재현.
+    // e66c31d에서 enabled→readOnly로 바꿔 "강제 unfocus" 경로는 없앴지만, 포커스 유지
+    // 상태에서의 readOnly 토글 자체가 같은 파괴를 일으키는 게 남은 진짜 원인이었다.
+    // 리빌드 전에 미리 unfocus해 두면(팝업 열기 전의 _showManagedDialog와 같은 패턴)
+    // 연결이 깨끗하게 닫히고, 차단 해제 후 탭하면 새 연결로 정상 복구된다.
+    ref.listen<bool>(
+      roomProvider.select((v) =>
+          v.phase == GamePhase.describing &&
+          v.currentTurnPlayerId != null &&
+          !v.isMyTurn(_myUid)),
+      (prev, next) {
+        if (next && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
+      },
+    );
 
     if (s.chatLog.length != _lastChatLen) {
       _lastChatLen = s.chatLog.length;
