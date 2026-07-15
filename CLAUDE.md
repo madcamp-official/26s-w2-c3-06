@@ -24,6 +24,10 @@
 
 - 백엔드·프론트엔드 모두 `dev` 브랜치에서 함께 작업한다. `milleion`(백엔드 담당)·`ireyhye`(프론트엔드 담당) 모두 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
 
+# Working Branch
+
+기능/버그 수정 작업은 `dev`가 아니라 **`dev-2`**에서 진행한다. `dev-2`는 `dev`에서 분기한 작업용 브랜치이며, `CLAUDE.md`/`README.md`/`PLAN.md`/`.claude/agents/` 등 공유 문서만 예외적으로 `dev`에 직접 커밋한다(Document Management 항목 참고). `dev-2`에서 커밋하기 전에는 **`git branch --show-current`로 현재 브랜치가 `dev-2`인지 반드시 먼저 확인**한다 — 같은 워킹 디렉토리를 다른 세션이 동시에 쓰면서 브랜치가 바뀌어 있을 수 있다. `dev-2`는 `origin/dev`를 upstream으로 추적하지 않도록 유지해 실수로 `dev`에 push되는 일을 막는다.
+
 # Branch Sync
 
-작업 중 로컬이 `origin/dev`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin dev`로 로컬을 최신화한다. `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.
+작업 중 로컬이 `origin/dev`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `dev`를 최신화하고 `dev-2`에 반영(rebase 또는 merge)한다. `dev-2`에서 커밋하기 전에는 항상 이 확인과 위 Working Branch 항목의 브랜치 확인을 먼저 수행한다.
