@@ -198,8 +198,9 @@ interface Player {
 }
 // 방장 여부는 Player에 두지 않고 RoomState.hostId == player.id로 판별한다(단일 source of truth).
 
-// 설명 한 바퀴. 설명 순서는 게임 단위로 고정이고 투표는 게임당 한 번뿐이므로,
-// 순서·투표·판정 결과는 Round가 아니라 GameState에 둔다. Round는 그 바퀴의 설명(turns)만 담는다.
+// 설명 한 바퀴. 설명 순서는 게임 단위로 고정이므로 순서는 Round가 아니라 GameState에
+// 둔다. Round는 그 바퀴의 설명(turns)만 담는다. 투표가 동점으로 갈리면 동점자만 다시
+// 한 바퀴 설명하는 Round가 추가되고(tieCandidates 참고) 그만큼 다시 투표한다.
 interface Round {
   roundNumber: number;
   turns: { playerId: string; text: string }[];
@@ -216,9 +217,11 @@ interface GameState {
   phase: 'setup'|'describing'|'discussion'|'voting'|'resolution'|'liarGuess'|'ended';
   playerOrder: string[];         // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
   usedWordsThisGame: string[];
-  rounds: Round[];               // 설명 라운드들. MVP: 길이 1. 추후 스트레치: 다중 설명 라운드 지원 시 증가
+  rounds: Round[];               // 설명 라운드들. 최초 1개 + 투표 동점마다 재설명 라운드가 하나씩 추가(tieCandidates)
 
-  // 투표·판정은 게임당 한 번(모든 설명 라운드 종료 후). 라운드가 아니라 게임에 귀속된다.
+  // 투표·판정은 라운드가 아니라 게임에 귀속된다. 동점이면 동점자만 재설명 후 재투표를
+  // 반복하므로(startTieBreakDescribing) 한 게임 안에서도 여러 번 일어날 수 있다.
+  tieCandidates: string[] | null; // 동점 재투표 중일 때 그 대상(설명 순서 유지). 동점 아니면 null
   votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
   votedOutId?: string;
   wasLiar?: boolean;
@@ -338,28 +341,29 @@ enum FriendshipStatus {
 - `chat:send` `{ text }` — 언제든 자유 채팅
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
 - `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
-- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
+- `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. 참가자 수(사람+봇)가 방의 `maxPlayers`를 넘으면(즉 `players.length + aiBotCount > maxPlayers`) 마찬가지로 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
 - `turn:submitDescription` `{ text }` — 현재 턴인 사람만 유효
-- `discussion:skip` `{}` — 호스트 전용. 토론 페이즈에서 제한시간을 다 기다리지 않고 곧바로 투표로 넘어간다(남은 토론 타이머 취소 후 `vote:started`). 토론 페이즈가 아니거나 호스트가 아니면 무시
-- `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계
+- `discussion:adjustTime` `{ deltaSec: number }` — 토론 페이즈 한정, 누구나(호스트 전용 아님) 보낼 수 있다. 남은 토론 시간을 ±10초 조절하며, 참가자별로 단축·연장 각각 한 번씩만 허용(서버가 uid별 사용 여부를 기억). 조절된 새 종료 시각을 반영해 `discussion:started`를 방 전체에 재브로드캐스트
+- `vote:cast` `{ votedPlayerId }` — 익명, 서버만 집계. 선택만 하는 단계이며 아직 확정은 아님
+- `vote:confirm` `{}` — 자신의 투표를 명시적으로 확정한다(아직 후보를 안 골랐으면 무시). 확정 후에는 선택을 바꿀 수 없다. 전원이 확정하면 마음이 바뀔 짧은 유예(3초) 뒤 곧바로 집계, 아니면 원래 제한시간 만료 시 집계
 - `liar:guessWord` `{ guess }` — 지목된 사람이 실제 라이어일 때만 유효
 - `friend:invite` `{ toUid }` — 현재 방으로 친구를 초대. 초대자는 방에 있어야 하고, 대상이 온라인이면 그 소켓(들)에 `room:invited`가 전송된다(방에 없거나 대상이 오프라인이면 `room:error`)
 
 **Server → Client**:
-- `room:created`/`room:joined` `{ roomCode, hostId, title, emoji, visibility, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
+- `room:created`/`room:joined` `{ roomCode, hostId, title, emoji, visibility, maxPlayers, players, customCategories, draftConfig }` — 방 생성/입장 직후 해당 소켓에만 전송되는 방 스냅샷 (`players`는 `Player[]`, `customCategories`는 이 방에서 그동안 사용된 카테고리 목록, `draftConfig`는 현재 대기방 카테고리/봇 수 미리보기)
 - `game:draftConfigUpdated` `{ category, aiBotCount }` — `game:draftConfig` 수신 시 방 전체 브로드캐스트, 게임 시작(`game:configure`) 시 `{ category: null, aiBotCount: 0 }`로 리셋
 - `room:customCategoriesUpdated` `{ customCategories }` (`string[]`) — 새 게임 시작 시 이번 카테고리(방장 입력·AI 랜덤 포함)가 방의 재사용 목록에 새로 추가됐을 때만 방 전체에 브로드캐스트. 클라이언트는 다음 게임 카테고리 칩 목록을 이 값으로 갱신
 - `room:publicList` `{ rooms: [{roomCode, title, emoji, hostNickname, category, playerCount, maxPlayers, inProgress}] }` — 로비 카드 표시용. `category`는 방장이 대기방에서 고르고 있는 값(null이면 AI 랜덤), `inProgress`는 해당 방에 진행 중인 게임이 있는지("게임 중" 표시용)
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
-- `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 재전송
+- `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, maxPlayers, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 그 페이즈에 맞는 타이머 이벤트(`turn:started`/`vote:started`/`discussion:started`/`liar:guessPrompt`)를 원래 종료 예정 시각 기준 실제 남은 시간으로 재계산해 재전송하고, `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 보낸다
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
-- `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음
-- `vote:started` `{ timeLimitSec }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만
-- `round:resolved` `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행. 지목된 사람·라이어 여부·실제/라이어 제시어·역전승 결과는 채팅에 작은 텍스트로 흘리지 않고, 클라이언트가 이 이벤트와 `round:finalResult`를 합쳐 큰 알림창으로 한 번에 보여준다(chat:message로는 더 이상 별도 브로드캐스트하지 않음)
+- `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음. `discussion:adjustTime`으로 남은 시간이 조절됐을 때도(그리고 재접속 시 남은 시간을 다시 계산해 보낼 때도) 새 `timeLimitSec`으로 이 이벤트를 재브로드캐스트한다
+- `vote:started` `{ timeLimitSec, candidateIds }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만. `candidateIds`는 보통 전체 참가자지만, 동점 재투표 중이면 그 동점자들로 좁혀진다
+- `round:resolved` `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — 투표가 동점(2명 이상 최다 득표)이면 이 이벤트 대신 동점자만 대상으로 한 재설명(`turn:started`)이 다시 시작되고, 최다 득표가 정확히 1명이 될 때까지 설명→투표를 반복한다(그 사이 새 채팅으로 동점 안내). 단독 득표자가 정해진 뒤에야 `votedOutId`가 그 사람으로 채워져 이 이벤트가 나간다. `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행. 지목된 사람·라이어 여부·실제/라이어 제시어·역전승 결과는 채팅에 작은 텍스트로 흘리지 않고, 클라이언트가 이 이벤트와 `round:finalResult`를 합쳐 큰 알림창으로 한 번에 보여준다(chat:message로는 더 이상 별도 브로드캐스트하지 않음)
 - `liar:guessPrompt` `{ timeLimitSec }` — `wasLiar`가 `true`일 때만 발생, 지목된 사람의 소켓에만
 - `round:finalResult` `{ liarGuessCorrect: boolean | null, winner: 'liar'|'citizens', liarGuess: string | null }` — 오지목으로 역전승 단계 자체가 없었으면 `liarGuessCorrect`/`liarGuess` 모두 `null`. 정답 판정은 서버가 우선 편집 거리 기반 유사 일치를 결정적으로 체크하고(오타 관대하게 허용), 통과 못 하면 LLM(`judgeLiarGuess`)에게 의미 판단을 맡긴다(번역·동의어 등은 LLM이 판단)
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
@@ -370,7 +374,9 @@ enum FriendshipStatus {
 
 **타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 두지 않는다.
 
-**토론 조기 종료**: 토론 페이즈 한정으로 호스트는 `discussion:skip`을 보내 제한시간을 다 기다리지 않고 곧바로 투표로 넘어갈 수 있다(남은 토론 타이머를 취소하고 즉시 `startVoting`). 서버가 페이즈·호스트 여부를 검증하므로 토론 페이즈가 아니거나 호스트가 아닌 요청은 무시된다.
+**투표 동점 재투표**: 투표 집계 결과 최다 득표가 2명 이상으로 갈리면(0표 전원 기권이거나 단독 최다 득표면 해당 없음) 토론 단계는 다시 거치지 않고, 그 동점자들만 기존 제시어에 대해 한 번씩 더 설명(`Round` 추가)한 뒤 그 동점자들만 대상으로 다시 투표한다. 최다 득표가 정확히 1명이 될 때까지 반복하며 횟수 제한은 없다.
+
+**토론 시간 조절**: 토론 페이즈 한정으로 누구나(호스트 전용 아님) `discussion:adjustTime { deltaSec }`으로 남은 시간을 ±10초 조절할 수 있다. 참가자별로 단축·연장 각각 한 번씩만 허용되며, 서버가 uid별 사용 여부를 강제한다. 조절 즉시 `discussion:started`를 새 `timeLimitSec`으로 재브로드캐스트.
 
 ### REST API (전적·친구)
 
@@ -431,7 +437,7 @@ interface LiarGameLLM {
 
 ## 구현 현황
 
-백엔드·프론트 모두 `dev` 브랜치에서 함께 작업한다. 아래는 현재 `dev` 기준 구현 현황이다.
+백엔드·프론트 모두 `dev`에서 분기한 작업 브랜치(`dev-2` 등, CLAUDE.md "Working Branch" 참고)에서 작업하고 이후 `dev`로 합쳐진다. 아래는 현재 구현 현황이다.
 
 ### 백엔드
 
@@ -456,7 +462,8 @@ interface LiarGameLLM {
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
 - **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
-- **`discussion:skip`**: room_screen.dart 토론 페이즈의 토론 카드에 방장 전용 "토론 건너뛰고 투표 시작" 버튼을 두고, 누르면 `socket_service.dart`의 `skipDiscussion()`으로 emit한다.
+- **`discussion:adjustTime`**: room_screen.dart 토론 페이즈 타이머 양옆에 -10/+10초 버튼을 두고(누구나 조작 가능, 참가자별 각 1회 제한은 서버가 강제), 누르면 `socket_service.dart`가 `discussion:adjustTime { deltaSec }`으로 emit한다.
+- **참가자 연결 상태 표시**: `room:playerListUpdated`의 `Player.connected`가 `false`면(재접속 유예 시간 중) 참가자 카드를 흐리게 하고 "재접속중" 배지를 띄워, 다른 참가자 화면에서도 실시간으로 알 수 있게 한다.
 - **데스크탑 레이아웃**: lobby_screen과 동일하게 `context.isDesktop`일 때 좌측 `AppNavRail`로 나가기/초대(방장·회원만) 버튼이 이동하고, 헤더에서는 숨겨진다.
 
 위 정리는 정적 코드 검토 기준이며, 런타임 동작(빌드/실행)은 별도로 확인해야 한다.
