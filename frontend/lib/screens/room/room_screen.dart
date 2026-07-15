@@ -441,6 +441,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       barrierDismissible: false,
       maxWidth: 380,
       builder: (dialogContext) {
+        void submit() {
+          final g = guessController.text.trim();
+          if (g.isEmpty) return;
+          setState(() => _submittingGuess = true);
+          ref.read(roomProvider.notifier).guessWord(g);
+          Navigator.of(dialogContext).pop();
+        }
+
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -458,18 +466,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
             ),
             const SizedBox(height: 16),
-            AppTextField(controller: guessController, hintText: '진짜 제시어'),
+            AppTextField(controller: guessController, hintText: '진짜 제시어', onSubmitted: (_) => submit()),
             const SizedBox(height: 12),
-            AppButton(
-              label: '제출',
-              onPressed: () {
-                final g = guessController.text.trim();
-                if (g.isEmpty) return;
-                setState(() => _submittingGuess = true);
-                ref.read(roomProvider.notifier).guessWord(g);
-                Navigator.of(dialogContext).pop();
-              },
-            ),
+            AppButton(label: '제출', onPressed: submit),
           ],
         );
       },
@@ -705,6 +704,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                         setSheetState(() {});
                         _pushDraft();
                       },
+                      onSubmitted: (_) => Navigator.of(sheetContext).pop(),
                     ),
                     const SizedBox(height: 12),
                     AppButton(label: '확인', onPressed: () => Navigator.of(sheetContext).pop()),
@@ -1518,7 +1518,7 @@ class _ResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1526,6 +1526,7 @@ class _ResultRow extends StatelessWidget {
             width: 92,
             child: Text(label, style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
           ),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               value,
