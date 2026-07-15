@@ -61,6 +61,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   int _lastChatLen = 0;
   bool _hostDraftSeeded = false;
 
+  // 메시지 입력창 위 페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 채팅을 더 넓게 보고
+  // 싶을 때 직접 접었다 펼 수 있게 하는 토글 상태(_contextPanelToggle 참고).
+  bool _contextPanelCollapsed = false;
+
   // AI 응답을 기다리는 동안(게임 시작·라이어 역전승 판정) 버튼이 눌렸고 처리 중임을
   // 명확히 보여주기 위한 로딩 플래그. 서버가 다음 페이즈로 넘기거나 room:error를
   // 보내면 리셋한다(phase/roomError 리스너 참고).
@@ -812,12 +816,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     final hideForKeyboard = !isDesktop && keyboardOpen;
+    // 키보드와 무관하게, 채팅을 더 넓게 보고 싶을 때 직접 접었다 펼 수 있는 토글도 둔다.
+    final showContextPanel = !hideForKeyboard && !_contextPanelCollapsed;
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
         if (!hideForKeyboard) _playerProfileRow(s, isHost),
         Expanded(child: _chatFeed(s)),
-        if (!hideForKeyboard) _contextPanel(s, isHost),
+        if (!hideForKeyboard) _contextPanelToggle(showContextPanel),
+        if (showContextPanel) _contextPanel(s, isHost),
         _inputBar(s),
       ],
     );
@@ -1082,6 +1089,23 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final pool = s.participants.isNotEmpty ? s.participants : s.players;
     final idx = pool.indexWhere((p) => p.id == id);
     return idx == -1 ? 0 : idx;
+  }
+
+  /// 채팅 목록을 더 넓게 보고 싶을 때 카테고리/타이머/투표 등 컨텍스트 박스를 직접
+  /// 접었다 펼 수 있는 얇은 토글 바. [expanded]는 박스가 지금 펼쳐져 보이는 상태인지.
+  Widget _contextPanelToggle(bool expanded) {
+    return HoverTap(
+      onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        alignment: Alignment.center,
+        child: Text(
+          expanded ? '▲' : '▼',
+          style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+        ),
+      ),
+    );
   }
 
   // ── 페이즈별 하단 컨텍스트 패널 ──
