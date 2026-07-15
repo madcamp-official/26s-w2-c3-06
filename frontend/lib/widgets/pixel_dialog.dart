@@ -21,7 +21,12 @@ Future<T?> showPixelDialog<T>({
         insetPadding: const EdgeInsets.all(24),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth),
-          child: PixelBox(padding: padding, child: builder(dialogContext)),
+          // 후보 목록이 많거나(투표) 화면이 작은 실기기에서 다이얼로그 내용이 화면 높이를
+          // 넘으면 잘려나가지 않고 스크롤되게 한다 — 예전엔 높이 제약이 없어 내용이 넘치면
+          // 그대로 "bottom overflowed" 에러가 났다.
+          child: SingleChildScrollView(
+            child: PixelBox(padding: padding, child: builder(dialogContext)),
+          ),
         ),
       );
     },

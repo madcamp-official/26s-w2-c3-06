@@ -1094,15 +1094,19 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// 채팅 목록을 더 넓게 보고 싶을 때 카테고리/타이머/투표 등 컨텍스트 박스를 직접
   /// 접었다 펼 수 있는 얇은 토글 바. [expanded]는 박스가 지금 펼쳐져 보이는 상태인지.
   Widget _contextPanelToggle(bool expanded) {
-    return HoverTap(
-      onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        alignment: Alignment.center,
-        child: Text(
-          expanded ? '▲' : '▼',
-          style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+    // 패널 상하 여백(_panelBox의 margin)과 리듬이 맞도록 좌우 10 + 상하 4로 통일 —
+    // 접힌 상태에서도(패널이 안 보여도) 입력창과의 간격이 펼친 상태와 일정하게 유지된다.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+      child: HoverTap(
+        onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
+        child: SizedBox(
+          width: double.infinity,
+          child: Text(
+            expanded ? '▲' : '▼',
+            textAlign: TextAlign.center,
+            style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+          ),
         ),
       ),
     );
