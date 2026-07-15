@@ -1189,13 +1189,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           // 방장 화면의 "시작 ▶" 버튼과 같은 자리(가로 한 줄의 맨 끝)에 놓인다.
           if (isHost) ...[
             const SizedBox(height: 10),
-            if (!allReady)
+            // 안내 문구가 없어지는 조건(전원 준비 완료 + 인원 충분)일 때 빈 여백만 남지 않도록,
+            // 문구와 그 아래 간격을 하나의 묶음으로 묶어 문구가 없으면 간격도 같이 사라지게 한다.
+            if (!allReady) ...[
               Text('모든 참가자가 준비 완료해야 시작할 수 있어요.',
-                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground))
-            else if (!enough)
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+              const SizedBox(height: 6),
+            ] else if (!enough) ...[
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-            const SizedBox(height: 6),
+              const SizedBox(height: 6),
+            ],
             // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
             // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
             // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
