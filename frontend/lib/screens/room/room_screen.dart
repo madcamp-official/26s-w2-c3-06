@@ -119,24 +119,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   String? get _myUid => AuthService.instance.currentUser?.uid;
 
-  // 채팅 입력창에 포커스가 가서 키보드가 올라오면(특히 화면이 작은 실기기), 헤더·컨텍스트
-  // 패널·입력창 등 고정 높이 요소들의 합이 남은 화면 높이보다 커져 "bottom overflowed"가
-  // 나는 문제가 있었다. 타이핑 중엔 덜 중요한 참가자 아바타 줄을 접어 공간을 확보한다.
-  bool _chatHasFocus = false;
-
-  void _handleChatFocusChange() {
-    if (mounted) setState(() => _chatHasFocus = _chatFocusNode.hasFocus);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _chatFocusNode.addListener(_handleChatFocusChange);
-  }
-
   @override
   void dispose() {
-    _chatFocusNode.removeListener(_handleChatFocusChange);
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -819,11 +803,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final isDesktop = context.isDesktop;
     // 데스크탑에서는 나가기/초대 버튼이 헤더가 아니라 좌측 내비게이션 바로 이동한다
     // (frontend 브랜치의 데스크탑 레이아웃 참고, lobby_screen과 동일한 패턴).
-    // 모바일에서 채팅 입력에 포커스가 가 키보드가 뜨면(_chatHasFocus), 화면에서 세로 공간을
-    // 크게 잡아먹는 참가자 아바타 줄·페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 접어
-    // 채팅 목록이 키보드에 가려지지 않고 그대로 보이게 한다. 고정 요소 합이 화면 높이를
+    // 모바일에서 키보드가 실제로 열려있는 동안(MediaQuery.viewInsets.bottom > 0), 화면에서
+    // 세로 공간을 크게 잡아먹는 참가자 아바타 줄·페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를
+    // 접어 채팅 목록이 키보드에 가려지지 않고 그대로 보이게 한다. 고정 요소 합이 화면 높이를
     // 넘겨 "bottom overflowed" 나던 문제도 이걸로 해결된다.
-    final hideForKeyboard = !isDesktop && _chatHasFocus;
+    // TextField 포커스 여부(_chatFocusNode.hasFocus) 대신 실제 키보드 인셋을 기준으로 삼는데,
+    // 안드로이드에서 뒤로가기/제스처로 키보드만 내리면 포커스는 그대로 남아있어(hasFocus는
+    // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final hideForKeyboard = !isDesktop && keyboardOpen;
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
