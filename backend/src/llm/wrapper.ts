@@ -115,15 +115,10 @@ const realLLM: LiarGameLLM = {
       resolvedCategory = pickRandom(catParsed.categories);
     }
 
-    // 같은 이유로 제시어 쌍도 후보 3개를 받아 서버가 무작위로 하나를 고른다.
-    const raw = await completeText(wordPairPrompt(resolvedCategory, usedWords), 500);
-    const parsed = parseJsonBlock<{ pairs: { realWord: string; liarWord: string }[] }>(
-      raw,
-      'wordPairCandidates',
-    );
-    if (!parsed.pairs?.length) throw new Error('wordPairCandidates: 빈 응답');
-    const chosen = pickRandom(parsed.pairs);
-    return { category: resolvedCategory, realWord: chosen.realWord, liarWord: chosen.liarWord };
+    const raw = await completeText(wordPairPrompt(resolvedCategory, usedWords), 200);
+    const parsed = parseJsonBlock<{ citizenWord: string; liarWord: string }>(raw, 'wordPair');
+    if (!parsed.citizenWord || !parsed.liarWord) throw new Error('wordPair: 빈 응답');
+    return { category: resolvedCategory, realWord: parsed.citizenWord, liarWord: parsed.liarWord };
   },
 
   async generateBotTurn(ctx) {
