@@ -115,7 +115,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     late final OverlayEntry entry;
     entry = OverlayEntry(
       builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + 90,
+        top: MediaQuery.of(context).padding.top + 150,
         left: 0,
         right: 0,
         child: Center(
@@ -137,7 +137,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
     _turnToastEntry = entry;
     overlay.insert(entry);
-    Future.delayed(const Duration(seconds: 2), () {
+    Future.delayed(const Duration(seconds: 4), () {
       if (_turnToastEntry == entry) {
         entry.remove();
         _turnToastEntry = null;
@@ -1063,6 +1063,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           if (!context.isDesktop && s.phaseDeadline != null) ...[
             const SizedBox(width: 8),
             _headerTimer(s),
+            if (showActions) const SizedBox(width: 14),
           ],
           if (showActions) ...[
             if (isHost && _canInviteFriends) ...[
@@ -1388,9 +1389,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
               const SizedBox(height: 6),
             ],
-            // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
-            // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
-            // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
+            // 방장 화면도 비방장 화면과 같이 카테고리·봇 수·시작 버튼을 한 줄에 순서대로 둔다.
             Row(
               children: [
                 Expanded(
@@ -1401,7 +1400,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     onPressed: _openCategoryPicker,
                   ),
                 ),
-                const SizedBox(width: 4),
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1423,14 +1421,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                         },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: AppButton(
+                    label: '시작 ▶',
+                    dense: true,
+                    loading: _startingGame,
+                    onPressed: canStart && !_startingGame ? _startGame : null,
+                  ),
+                ),
               ],
-            ),
-            const SizedBox(height: 6),
-            AppButton(
-              label: '시작 ▶',
-              dense: true,
-              loading: _startingGame,
-              onPressed: canStart && !_startingGame ? _startGame : null,
             ),
             // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
             // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
