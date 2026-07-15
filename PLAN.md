@@ -31,7 +31,7 @@
   - 백엔드는 소켓 handshake 시 `firebase-admin`으로 ID 토큰만 검증.
   - Firebase Authentication은 인증만 담당하고, 닉네임/프로필/승패 기록 등 유저 데이터는 백엔드가 관리하는 로컬 DB(Postgres 등)에 저장. 익명 계정 link로 UID가 유지되므로, 게스트에서 가입 후 추가 마이그레이션 없이 데이터가 자동으로 이어짐. 방/게임/라운드 같은 휘발성 상태는 Node 서버 **인메모리**에 둔다.
 - **LLM: Anthropic Claude API / OpenAI API 중 택1 (환경변수로 전환)**
-  - 다섯 함수(제시어 쌍 생성, 봇 턴 생성, 매 턴 교란 코멘트, 낯선 단어 설명, 역전승 정답 유사판정) 모두 빈도가 높거나 지연에 민감 → Anthropic: **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), OpenAI: **gpt-5.4-mini** (제시어 생성·봇 턴·교란 코멘트·판정용) / **gpt-5.4-nano** (단어 설명 전용, 저렴).
+  - 다섯 함수(제시어 쌍 생성, 봇 턴 생성, 토론 사칭 메시지, 낯선 단어 설명, 역전승 정답 유사판정) 모두 빈도가 높거나 지연에 민감 → Anthropic: **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), OpenAI: **gpt-5.4-mini** (제시어 생성·봇 턴·사칭 메시지·판정용) / **gpt-5.4-nano** (단어 설명 전용, 저렴).
   - LLM 호출부는 provider(회사)와 모델을 나중에 쉽게 바꿀 수 있도록 얇은 인터페이스로만 감싸고, 과한 멀티프로바이더 프레임워크는 만들지 않음 — 실제로 `backend/src/llm/anthropicClient.ts`/`openaiClient.ts` 두 얇은 클라이언트를 두고, `wrapper.ts`가 `LLM_PROVIDER` 환경변수(미지정 시 사용 가능한 키 기준 자동 선택, 둘 다 있으면 OpenAI 우선)로 어느 쪽을 쓸지만 결정한다. 현재 배포 환경은 **OpenAI**로 운영 중. 프롬프트·파싱·거절감지 로직은 provider와 무관하게 완전히 공유.
 
 ## 기능 명세
@@ -48,7 +48,7 @@ AI는 여섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 1. 방장이 지정(또는 AI 랜덤)한 카테고리로 진짜/가짜 제시어 쌍을 생성
 2. 방장이 선택한 수만큼 AI 봇이 플레이어로 참여해 설명 생성 (봇도 자신이 라이어인지 모름 — 사람과 동일 조건)
 3. **설명 페이즈**는 AI 개입 없이, 각 턴마다 배정된 사람이 한 번씩 설명하고 끝난다.
-4. **토론 페이즈**에서 AI가 5초 간격으로 무작위 실제 참가자(사람)인 척 자유 채팅에 끼어들어 교란한다 — 실제 그 참가자의 senderId로 일반 채팅과 동일하게 나가 AI 개입이라는 티가 전혀 나지 않으며, 게임 종료 후에도 공개되지 않는다.
+4. **토론 페이즈**에서 AI가 3~7초 무작위 간격으로 참가자(사람·봇 모두) 한 명인 척 자유 채팅에 끼어들어 교란한다 — 실제 그 참가자의 senderId로 일반 채팅과 동일하게 나가 AI 개입이라는 티가 전혀 나지 않으며, 게임 종료 후에도 공개되지 않는다.
 5. 모든 제시어에 대해 AI가 짧은 텍스트 설명을 미리 만들어 함께 내려준다 (난이도 무관, 이미지 생성은 하지 않음) — 유저는 "AI 설명보기" 버튼으로 원할 때 펼쳐 본다
 6. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
 
@@ -214,6 +214,7 @@ interface GameState {
   liarWord: string;
   liarIds: string[];            // 서버 전용 비밀, 라이어 본인에게도 전송 안 함. 길이 1 고정(라이어 수 선택 기능 없음, 확정)
   participantIds: string[];     // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
+  participants: { id: string; nickname: string; isBot: boolean }[]; // 게임 시작 시점 스냅샷. game:started 페이로드로 그대로 실어 보내 클라이언트가 봇 포함 투표 후보·턴 배너를 그리는 데 쓴다(room:playerListUpdated는 사람만 추적)
   aiBotCount: number;
   phase: 'setup'|'describing'|'discussion'|'voting'|'resolution'|'liarGuess'|'ended';
   playerOrder: string[];         // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
@@ -358,11 +359,12 @@ enum FriendshipStatus {
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
 - `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, maxPlayers, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 그 페이즈에 맞는 타이머 이벤트(`turn:started`/`vote:started`/`discussion:started`/`liar:guessPrompt`)를 원래 종료 예정 시각 기준 실제 남은 시간으로 재계산해 재전송하고, `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 보낸다
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
-- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨. 토론 페이즈 중 서버가 5초 간격으로 실제 참가자(사람) 한 명을 무작위로 골라 그 사람의 진짜 senderId로 흘려보내는 AI 사칭 메시지도 `type: 'chat'`으로 이 경로를 그대로 타므로, 클라이언트는 이를 구분할 방법이 없다(의도된 설계 — 게임 종료 후에도 공개하지 않음)
+- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨. 토론 페이즈 중 서버가 3~7초 무작위 간격으로 참가자(사람·봇 모두) 한 명을 무작위로 골라 그 사람의 진짜 senderId로 흘려보내는 AI 사칭 메시지도 `type: 'chat'`으로 이 경로를 그대로 타므로, 클라이언트는 이를 구분할 방법이 없다(의도된 설계 — 게임 종료 후에도 공개하지 않음)
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
 - `discussion:started` `{ timeLimitSec }` — 설명 페이즈가 끝나고 토론 페이즈로 전환됐음을 명시(하위호환 추가). 이전엔 system 채팅 텍스트로만 암시돼 클라이언트가 "현재 턴" 배너를 내릴 시점을 알 수 없었음. `discussion:adjustTime`으로 남은 시간이 조절됐을 때도(그리고 재접속 시 남은 시간을 다시 계산해 보낼 때도) 새 `timeLimitSec`으로 이 이벤트를 재브로드캐스트한다
+- `discussion:myAdjustState` `{ canShorten: boolean, canExtend: boolean }` — 방 전체가 아니라 해당 소켓에만 개별 전송. 그 참가자가 아직 남은 시간 단축/연장(`discussion:adjustTime`)을 각각 쓸 수 있는지를 알려, 클라이언트가 -10/+10초 버튼을 비활성화할지 결정한다(각 1회 제한은 서버가 최종 강제)
 - `vote:started` `{ timeLimitSec, candidateIds }`, `vote:progress` `{ votesInCount, totalCount }` — 식별정보 없이 진행률만. `candidateIds`는 보통 전체 참가자지만, 동점 재투표 중이면 그 동점자들로 좁혀진다
 - `round:resolved` `{ votedOutId, wasLiar, realWord, liarWord, liarId }` — 투표가 동점(2명 이상 최다 득표)이면 이 이벤트 대신 동점자만 대상으로 한 재설명(`turn:started`)이 다시 시작되고, 최다 득표가 정확히 1명이 될 때까지 설명→투표를 반복한다(그 사이 새 채팅으로 동점 안내). 단독 득표자가 정해진 뒤에야 `votedOutId`가 그 사람으로 채워져 이 이벤트가 나간다. `liarId`는 투표 결과와 무관하게 항상 함께 공개된다(시민이 오지목되면 역전승 단계 없이 바로 끝나 그 외엔 알 방법이 없으므로). `wasLiar`가 `false`(오지목)면 역전승 단계 없이 바로 `round:finalResult { winner: 'liar' }`로 진행. 지목된 사람·라이어 여부·실제/라이어 제시어·역전승 결과는 채팅에 작은 텍스트로 흘리지 않고, 클라이언트가 이 이벤트와 `round:finalResult`를 합쳐 큰 알림창으로 한 번에 보여준다(chat:message로는 더 이상 별도 브로드캐스트하지 않음)
 - `liar:guessPrompt` `{ timeLimitSec }` — `wasLiar`가 `true`일 때만 발생, 지목된 사람의 소켓에만
@@ -370,10 +372,11 @@ enum FriendshipStatus {
 - `game:ended` `{}` — 방은 대기 상태로 복귀, 채팅은 유지, 호스트는 다음 게임 설정 가능
 - `room:closed` — 호스트가 방을 나가면(재접속 유예 시간 만료 포함) 방이 폭파되며 전송. 호스트가 아닌 인원의 퇴장은 방을 유지한 채 `room:playerListUpdated`만 브로드캐스트
 - `room:invited` `{ roomCode, title, emoji, fromUid, fromNickname }` — 친구가 나를 방으로 초대했을 때(`friend:invite`) 온라인인 내 소켓에 전송. 클라이언트는 알림을 띄우고 수락 시 해당 `roomCode`로 입장
+- `llm:mode` `{ mock: boolean }` — 소켓 연결 직후 해당 소켓에 1회 전송. 백엔드에 Anthropic/OpenAI 키가 하나도 없어 LLM이 고정 mock 응답으로 동작 중인지를 알려, 클라이언트가 "AI 미연동(데모)" 배지 등을 표시할 수 있게 한다
 
 서버가 방/게임/라운드 페이즈 전이(`대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)`)를 전적으로 소유하고 타이머를 관리. 투표는 **개인별 선택을 어떤 클라이언트에게도 절대 전송하지 않고 서버 내부 집계로만** 사용 — `round:resolved`에도 누가 누구에게 투표했는지는 포함하지 않는다.
 
-**타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 두지 않는다.
+**타이머 만료 동작**: 설명/투표 시간이 만료되면 해당 행동은 **그냥 못 하는 것**으로 처리한다 — 설명 미제출 턴은 빈 채로 넘어가고, 미투표는 집계에서 빠진 채 다음 페이즈로 진행한다. 봇 자동 대체나 기본값 강제 같은 별도 보정 로직은 서버에 두지 않는다. 다만 **프론트엔드는** 내 설명 차례에서 입력창에 글을 써 뒀는데 엔터를 안 친 채로 시간이 다 되면, 서버 타임아웃(빈 턴 처리)이 발동하기 직전에 그 입력 내용을 자동으로 대신 제출한다("프론트엔드 구현 현황"의 설명 턴 자동 제출 참고) — 서버 규칙은 그대로고, 클라이언트가 마감 전에 정상 `turn:submitDescription`을 한 번 쏘는 것이라 충돌하지 않는다.
 
 **투표 동점 재투표**: 투표 집계 결과 최다 득표가 2명 이상으로 갈리면(0표 전원 기권이거나 단독 최다 득표면 해당 없음) 토론 단계는 다시 거치지 않고, 그 동점자들만 기존 제시어에 대해 한 번씩 더 설명(`Round` 추가)한 뒤 그 동점자들만 대상으로 다시 투표한다. 최다 득표가 정확히 1명이 될 때까지 반복하며 횟수 제한은 없다.
 
@@ -415,7 +418,7 @@ enum FriendshipStatus {
 - 인터페이스 변경: `explainWord`와 `judgeLiarGuess` 모두 **`category` 파라미터 추가** — 동음이의어(예: "너구리"는 "동물" 카테고리면 라쿤독, "라면"이면 인스턴트라면) 해석을 위해 카테고리 맥락이 필수.
 - `generateWordPair`: 카테고리 후보 3개 중 무작위 선택 후, 제시어 쌍 후보 3개(`wordPairCandidatesPrompt`)를 받아 역시 무작위 선택. **이제 모든 후보가 실제 웹 검색으로 한국인 친숙도와 실존 여부를 검증** — 검증 실패 후보는 폐기하고 대체. 프롬프트는 중복/장황성을 제거해 재작성되었으며, 외국어 사용 규칙 강화(예: "Ouija 보드" → "위저보드") 및 유사도 기준 재정의("국제적 유명도" → "한국 평범한 성인의 일상 접촉도").
 - `generateBotTurn`: 음슴체(`~함`, `~임`, `~음` 종결) 강제. 봇이 이전 설명들을 보고 자신의 배정 단어와 맞지 않는다 판단하면(즉 라이어일 가능성 높음), 그 설명들로부터 실제 단어를 추측해 그 추측한 단어를 설명 — 라이어 티가 덜 난다. 단어 자체와 결정적 특징 금지, 메타 발언(추론 과정) 금지, 길이 ~15-20자 단일 절 제한.
-- `generateImpersonationMessage` 프롬프트 핵심: **설명 페이즈에는 더 이상 AI가 개입하지 않는다** — 각 턴은 배정된 참가자가 한 번씩 설명하고 끝난다(이전의 "분탕충봇" 매 턴 코멘트는 폐지). 대신 **토론 페이즈** 동안 서버가 5초마다(`gameEngine.ts`의 `DISCUSSION_IMPERSONATION_INTERVAL_MS`) 실제 참가자(사람, 봇 제외) 한 명을 무작위로 골라 그 사람인 척 자유 채팅 메시지를 생성하고, 그 사람의 진짜 senderId로 `chat:message`(`type: 'chat'`)를 그대로 내보낸다 — 클라이언트·본인 포함 누구도 이를 AI 개입으로 구분할 수 없고, 게임 종료 후에도 공개하지 않는다(끝까지 비공개). 근거 없이 다른 참가자를 의심하거나 몰아가는 발언, 투표에 영향을 줄 만큼 직접적인 지목 발언도 허용된다. 실제 라이어가 누구인지·진짜/가짜 제시어가 무엇인지는 `ImpersonationContext` 자체에 그 필드가 없어 구조적으로 이 프롬프트에 입력될 수 없음 — 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. **별도 system 프롬프트**로 "참가자 전원이 동의한 게임 내 교란 기능"임을 먼저 명시해 모델이 이를 실제 기만 요청으로 오인해 거부하는 것을 방지하는 동시에, "네가 AI/봇이라는 사실이나 사칭·역할극 같은 메타 표현을 절대 출력에 담지 마라"고 강하게 못박는다(들키면 게임의 핵심 장치가 깨짐). 응답이 거절 문구처럼 보이거나(영文/한글 거절 패턴) 비정상적으로 길면 `wrapper.ts`의 `assertNotRefusal`이 에러로 처리해, 거절 텍스트가 그대로 게임 채팅에 노출되지 않고 조용히 이번 차례가 생략되게 한다.
+- `generateImpersonationMessage` 프롬프트 핵심: **설명 페이즈에는 더 이상 AI가 개입하지 않는다** — 각 턴은 배정된 참가자가 한 번씩 설명하고 끝난다(이전의 "분탕충봇" 매 턴 코멘트는 폐지). 대신 **토론 페이즈** 동안 서버가 3~7초 무작위 간격(`gameEngine.ts`의 `DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS`~`DISCUSSION_IMPERSONATION_MAX_INTERVAL_MS`, 매 차례 끝나고 다음 간격을 다시 뽑는 재귀 setTimeout)으로 참가자(사람·봇 모두) 한 명을 무작위로 골라 그 사람인 척 자유 채팅 메시지를 생성하고, 그 사람의 진짜 senderId로 `chat:message`(`type: 'chat'`)를 그대로 내보낸다 — 클라이언트·본인 포함 누구도 이를 AI 개입으로 구분할 수 없고, 게임 종료 후에도 공개하지 않는다(끝까지 비공개). 근거 없이 다른 참가자를 의심하거나 몰아가는 발언, 투표에 영향을 줄 만큼 직접적인 지목 발언도 허용된다. `ImpersonationContext`에는 카테고리·(사칭 대상을 뺀) 다른 참가자 닉네임·최근 토론 채팅(최근 12개)·설명 페이즈에서 각자 제출한 설명 전체(`explanations`, 윈도우 제한 없이 항상 전체 포함)가 담긴다. 실제 라이어가 누구인지·진짜/가짜 제시어가 무엇인지는 이 타입 자체에 그 필드가 없어 구조적으로 이 프롬프트에 입력될 수 없음 — 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. **별도 system 프롬프트**로 "참가자 전원이 동의한 게임 내 교란 기능"임을 먼저 명시해 모델이 이를 실제 기만 요청으로 오인해 거부하는 것을 방지하는 동시에, "네가 AI/봇이라는 사실이나 사칭·역할극 같은 메타 표현을 절대 출력에 담지 마라"고 강하게 못박는다(들키면 게임의 핵심 장치가 깨짐). 응답이 거절 문구처럼 보이거나(영文/한글 거절 패턴) 비정상적으로 길면 `wrapper.ts`의 `assertNotRefusal`이 에러로 처리해, 거절 텍스트가 그대로 게임 채팅에 노출되지 않고 조용히 이번 차례가 생략되게 한다.
 - `explainWord`: 카테고리 맥락으로 단어 해석해 1-2문 설명 생성. **실제 웹 검색으로 사실 확인**(위치, 연도, 소속 등) 후 검증된 내용만 포함. 출처 링크/URL 절대 포함 금지. 하십시오체(`-입니다/-습니다`) 사용.
 - `judgeLiarGuess`: 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거") 허용 여부도 prompting 영역. 겉보기 비슷하지만 실제로는 다른 사물(예: 너구리와 라쿤은 혼동되지만 너구리는 Canidae, 라쿤은 Procyonidae로 서로 다른 동물)은 **절대 정답으로 인정하지 않음** — 표기만 다를 뿐 실제로 동일한 대상을 가리킬 때만 true 반환.
 
@@ -435,7 +438,7 @@ enum FriendshipStatus {
 
 ## 구현 현황
 
-백엔드·프론트 모두 `dev`에서 분기한 작업 브랜치(`dev-2` 등, CLAUDE.md "Working Branch" 참고)에서 작업하고 이후 `dev`로 합쳐진다. 아래는 현재 구현 현황이다.
+백엔드·프론트 모두 `dev` 브랜치에서 함께 작업한다(CLAUDE.md 참고). 아래는 현재 구현 현황이다.
 
 ### 백엔드
 
@@ -460,7 +463,8 @@ enum FriendshipStatus {
 - **`room:rejoin`/`room:rejoined`**: `socket_service.dart`의 `rejoinRoom()`/`onRoomRejoined`, `room_provider.dart`의 `_applyRejoin()`이 새로고침 후 채팅·게임 상태를 복원.
 - **`maxPlayers`/`title` 방 생성 UI**: `screens/lobby/lobby_screen.dart`의 방 만들기 다이얼로그에서 인원수는 +/- 스테퍼로(상한 없음), 방 이름은 텍스트 입력창(기본값 "{닉네임}의 방" 프리필, 수정 가능)으로 지정하고 `createRoom()`이 이 값들을 emit.
 - **`discussion:started`**: `socket_service.dart`의 `onDiscussionStarted`가 페이즈를 전환하고 현재 턴 배너를 내린다.
-- **`discussion:adjustTime`**: room_screen.dart 토론 페이즈 타이머 양옆에 -10/+10초 버튼을 두고(누구나 조작 가능, 참가자별 각 1회 제한은 서버가 강제), 누르면 `socket_service.dart`가 `discussion:adjustTime { deltaSec }`으로 emit한다.
+- **`discussion:adjustTime`**: room_screen.dart 토론 페이즈 타이머 양옆에 -10/+10초 버튼을 두고(누구나 조작 가능, 참가자별 각 1회 제한은 서버가 강제, `discussion:myAdjustState`의 `canShorten`/`canExtend`로 버튼 활성 여부 갱신), 누르면 `socket_service.dart`가 `discussion:adjustTime { deltaSec }`으로 emit한다.
+- **설명 턴 자동 제출**: 내 설명 차례에서 입력창에 텍스트를 써 뒀지만 엔터를 안 친 채 시간이 다 되면, room_screen.dart가 서버 타임아웃 직전(`phaseDeadline` − 0.5초)에 그 내용을 자동으로 `turn:submitDescription`으로 제출한다(`_turnAutoSubmitTimer`/`_autoSubmitOnTurnTimeout`). 입력이 비어 있으면 기존대로 빈 턴으로 넘어간다. 차례가 넘어가거나 직접 제출하면 타이머는 취소된다.
 - **참가자 연결 상태 표시**: `room:playerListUpdated`의 `Player.connected`가 `false`면(재접속 유예 시간 중) 참가자 카드를 흐리게 하고 "재접속중" 배지를 띄워, 다른 참가자 화면에서도 실시간으로 알 수 있게 한다.
 - **데스크탑 레이아웃**: lobby_screen과 동일하게 `context.isDesktop`일 때 좌측 `AppNavRail`로 나가기/초대(방장·회원만) 버튼이 이동하고, 헤더에서는 숨겨진다.
 
