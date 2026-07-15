@@ -250,19 +250,22 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     await _showManagedDialog<void>(
       maxWidth: 320,
       builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
-            const SizedBox(height: 12),
-            Text(
-              '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
-              style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
-            ),
-            const SizedBox(height: 18),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
+        return dialogEnterToConfirm(
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
+              const SizedBox(height: 12),
+              Text(
+                '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
+                style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
+              ),
+              const SizedBox(height: 18),
+              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+            ],
+          ),
         );
       },
     );
@@ -293,26 +296,29 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     await _showManagedDialog<void>(
       maxWidth: 380,
       builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
-              textAlign: TextAlign.center,
-              style: PixelFont.title(fontSize: 18, color: AppColors.primary),
-            ),
-            const SizedBox(height: 20),
-            _ResultRow(label: '지목된 사람', value: accusedText),
-            // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
-            // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
-            if (!r.wasLiar) _ResultRow(label: '진짜 라이어', value: r.liarNickname),
-            _ResultRow(label: '실제 제시어', value: r.realWord),
-            _ResultRow(label: '라이어 제시어', value: r.liarWord),
-            _ResultRow(label: '라이어 역전승', value: liarGuessText),
-            const SizedBox(height: 22),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
+        return dialogEnterToConfirm(
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
+                textAlign: TextAlign.center,
+                style: PixelFont.title(fontSize: 18, color: AppColors.primary),
+              ),
+              const SizedBox(height: 20),
+              _ResultRow(label: '지목된 사람', value: accusedText),
+              // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
+              // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
+              if (!r.wasLiar) _ResultRow(label: '진짜 라이어', value: r.liarNickname),
+              _ResultRow(label: '실제 제시어', value: r.realWord),
+              _ResultRow(label: '라이어 제시어', value: r.liarWord),
+              _ResultRow(label: '라이어 역전승', value: liarGuessText),
+              const SizedBox(height: 22),
+              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+            ],
+          ),
         );
       },
     );
@@ -436,36 +442,39 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     await _showManagedDialog<void>(
       maxWidth: 360,
       builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('🗳️ 투표 결과', style: PixelFont.title(fontSize: 16, color: AppColors.primary)),
-            const SizedBox(height: 16),
-            if (accusedNickname != null) ...[
-              Center(
-                child: UserAvatar(
-                  avatarIndex: _avatarIndexFor(r.votedOutId!, s),
-                  radius: 24,
-                  imageUrl: _avatarUrlFor(r.votedOutId!),
+        return dialogEnterToConfirm(
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('🗳️ 투표 결과', style: PixelFont.title(fontSize: 16, color: AppColors.primary)),
+              const SizedBox(height: 16),
+              if (accusedNickname != null) ...[
+                Center(
+                  child: UserAvatar(
+                    avatarIndex: _avatarIndexFor(r.votedOutId!, s),
+                    radius: 24,
+                    imageUrl: _avatarUrlFor(r.votedOutId!),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+                Text(
+                  '$accusedNickname님이 라이어로 지목됐습니다',
+                  textAlign: TextAlign.center,
+                  style: PixelFont.title(fontSize: 14, color: AppColors.foreground),
+                ),
+                const SizedBox(height: 8),
+              ],
               Text(
-                '$accusedNickname님이 라이어로 지목됐습니다',
+                subtitle,
                 textAlign: TextAlign.center,
-                style: PixelFont.title(fontSize: 14, color: AppColors.foreground),
+                style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 20),
+              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
             ],
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
-            ),
-            const SizedBox(height: 20),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
+          ),
         );
       },
     );
