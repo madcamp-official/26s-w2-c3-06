@@ -6,17 +6,16 @@ import type { BotTurnContext, TurnCommentContext } from '../types';
 // LLM이 직접 하나를 확정해버리면 같은 프롬프트라도 항상 비슷한(가장 "무난한") 답으로 수렴하는
 // 경향이 있어, 후보를 여러 개 받고 실제 무작위 선택은 서버 코드가 해서 다양성을 확보한다.
 export function categoryCandidatesPrompt(usedCategories: string[]): string {
-  return [
-    '라이어게임(추리 파티게임)에 쓸 카테고리 후보 3개를 제안하라.',
-    '조건:',
-    '- 서로 다른 3개일 것.',
-    '- "동물", "음식", "직업"처럼 너무 흔하고 뻔한 카테고리는 피하라.',
-    '- 그렇다고 대부분의 사람이 못 알아들을 정도로 생소한 카테고리도 피하라 — 초중고생도 듣자마자 감이 오는 수준에서, 약간 의외성 있고 흥미로운 카테고리를 골라라.',
-    usedCategories.length ? `이미 사용한 카테고리는 피하라: ${usedCategories.join(', ')}.` : '',
-    '반드시 JSON만 출력: {"categories": [string, string, string]}',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const usedCategoriesLine = usedCategories.length
+    ? `이미 사용한 카테고리는 피하라: ${usedCategories.join(', ')}.\n`
+    : '';
+  return `라이어게임(추리 파티게임)에 쓸 카테고리 후보 3개를 제안하라.
+조건:
+- 서로 다른 3개일 것.
+- "동물", "음식", "직업"처럼 너무 흔하고 뻔한 카테고리는 피하라.
+- 그렇다고 대부분의 사람이 못 알아들을 정도로 생소한 카테고리도 피하라 — 초중고생도 듣자마자 감이 오는 수준에서, 약간 의외성 있고 흥미로운 카테고리를 골라라.
+- 표현은 짧은 명사구로 끝내라(2~4어절, 공백 포함 10자 내외). "~에서 자주 보는 상황", "~할 때 떠오르는 것"처럼 문장을 풀어쓰는 표현은 쓰지 말고, 같은 아이디어라도 더 짧은 명사구로 압축하라. (예: "우주에서 많이 쓰는 물건"이 아니라 "우주 필수품", "SNS에서 자주 보는 상황"이 아니라 "SNS 밈"이나 "SNS 유행어"처럼)
+${usedCategoriesLine}반드시 JSON만 출력: {"categories": [string, string, string]}`;
 }
 
 // 카테고리에 실제로 속하는 구체적인 제시어 쌍(citizenWord/liarWord)을 3개 만든다.
