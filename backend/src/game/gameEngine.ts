@@ -20,7 +20,9 @@ export const DISCUSSION_TIME_ADJUST_SEC = 10;
 // 단축을 남용해 0초/음수로 만들지 못하도록 최소 남은 시간.
 const DISCUSSION_MIN_REMAINING_SEC = 5;
 // 토론 중 AI가 실제 참가자인 척 끼어드는 간격 — 참가자에겐 절대 밝히지 않는다(끝까지 비공개).
-const DISCUSSION_IMPERSONATION_INTERVAL_MS = 5000;
+// 매번 고정 간격이면 패턴이 읽혀 부자연스러우니, 매 턴 이 범위 안에서 균등 분포로 무작위 간격을 고른다.
+const DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS = 3000;
+const DISCUSSION_IMPERSONATION_MAX_INTERVAL_MS = 7000;
 
 // 문서화된 GameState/Round는 그대로 두고, 타이머 핸들·봇 목록 같은 휘발성 런타임 부가정보는
 // roomCode로 키잉한 모듈 내부 맵으로 별도 관리한다(직렬화 대상 타입을 오염시키지 않기 위함).
@@ -59,10 +61,9 @@ const voteConfirmedByRoom = new Map<string, Set<string>>();
 // 짧은 틈을 준다) — 투표 페이즈 전체 제한시간 타이머(phaseTimers)와는 별개로 관리한다.
 const voteGraceTimers = new Map<string, NodeJS.Timeout>();
 const VOTE_ALL_CONFIRMED_GRACE_MS = 3000;
-// 토론 중 5초마다 실제 참가자인 척 채팅에 끼어드는 사칭 인터벌(roomCode 당 하나).
+// 토론 중 3~7초 무작위 간격으로 실제 참가자인 척 채팅에 끼어드는 사칭 타이머(roomCode 당 하나).
+// setInterval이 아니라 매 턴 끝나고 다음 무작위 간격을 다시 잡는 재귀 setTimeout으로 구현한다.
 const discussionImpersonationTimers = new Map<string, NodeJS.Timeout>();
-// 같은 사람을 연달아 두 번 사칭하면 부자연스러워 보여, 직전에 사칭한 uid를 기억해 피한다.
-const lastImpersonatedByRoom = new Map<string, string>();
 
 function isBotId(id: string): boolean {
   return id.startsWith('bot-');
@@ -89,39 +90,53 @@ function clearRoomTimers(roomCode: string): void {
 
 function stopDiscussionImpersonation(roomCode: string): void {
   const t = discussionImpersonationTimers.get(roomCode);
-  if (t) clearInterval(t);
+  if (t) clearTimeout(t);
   discussionImpersonationTimers.delete(roomCode);
-  lastImpersonatedByRoom.delete(roomCode);
 }
 
-// 실제 참가자인 척 채팅에 끼어드는 사칭 인터벌을 시작한다. 토론 페이즈 시작 시(endDescribingPhase)
+function randomImpersonationIntervalMs(): number {
+  return (
+    DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS +
+    Math.random() * (DISCUSSION_IMPERSONATION_MAX_INTERVAL_MS - DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS)
+  );
+}
+
+// 실제 참가자인 척 채팅에 끼어드는 사칭 타이머를 시작한다. 토론 페이즈 시작 시(endDescribingPhase)
 // 한 번만 호출되고, 투표로 넘어가는 순간(startVoting) 또는 게임 종료(clearRoomTimers)에 멈춘다.
+// 매 턴이 끝난 뒤 다음 턴까지의 간격을 새로 무작위로 뽑아 재귀적으로 예약한다(고정 간격이면
+// 패턴이 읽히므로 3~7초 사이 균등 분포로 매번 달라지게 함).
 function startDiscussionImpersonation(io: Server, room: RoomState): void {
   stopDiscussionImpersonation(room.roomCode);
-  const timer = setInterval(() => {
-    void runDiscussionImpersonationTick(io, room);
-  }, DISCUSSION_IMPERSONATION_INTERVAL_MS);
-  discussionImpersonationTimers.set(room.roomCode, timer);
+  const scheduleNext = () => {
+    const timer = setTimeout(() => {
+      void runDiscussionImpersonationTick(io, room).finally(() => {
+        if (discussionImpersonationTimers.has(room.roomCode)) scheduleNext();
+      });
+    }, randomImpersonationIntervalMs());
+    discussionImpersonationTimers.set(room.roomCode, timer);
+  };
+  scheduleNext();
 }
 
-// 실제 사람(봇 제외) 참가자 중 한 명을 무작위로 골라, 그 사람인 척 자유 채팅 메시지를
+// 참가자(사람+봇 모두) 중 한 명을 매 턴 완전히 무작위로 골라, 그 사람인 척 자유 채팅 메시지를
 // 하나 만들어 그 사람의 실제 senderId로 그대로 흘려보낸다 — 클라이언트 입장에서는 그
 // 참가자가 직접 보낸 일반 채팅과 완전히 동일하게 보이며, 어떤 표식도 남기지 않는다.
+// 직전에 사칭한 대상을 다시 고르지 못하게 막는 로직은 의도적으로 두지 않는다(매 턴 완전 무작위).
 async function runDiscussionImpersonationTick(io: Server, room: RoomState): Promise<void> {
   const game = room.currentGame;
   if (!game || game.phase !== 'discussion') return;
+  if (game.participantIds.length === 0) return;
 
-  const humanIds = game.participantIds.filter((id) => !isBotId(id));
-  if (humanIds.length === 0) return;
-
-  const lastTarget = lastImpersonatedByRoom.get(room.roomCode);
-  const pool = humanIds.length > 1 ? humanIds.filter((id) => id !== lastTarget) : humanIds;
-  const targetId = pickRandom(pool);
+  const targetId = pickRandom(game.participantIds);
 
   try {
     const recentDiscussion = room.chatLog
       .filter((m) => m.type === 'chat')
       .slice(-12)
+      .map((m) => ({ nickname: getParticipantNickname(room, m.senderId), text: m.text }));
+    // 설명 페이즈에서 각자 제출한 설명은 최근 12개 대화 윈도우와 무관하게 항상 전체를 참고한다.
+    const explanations = room.chatLog
+      .filter((m) => m.type === 'turnDescription')
       .map((m) => ({ nickname: getParticipantNickname(room, m.senderId), text: m.text }));
     const otherParticipantNicknames = game.participantIds
       .filter((id) => id !== targetId)
@@ -131,11 +146,11 @@ async function runDiscussionImpersonationTick(io: Server, room: RoomState): Prom
       category: game.category,
       otherParticipantNicknames,
       recentDiscussion,
+      explanations,
     });
 
     // 응답을 기다리는 동안 토론이 이미 끝났을 수 있으니(비동기 호출 중 페이즈 전환) 다시 확인.
     if (room.currentGame !== game || game.phase !== 'discussion') return;
-    lastImpersonatedByRoom.set(room.roomCode, targetId);
     broadcastChat(io, room, targetId, 'chat', text);
   } catch (err) {
     console.error('[gameEngine] generateImpersonationMessage 실패, 이번 차례는 생략', err);

@@ -103,5 +103,6 @@ export interface BotTurnContext {
 export interface ImpersonationContext {
   category: string;
   otherParticipantNicknames: string[]; // 사칭 대상 본인을 제외한 나머지 참가자 닉네임(의심 발언 대상 후보)
-  recentDiscussion: { nickname: string; text: string }[]; // 지금까지 토론에서 실제로 오간 채팅 기록
+  recentDiscussion: { nickname: string; text: string }[]; // 최근 토론 채팅(최근 12개로 제한)
+  explanations: { nickname: string; text: string }[]; // 설명 페이즈에서 각자 제출한 설명 전체(윈도우 제한 없이 항상 전체 포함)
 }
