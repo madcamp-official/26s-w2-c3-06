@@ -48,12 +48,16 @@ async function completeText(
   maxTokens: number,
   system?: string,
   openaiModelOverride?: string,
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high',
 ): Promise<string> {
   if (provider === 'openai') {
     const res = await getOpenAI().chat.completions.create({
       model: openaiModelOverride ?? OPENAI_MODEL,
       // gpt-5.4 계열부터 max_tokens가 아니라 max_completion_tokens를 요구한다(400 에러).
+      // reasoning 모델은 눈에 안 보이는 추론 토큰도 이 한도에서 함께 차감되므로, 짧은 답을
+      // 기대하고 max_completion_tokens를 너무 작게 주면 추론만 하다 끊겨 400 에러가 난다.
       max_completion_tokens: maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       messages: [
         ...(system ? [{ role: 'system' as const, content: system }] : []),
         { role: 'user' as const, content: prompt },
@@ -174,7 +178,10 @@ const realLLM: LiarGameLLM = {
   async judgeLiarGuess(guess, realWord, category) {
     // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·표기 차이 허용과 동음이의어의 카테고리 맥락
     // 해석까지 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
-    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8);
+    // reasoning 모델(OpenAI)의 숨은 추론 토큰까지 감안해 max_completion_tokens는 넉넉히,
+    // 대신 reasoning_effort는 none으로 낮춰 단순 참/거짓 판정에 불필요한 추론을 줄인다
+    // (gpt-5.4-mini는 'minimal'을 지원하지 않고 none/low/medium/high/xhigh만 지원).
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 20, undefined, undefined, 'none');
     return raw.trim().toLowerCase().startsWith('true');
   },
 };
