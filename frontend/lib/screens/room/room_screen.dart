@@ -62,6 +62,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _aiRandom = false;
   bool _leaving = false;
   int _lastChatLen = 0;
+  // 키보드가 열리면서 화면(=스크롤 뷰포트)이 줄어들 때, 스크롤은 "맨 아래"라는 위치가
+  // 아니라 그 전 스크롤 오프셋(px)을 그대로 유지한다 — 뷰포트가 줄어든 만큼 이전엔 맨
+  // 아래였던 위치가 더 이상 맨 아래가 아니게 되어, 최신 메시지가 키보드에 가려 안 보이는
+  // 문제가 있었다. 키보드 열림 상태가 바뀔 때마다 다시 맨 아래로 스크롤해 해결한다.
+  bool _lastKeyboardOpen = false;
 
   // 내 "입력 중" 상태 전송 관리. 입력이 이어지는 동안 2초마다 chat:typing(true)을
   // 재전송하고(수신 측 5초 만료 타이머를 계속 연장시키는 하트비트 — room_provider 참고),
@@ -115,7 +120,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     late final OverlayEntry entry;
     entry = OverlayEntry(
       builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + 90,
+        top: MediaQuery.of(context).padding.top + 150,
         left: 0,
         right: 0,
         child: Center(
@@ -137,7 +142,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
     _turnToastEntry = entry;
     overlay.insert(entry);
-    Future.delayed(const Duration(seconds: 2), () {
+    Future.delayed(const Duration(seconds: 4), () {
       if (_turnToastEntry == entry) {
         entry.remove();
         _turnToastEntry = null;
@@ -949,6 +954,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 안드로이드에서 뒤로가기/제스처로 키보드만 내리면 포커스는 그대로 남아있어(hasFocus는
     // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    if (keyboardOpen != _lastKeyboardOpen) {
+      _lastKeyboardOpen = keyboardOpen;
+      _autoScroll();
+      // 키보드가 열리고 닫히는 애니메이션(약 300ms) 동안 뷰포트 높이가 매 프레임 계속
+      // 바뀌므로, 애니메이션이 막 시작된 시점에 한 번만 스크롤하면 최종 위치보다 덜
+      // 내려간 채로 끝난다 — 애니메이션이 끝날 즈음 한 번 더 맞춰준다.
+      Future.delayed(const Duration(milliseconds: 300), _autoScroll);
+    }
     final hideForKeyboard = !isDesktop && keyboardOpen;
     // 투표 중엔 확정 상태/버튼을 반드시 볼 수 있어야 하므로, 접힘·키보드에 의한 숨김을
     // 무시하고 항상 펼쳐 보여준다(접혀 있으면 확정했는지조차 확인할 방법이 없었다).
@@ -1063,6 +1076,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           if (!context.isDesktop && s.phaseDeadline != null) ...[
             const SizedBox(width: 8),
             _headerTimer(s),
+            if (showActions) const SizedBox(width: 14),
           ],
           if (showActions) ...[
             if (isHost && _canInviteFriends) ...[
@@ -1388,9 +1402,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
               const SizedBox(height: 6),
             ],
-            // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
-            // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
-            // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
+            // 방장 화면도 비방장 화면과 같이 카테고리·봇 수·시작 버튼을 한 줄에 순서대로 둔다.
             Row(
               children: [
                 Expanded(
@@ -1401,7 +1413,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     onPressed: _openCategoryPicker,
                   ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 10),
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1411,7 +1423,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   },
                   icon: const Icon(Icons.remove_circle_outline, size: 18),
                 ),
+                const SizedBox(width: 4),
                 Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                const SizedBox(width: 4),
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1423,14 +1437,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                         },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
+                const SizedBox(width: 12),
+                AppButton(
+                  label: '시작 ▶',
+                  dense: true,
+                  fullWidth: false,
+                  loading: _startingGame,
+                  onPressed: canStart && !_startingGame ? _startGame : null,
+                ),
               ],
-            ),
-            const SizedBox(height: 6),
-            AppButton(
-              label: '시작 ▶',
-              dense: true,
-              loading: _startingGame,
-              onPressed: canStart && !_startingGame ? _startGame : null,
             ),
             // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
             // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
