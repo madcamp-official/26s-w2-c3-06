@@ -57,7 +57,7 @@ export interface GameState {
 }
 
 export type ChatSenderKind = string | 'ai' | 'system';
-export type ChatMessageType = 'chat' | 'turnDescription' | 'aiComment' | 'system';
+export type ChatMessageType = 'chat' | 'turnDescription' | 'system';
 
 export interface ChatMessage {
   id: string;
@@ -98,19 +98,10 @@ export interface BotTurnContext {
   priorTurns: { nickname: string; text: string }[];
 }
 
-// 설명(turnDescription)과 분탕충봇 자신의 이전 코멘트(aiComment)를 시간 순서대로 섞은 기록.
-// 코멘트가 이전 코멘트와 연속성 있게(같은 대상을 계속 몰아가는 등) 이어지려면, 자신이 이전에
-// 뭐라고 코멘트했는지도 컨텍스트로 봐야 한다 — 그래서 설명만이 아니라 코멘트도 함께 담는다.
-export interface ChatHistoryEntry {
-  type: 'turnDescription' | 'aiComment';
-  nickname: string; // aiComment면 "분탕충봇" 고정 라벨, turnDescription이면 실제 참가자 닉네임
-  text: string;
-}
-
-export interface TurnCommentContext {
+// 토론 페이즈에서 AI가 실제 참가자인 척 자연스럽게 끼어들 메시지를 생성하는 컨텍스트.
+// 실제 라이어 정체·진짜/가짜 제시어는 이 타입 자체에 필드가 없어 구조적으로 유출 불가능하다.
+export interface ImpersonationContext {
   category: string;
-  latestDescription: string; // 방금 제출된 설명 (실제 라이어 정체는 절대 포함하지 않음)
-  latestSpeakerNickname: string; // 방금 그 설명을 작성한 참가자 닉네임
-  participantNicknames: string[]; // 이번 게임 전체 참가자 닉네임(몰아갈 대상 후보 포함)
-  history: ChatHistoryEntry[]; // latestDescription 이전까지의 전체 기록(설명 + AI 코멘트)
+  otherParticipantNicknames: string[]; // 사칭 대상 본인을 제외한 나머지 참가자 닉네임(의심 발언 대상 후보)
+  recentDiscussion: { nickname: string; text: string }[]; // 지금까지 토론에서 실제로 오간 채팅 기록
 }

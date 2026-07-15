@@ -297,7 +297,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     } else if (r.liarGuessCorrect == true) {
       liarGuessText = r.liarGuess == null ? '✅ 성공 — 라이어 역전승!' : '✅ 성공 — "${r.liarGuess}" 정답!';
     } else {
-      liarGuessText = r.liarGuess == null ? '❌ 실패' : '❌ 실패 — "${r.liarGuess}"라고 썼어요';
+      liarGuessText = r.liarGuess == null ? '❌' : '❌ — "${r.liarGuess}"라고 썼어요';
     }
 
     await _showManagedDialog<void>(
@@ -315,13 +315,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 style: PixelFont.title(fontSize: 18, color: AppColors.primary),
               ),
               const SizedBox(height: 20),
-              _ResultRow(label: '지목된 사람', value: accusedText),
+              _ResultRow(label: '지목된 사람   ', value: accusedText),
               // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
               // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
-              if (!r.wasLiar) _ResultRow(label: '진짜 라이어', value: r.liarNickname),
-              _ResultRow(label: '실제 제시어', value: r.realWord),
-              _ResultRow(label: '라이어 제시어', value: r.liarWord),
-              _ResultRow(label: '라이어 역전승', value: liarGuessText),
+              if (!r.wasLiar) _ResultRow(label: '진짜 라이어   ', value: r.liarNickname),
+              _ResultRow(label: '실제 제시어   ', value: r.realWord),
+              _ResultRow(label: '라이어 제시어   ', value: r.liarWord),
+              _ResultRow(label: '라이어 역전승   ', value: liarGuessText),
               const SizedBox(height: 22),
               AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
             ],
