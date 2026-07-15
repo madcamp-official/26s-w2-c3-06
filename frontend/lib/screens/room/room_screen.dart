@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,6 +62,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _aiRandom = false;
   bool _leaving = false;
   int _lastChatLen = 0;
+
+  // 내 "입력 중" 상태 전송 관리. 입력이 이어지는 동안 2초마다 chat:typing(true)을
+  // 재전송하고(수신 측 5초 만료 타이머를 계속 연장시키는 하트비트 — room_provider 참고),
+  // 3초간 입력 변화가 없거나 입력창이 비면/전송하면 false를 보낸다.
+  DateTime? _typingLastSentAt;
+  Timer? _typingStopTimer;
+  static const _typingResendEvery = Duration(seconds: 2);
+  static const _typingStopAfter = Duration(seconds: 3);
   bool _hostDraftSeeded = false;
 
   // 메시지 입력창 위 페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 채팅을 더 넓게 보고
@@ -184,6 +194,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   @override
   void dispose() {
     _turnToastEntry?.remove();
+    _typingStopTimer?.cancel();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -252,33 +263,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  /// 예기치 않게 소켓 연결이 끊겼을 때 — 확인을 눌러야 닫히는 알림창을 띄운 뒤 로비로 나간다.
-  Future<void> _showDisconnectedDialog() async {
-    await _showManagedDialog<void>(
-      maxWidth: 320,
-      builder: (dialogContext) {
-        return dialogEnterToConfirm(
-          onConfirm: () => Navigator.of(dialogContext).pop(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
-              const SizedBox(height: 12),
-              Text(
-                '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
-                style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
-              ),
-              const SizedBox(height: 18),
-              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-            ],
-          ),
-        );
-      },
-    );
-    if (!mounted) return;
+  /// 예기치 않게 소켓 연결이 끊겼을 때 — 사용자의 확인을 기다리지 않고 즉시 로비로
+  /// 이동한 뒤(끊긴 쪽 화면도 실시간으로 방에서 나가지도록), 로비 위에 알림창을 띄운다.
+  void _handleUnexpectedDisconnect() {
+    // 로비로 popUntil하면 RoomScreen의 context는 죽으므로, 알림은 살아남는
+    // Navigator 자신의 context로 띄운다.
+    final navigator = Navigator.of(context);
     ref.read(roomProvider.notifier).reset();
-    _returnToLobby();
+    navigator.popUntil((route) => route.isFirst);
+    showAppAlert(navigator.context, '서버와의 연결이 끊어져 로비로 돌아왔어요.', title: '⚠️ 연결 끊김');
   }
 
   /// 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)를 채팅 로그에
@@ -620,9 +613,35 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
+  /// 채팅 입력창 내용이 바뀔 때마다 호출 — 내 입력 중 상태를 방에 알린다.
+  void _onChatInputChanged(String text) {
+    final notifier = ref.read(roomProvider.notifier);
+    if (text.trim().isEmpty) {
+      _stopTypingSignal();
+      return;
+    }
+    final now = DateTime.now();
+    if (_typingLastSentAt == null || now.difference(_typingLastSentAt!) >= _typingResendEvery) {
+      _typingLastSentAt = now;
+      notifier.sendTyping(true);
+    }
+    _typingStopTimer?.cancel();
+    _typingStopTimer = Timer(_typingStopAfter, _stopTypingSignal);
+  }
+
+  /// 입력 중 표시를 끈다(입력창이 비었거나, 한동안 입력이 없거나, 메시지를 전송했을 때).
+  void _stopTypingSignal() {
+    _typingStopTimer?.cancel();
+    _typingStopTimer = null;
+    if (_typingLastSentAt == null) return;
+    _typingLastSentAt = null;
+    ref.read(roomProvider.notifier).sendTyping(false);
+  }
+
   void _sendChatOrDescription(RoomViewState s) {
     final text = _chatController.text.trim();
     if (text.isEmpty) return;
+    _stopTypingSignal();
     final notifier = ref.read(roomProvider.notifier);
     if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
       notifier.submitDescription(text);
@@ -873,11 +892,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         showAppAlert(context, message);
       });
     });
-    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 확인 알림창을 띄우고 바로 로비로 나간다.
-    ref.listen<AsyncValue<void>>(socketDisconnectedProvider, (prev, next) {
+    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 즉시 로비로 나가고 알림창을 띄운다.
+    ref.listen<AsyncValue<int>>(socketDisconnectedProvider, (prev, next) {
       if (next.hasValue && !_leaving) {
         _leaving = true;
-        _showDisconnectedDialog();
+        _handleUnexpectedDisconnect();
       }
     });
     // 설명 차례가 바뀐 걸 못 알아챈다는 피드백 — 확인 버튼이 필요한 팝업 대신, 잠깐 떴다
@@ -943,6 +962,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         Expanded(child: _chatFeed(s)),
         if (!hideForKeyboard && !forceShowPanel) _contextPanelToggle(showContextPanel),
         if (showContextPanel) _contextPanel(s, isHost),
+        _typingIndicator(s),
         _inputBar(s),
       ],
     );
@@ -1589,6 +1609,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
+  /// 입력창 바로 위에 "OO님이 입력 중..."을 보여준다(chat:typingUpdated 기반).
+  /// 서버가 socket.to로 본인을 제외하고 보내지만, 같은 계정 다중 탭 등 예외를 대비해
+  /// 내 uid는 한 번 더 걸러낸다. 아무도 입력 중이 아니면 자리 자체를 차지하지 않는다.
+  Widget _typingIndicator(RoomViewState s) {
+    final others = s.typingUserIds.where((id) => id != _myUid).toList();
+    if (others.isEmpty) return const SizedBox.shrink();
+    final label = others.length == 1
+        ? '${s.nicknameOf(others.first)}님이 입력 중'
+        : '${s.nicknameOf(others.first)}님 외 ${others.length - 1}명이 입력 중';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: _TypingDotsText(label: label),
+      ),
+    );
+  }
+
   Widget _inputBar(RoomViewState s) {
     // 대기/종료 페이즈엔 하단 컨텍스트 패널에 컨트롤이 있으니 자유 채팅만 노출.
     final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
@@ -1619,12 +1657,23 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               onPointerDown: (_) {
                 if (kIsWeb && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
               },
-              child: AppTextField(
-                controller: _chatController,
-                focusNode: _chatFocusNode,
-                hintText: hint,
-                enabled: canChat,
-                onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+              // 남의 설명 턴 동안의 입력 차단은 enabled가 아니라 readOnly로 한다.
+              // enabled:false는 포커스된 입력창을 서버 이벤트(턴 시작)로 비활성화할 때
+              // 강제 unfocus를 유발하는데, 웹에서는 이 경로가 브라우저 input 연결을 영구히
+              // 끊어 재활성화 후 입력창을 탭해도(hasFocus는 true가 되지만 DOM 포커스가
+              // 복원되지 않아) 새로고침 전까지 타이핑이 안 먹는다 — 헤드리스 크롬 재현으로
+              // 확인. readOnly는 포커스를 건드리지 않아 이 문제가 없고, 차단이 풀리면
+              // 입력이 즉시 살아난다.
+              child: Opacity(
+                opacity: canChat ? 1 : 0.5,
+                child: AppTextField(
+                  controller: _chatController,
+                  focusNode: _chatFocusNode,
+                  hintText: hint,
+                  readOnly: !canChat,
+                  onChanged: canChat ? _onChatInputChanged : null,
+                  onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+                ),
               ),
             ),
           ),
@@ -1642,6 +1691,54 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "OO님이 입력 중" 뒤에 점(. → .. → ...)이 반복해서 붙는 애니메이션 텍스트.
+/// 점 개수가 바뀔 때 텍스트 폭이 흔들리지 않도록 점 3개 폭을 미리 확보해 둔다.
+class _TypingDotsText extends StatefulWidget {
+  final String label;
+
+  const _TypingDotsText({required this.label});
+
+  @override
+  State<_TypingDotsText> createState() => _TypingDotsTextState();
+}
+
+class _TypingDotsTextState extends State<_TypingDotsText> {
+  Timer? _timer;
+  int _tick = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      setState(() => _tick = (_tick + 1) % 3);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = PixelFont.body(fontSize: 10, color: AppColors.mutedForeground);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(widget.label, style: style),
+        // Stack으로 보이지 않는 '...'가 항상 폭을 잡아줘 점이 늘어나도 레이아웃이 안 흔들린다.
+        Stack(
+          children: [
+            Text('...', style: style.copyWith(color: Colors.transparent)),
+            Text('.' * (_tick + 1), style: style),
+          ],
+        ),
+      ],
     );
   }
 }
