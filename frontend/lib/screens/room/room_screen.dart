@@ -238,7 +238,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (r.accusedNickname == null) {
       accusedText = '아무도 지목되지 않았어요';
     } else {
-      accusedText = '${r.accusedNickname} (라이어 ${r.wasLiar ? '⭕ 맞음' : '❌ 아님'})';
+      accusedText = '${r.accusedNickname} (라이어 ${r.wasLiar ? '⭕' : '❌'})';
     }
     String liarGuessText;
     if (r.liarGuessCorrect == null) {
@@ -934,19 +934,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.title(fontSize: 16, color: AppColors.foreground, height: 1.1),
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (s.phase == GamePhase.discussion && s.phaseDeadline != null)
-                  _discussionTimerRow(s)
-                else if (s.phase == GamePhase.describing && s.phaseDeadline != null)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
-                      const SizedBox(width: 4),
-                      CountdownText(
-                        deadline: s.phaseDeadline!,
-                        style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
-                      ),
-                    ],
+                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를
+                // 보여준다 — 타이머는 이제 상단바가 아니라 각 페이즈 패널(채팅 입력창 위)
+                // 에 표시된다.
+                if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
+                  Text(
+                    '카테고리: ${s.category}',
+                    style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground, height: 1.1),
+                    overflow: TextOverflow.ellipsis,
                   )
                 else
                   Text(
@@ -995,9 +990,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
-  /// 토론 중엔 채팅창 위 패널이 아니라 상단바에 타이머를 두고, 그 양옆에 -10초/+10초
-  /// 버튼을 붙인다. 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장
-  /// 각각 한 번씩만 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
+  /// 토론 중 채팅창 위 패널에 타이머를 두고, 그 양옆에 -10초/+10초 버튼을 붙인다.
+  /// 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장 각각 한 번씩만
+  /// 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
   Widget _discussionTimerRow(RoomViewState s) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1355,10 +1350,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머는 상단바로 옮겼다(_header 참고) — 설명 턴 타이머는 조절 버튼이 없으니
-          // 토론 타이머와 달리 카운트다운 숫자만 상단바에 그대로 보여준다.
-          Text(statusText,
-              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(statusText,
+                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              ),
+              if (s.phaseDeadline != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
+                const SizedBox(width: 4),
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -1371,8 +1380,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머·시간 조절(-10초/+10초)은 상단바로 옮겨졌다(_discussionTimerRow 참고).
-          Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+              if (s.phaseDeadline != null) _discussionTimerRow(s),
+            ],
+          ),
         ],
       ),
     );
