@@ -908,7 +908,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     return PixelBox(
       margin: const EdgeInsets.all(10),
       // 안의 글자만 키우고 바 자체 높이는 고정해서 그대로 유지한다.
-      height: 56,
+      // 설명 턴 타이머 아이콘이 추가되면서 44px(56-패딩12) 콘텐츠 영역을 살짝 넘겨
+      // "bottom overflowed"가 나던 걸 여유를 좀 더 둬서 해결한다.
+      height: 60,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
