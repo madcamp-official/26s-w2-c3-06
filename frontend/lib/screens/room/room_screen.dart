@@ -1320,7 +1320,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         child: SizedBox(
           width: double.infinity,
           child: Text(
-            expanded ? '▼ 설정 닫기' : '▲ 설정 열기',
+            expanded ? '▼ 창 닫기' : '▲ 창 열기',
             textAlign: TextAlign.center,
             style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
           ),
@@ -1403,49 +1403,106 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               const SizedBox(height: 6),
             ],
             // 방장 화면도 비방장 화면과 같이 카테고리·봇 수·시작 버튼을 한 줄에 순서대로 둔다.
-            Row(
-              children: [
-                Expanded(
-                  child: AppButton(
-                    label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
-                    variant: AppButtonVariant.outlined,
-                    dense: true,
-                    onPressed: _openCategoryPicker,
+            // 데스크탑(웹)은 폭이 넓어 카테고리 칩이 Expanded 하나만 있으면 혼자 다 차지해
+            // 유독 길어 보이므로, 세 구간을 균등한 너비(flex 1)로 나눈다. 모바일은 폭이
+            // 좁아 균등 분할하면 카테고리 글자가 너무 눌리므로 내용 크기 그대로 둔다.
+            if (context.isDesktop) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
+                      variant: AppButtonVariant.outlined,
+                      dense: true,
+                      onPressed: _openCategoryPicker,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
-                    _pushDraft();
-                  },
-                  icon: const Icon(Icons.remove_circle_outline, size: 18),
-                ),
-                const SizedBox(width: 4),
-                Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
-                const SizedBox(width: 4),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: _botCount >= maxBotCount
-                      ? null
-                      : () {
-                          setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
-                          _pushDraft();
-                        },
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                ),
-                const SizedBox(width: 12),
-                AppButton(
-                  label: '시작 ▶',
-                  dense: true,
-                  fullWidth: false,
-                  loading: _startingGame,
-                  onPressed: canStart && !_startingGame ? _startGame : null,
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: () {
+                            setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
+                            _pushDraft();
+                          },
+                          icon: const Icon(Icons.remove_circle_outline, size: 18),
+                        ),
+                        const SizedBox(width: 4),
+                        Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: _botCount >= maxBotCount
+                              ? null
+                              : () {
+                                  setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                                  _pushDraft();
+                                },
+                          icon: const Icon(Icons.add_circle_outline, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: AppButton(
+                      label: '시작 ▶',
+                      dense: true,
+                      loading: _startingGame,
+                      onPressed: canStart && !_startingGame ? _startGame : null,
+                    ),
+                  ),
+                ],
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
+                      variant: AppButtonVariant.outlined,
+                      dense: true,
+                      onPressed: _openCategoryPicker,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: () {
+                      setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
+                      _pushDraft();
+                    },
+                    icon: const Icon(Icons.remove_circle_outline, size: 18),
+                  ),
+                  const SizedBox(width: 4),
+                  Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: _botCount >= maxBotCount
+                        ? null
+                        : () {
+                            setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                            _pushDraft();
+                          },
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  AppButton(
+                    label: '시작 ▶',
+                    dense: true,
+                    fullWidth: false,
+                    loading: _startingGame,
+                    onPressed: canStart && !_startingGame ? _startGame : null,
+                  ),
+                ],
             ),
             // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
             // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
