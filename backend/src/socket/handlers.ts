@@ -174,8 +174,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     const result = roomManager.leaveRoom(socket.id);
     if (!result) return;
     socket.leave(result.room.roomCode);
-    // 입력 중이던 채로 나가면 다른 참가자 화면에 표시가 남을 수 있어 바로 꺼 준다.
-    io.to(result.room.roomCode).emit('chat:typingUpdated', { playerId: uid, isTyping: false });
     if (result.roomClosed) {
       io.to(result.room.roomCode).emit('room:closed');
       broadcastPublicRoomsIfPublic(result.room.visibility);
@@ -199,8 +197,6 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     const { roomCode } = result;
     if (room) {
       io.to(roomCode).emit('room:playerListUpdated', { players: room.players });
-      // 입력 중이던 채로 끊기면 다른 참가자 화면에 표시가 남을 수 있어 바로 꺼 준다.
-      io.to(roomCode).emit('chat:typingUpdated', { playerId: uid, isTyping: false });
     }
     roomManager.scheduleRemoval(roomCode, uid, () => {
       const removal = roomManager.removePlayerByUid(roomCode, uid);
@@ -224,22 +220,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
   socket.on('chat:send', (payload: { text: string }) => {
     const room = currentRoom();
     if (!room || !payload.text?.trim()) return;
-    // 메시지가 도착하면 그 사람의 입력 중 표시는 의미가 없으므로 서버가 함께 꺼 준다
-    // (클라이언트도 끄지만, 이벤트 순서가 꼬여도 표시가 남지 않도록 이중 안전장치).
-    socket.to(room.roomCode).emit('chat:typingUpdated', { playerId: uid, isTyping: false });
     broadcastChat(io, room, uid, 'chat', payload.text.trim());
-  });
-
-  // 입력 중 표시 — 상태 저장 없이 같은 방의 다른 참가자에게 그대로 중계만 한다.
-  // 클라이언트가 주기적으로 true를 재전송하고 수신 측이 일정 시간 안 오면 스스로
-  // 지우는 구조라(room_provider 참고), 서버가 uid별 상태를 들고 있을 필요가 없다.
-  socket.on('chat:typing', (payload: { isTyping: boolean }) => {
-    const room = currentRoom();
-    if (!room) return;
-    socket.to(room.roomCode).emit('chat:typingUpdated', {
-      playerId: uid,
-      isTyping: Boolean(payload?.isTyping),
-    });
   });
 
   // ── 대기방 준비 상태 ──

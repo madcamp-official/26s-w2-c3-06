@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chat_message.dart';
@@ -65,12 +63,6 @@ class RoomViewState {
   final List<Player> participants;
 
   final List<ChatMessage> chatLog;
-
-  /// 지금 채팅을 입력 중인 다른 참가자들의 uid(chat:typingUpdated). 입력이 이어지는 동안
-  /// 상대 클라이언트가 주기적으로 true를 재전송하고, 일정 시간 재전송이 없으면 RoomNotifier가
-  /// 타이머로 스스로 지운다 — 상대가 끊기거나 false 이벤트가 유실돼도 표시가 남지 않게.
-  final Set<String> typingUserIds;
-
   final GamePhase phase;
 
   final int? gameNumber;
@@ -131,7 +123,6 @@ class RoomViewState {
     this.players = const [],
     this.participants = const [],
     this.chatLog = const [],
-    this.typingUserIds = const {},
     this.phase = GamePhase.waiting,
     this.gameNumber,
     this.category,
@@ -200,7 +191,6 @@ class RoomViewState {
     List<Player>? players,
     List<Player>? participants,
     List<ChatMessage>? chatLog,
-    Set<String>? typingUserIds,
     GamePhase? phase,
     int? gameNumber,
     String? category,
@@ -241,7 +231,6 @@ class RoomViewState {
       players: players ?? this.players,
       participants: participants ?? this.participants,
       chatLog: chatLog ?? this.chatLog,
-      typingUserIds: typingUserIds ?? this.typingUserIds,
       phase: phase ?? this.phase,
       gameNumber: gameNumber ?? this.gameNumber,
       category: category ?? this.category,
@@ -277,31 +266,6 @@ extension _FirstOrNull<T> on Iterable<T> {
 class RoomNotifier extends Notifier<RoomViewState> {
   final _socket = SocketService.instance;
 
-  /// 입력 중 표시 자동 만료 타이머(uid별). 상대 클라이언트가 입력이 이어지는 동안 2초마다
-  /// true를 재전송하므로(room_screen 참고), 이 만료 시간 안에 재전송이 오면 계속 유지되고
-  /// 안 오면(전송 중단·연결 유실 등) 표시를 스스로 지운다.
-  final Map<String, Timer> _typingExpiry = {};
-  static const _typingExpireAfter = Duration(seconds: 5);
-
-  void _setTyping(String uid, bool isTyping) {
-    _typingExpiry.remove(uid)?.cancel();
-    if (isTyping) {
-      _typingExpiry[uid] = Timer(_typingExpireAfter, () => _setTyping(uid, false));
-      if (!state.typingUserIds.contains(uid)) {
-        state = state.copyWith(typingUserIds: {...state.typingUserIds, uid});
-      }
-    } else if (state.typingUserIds.contains(uid)) {
-      state = state.copyWith(typingUserIds: {...state.typingUserIds}..remove(uid));
-    }
-  }
-
-  void _clearAllTyping() {
-    for (final timer in _typingExpiry.values) {
-      timer.cancel();
-    }
-    _typingExpiry.clear();
-  }
-
   @override
   RoomViewState build() {
     _wireSocketListeners();
@@ -328,13 +292,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
     });
     _socket.onRoomClosed.listen((_) => reset());
     _socket.onChatMessage.listen((message) {
-      // 메시지가 도착했다는 건 그 사람의 입력이 끝났다는 뜻 — 서버도 함께 꺼 주지만
-      // 이벤트 순서가 어긋나도 표시가 남지 않도록 로컬에서도 바로 지운다.
-      _setTyping(message.senderId, false);
       state = state.copyWith(chatLog: [...state.chatLog, message]);
-    });
-    _socket.onChatTyping.listen((update) {
-      _setTyping(update.playerId, update.isTyping);
     });
     _socket.onDraftConfigUpdated.listen((config) {
       state = state.copyWith(
@@ -583,10 +541,6 @@ class RoomNotifier extends Notifier<RoomViewState> {
 
   void sendChat(String text) => _socket.sendChat(text);
 
-  /// 내 채팅 입력 중 여부를 방에 알린다(chat:typing). room_screen이 입력 변화에 맞춰
-  /// 시작/주기 재전송/중단을 관리한다.
-  void sendTyping(bool isTyping) => _socket.sendTyping(isTyping);
-
   void configureGame({required String? category, required int aiBotCount}) {
     _socket.configureGame(category: category, aiBotCount: aiBotCount);
   }
@@ -617,7 +571,6 @@ class RoomNotifier extends Notifier<RoomViewState> {
   /// 방 나가기/소켓 재연결 등으로 완전히 초기 상태로 되돌릴 때.
   /// llmMock은 room과 무관한 서버 프로세스 전역 상태라 리셋해도 유지한다.
   void reset() {
-    _clearAllTyping();
     state = RoomViewState(llmMock: state.llmMock);
     RoomSessionStore.instance.clear();
   }

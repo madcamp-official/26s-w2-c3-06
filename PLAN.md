@@ -340,7 +340,6 @@ enum FriendshipStatus {
 - `room:leave` `{}` — 대기 상태(설정 전/게임 종료 후 대기 복귀 상태)에서만 유효. 게임 진행 중(`설명~역전승 시도`)에는 UI에 "방 나가기" 버튼 자체를 노출하지 않아 이 시나리오가 발생하지 않게 한다
 - `room:rejoin` `{ roomCode }` — 새로고침 등으로 연결이 끊겼다 되돌아왔을 때 방 상태 복구 요청
 - `chat:send` `{ text }` — 언제든 자유 채팅
-- `chat:typing` `{ isTyping: boolean }` — 채팅 입력 시작/중단 알림. 서버는 상태를 저장하지 않고 같은 방의 다른 소켓에 `chat:typingUpdated`로 그대로 중계만 한다. 클라이언트는 입력이 이어지는 동안 주기적으로(2초) `true`를 재전송하고, 입력이 멎거나(3초) 입력창이 비거나 메시지를 전송하면 `false`를 보낸다
 - `player:ready` `{ isReady: boolean }` — 대기방에서 준비 상태 토글. 봇은 참여 즉시 서버가 `isReady: true`로 고정
 - `game:draftConfig` `{ category: string | null, aiBotCount: number }` — 호스트 전용. 게임 시작 전 대기방에서 카테고리/봇 수를 만지작거릴 때마다 보내, 다른 참가자 화면에도 실시간 미리보기로 반영(아직 게임 시작은 아님)
 - `game:configure` `{ category: string | null, aiBotCount: number }` — 호스트 전용, **전원(사람+봇)이 `isReady: true`이고 참가자 수(사람+봇)가 3명 이상일 때만** 허용(방이 다 차지 않아도 이 조건만 충족하면 시작 가능), 아니면 `room:error`. 참가자 수(사람+봇)가 방의 `maxPlayers`를 넘으면(즉 `players.length + aiBotCount > maxPlayers`) 마찬가지로 `room:error`. `category`는 세 경로로 채워질 수 있다: (1) 프리셋 **칩 목록**(하드코딩된 기본 카테고리 + 이 방에서 그동안 사용된 `customCategories`)에서 선택한 값, (2) **자유 입력** 문자열, (3) `null` — 이 경우 AI가 카테고리까지 생성. **어느 경로든 이번 게임에 실제로 확정된 카테고리(AI 랜덤 생성분 포함)는 서버가 해당 방의 `customCategories`에 중복 없이 추가**해 이후 같은 방에서 칩으로 재사용 가능(방 종료 시 함께 소멸, DB 저장 안 함). 새 카테고리가 추가되면 서버가 `room:customCategoriesUpdated`를 방 전체에 브로드캐스트. 전송 즉시 새 게임 시작 + 방 채팅 초기화
@@ -360,7 +359,6 @@ enum FriendshipStatus {
 - `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, maxPlayers, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 그 페이즈에 맞는 타이머 이벤트(`turn:started`/`vote:started`/`discussion:started`/`liar:guessPrompt`)를 원래 종료 예정 시각 기준 실제 남은 시간으로 재계산해 재전송하고, `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 보낸다
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
 - `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨. 토론 페이즈 중 서버가 5초 간격으로 실제 참가자(사람) 한 명을 무작위로 골라 그 사람의 진짜 senderId로 흘려보내는 AI 사칭 메시지도 `type: 'chat'`으로 이 경로를 그대로 타므로, 클라이언트는 이를 구분할 방법이 없다(의도된 설계 — 게임 종료 후에도 공개하지 않음)
-- `chat:typingUpdated` `{ playerId, isTyping }` — 어떤 참가자가 채팅 입력 중인지(보낸 본인 제외 방 전체 브로드캐스트). 수신 측은 표시 후 일정 시간(5초) 안에 `true` 재전송이 없으면 스스로 지워, `false` 유실·연결 끊김에도 표시가 남지 않게 한다. 서버도 `chat:send` 처리·퇴장·연결 끊김 시점에 `false`를 함께 브로드캐스트해 즉시 꺼지게 한다
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
 - `turn:started` `{ playerId, timeLimitSec }`
