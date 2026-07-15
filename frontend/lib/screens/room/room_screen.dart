@@ -1210,12 +1210,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (s.phase == GamePhase.ended)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('게임 종료 — 새 게임을 시작할 수 있어요',
-                  style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
-            ),
           // 참가자 프로필(아바타·준비 상태)은 화면 상단(_playerProfileRow)으로 옮겨졌다.
           // 방장은 서버가 참여 즉시 준비 완료로 고정해두므로(봇과 동일 규칙) 준비 토글을
           // 보여주지 않는다. 방장이 아닌 참가자만 직접 준비 상태를 토글하고, 이 버튼은
