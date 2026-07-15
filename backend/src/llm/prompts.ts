@@ -21,7 +21,7 @@ ${usedCategoriesLine}반드시 JSON만 출력: {"categories": [string, string, s
 // 카테고리에 실제로 속하는 구체적인 제시어 쌍(citizenWord/liarWord)을 3개 만든다.
 // LLM에게 하나만 확정하게 하면 항상 가장 "무난한" 쌍으로 수렴하는 경향이 있어(카테고리 후보와
 // 동일한 이유), 3쌍을 받아 실제 선택은 서버 코드가 무작위로 해서 다양성을 확보한다.
-export function wordPairPrompt(category: string, usedWords: string[]): string {
+export function wordPairCandidatesPrompt(category: string, usedWords: string[]): string {
   const usedWordsLine = usedWords.length
     ? `\n이미 사용한 단어는 피하세요: ${usedWords.join(', ')}.\n`
     : '';
