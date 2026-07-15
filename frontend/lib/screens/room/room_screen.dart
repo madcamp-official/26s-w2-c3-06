@@ -1514,29 +1514,61 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ] else ...[
             const SizedBox(height: 10),
             // 방장이 아닌 참가자 화면도 위로 쌓지 않고 가로 한 줄로 나열한다.
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
-                    style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
+            // 데스크탑(웹)은 방장 화면과 같이 세 구간을 균등한 너비(flex 1)로 나누고,
+            // 모바일은 폭이 좁아 준비 버튼을 내용 크기로 줄여 카테고리 문구가 안 가려지게 한다.
+            if (context.isDesktop)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+                      style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
-                if (me != null) ...[
-                  const SizedBox(width: 16),
-                  AppButton(
-                    label: me.isReady ? '준비완료 ✓' : '준비하기',
-                    variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
-                    dense: true,
-                    fullWidth: false,
-                    onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Center(
+                      child: Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                    ),
                   ),
+                  if (me != null) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: AppButton(
+                        label: me.isReady ? '준비완료 ✓' : '준비하기',
+                        variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                        dense: true,
+                        onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+                      style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  if (me != null) ...[
+                    const SizedBox(width: 16),
+                    AppButton(
+                      label: me.isReady ? '준비완료 ✓' : '준비하기',
+                      variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                      dense: true,
+                      fullWidth: false,
+                      onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
+                    ),
+                  ],
+                ],
+              ),
           ],
         ],
       ),
@@ -1869,7 +1901,7 @@ class _PlayerProfileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveStatusText = disconnected ? '🔌재접속중' : statusText;
+    final effectiveStatusText = disconnected ? '재접속중' : statusText;
     final effectiveStatusColor = disconnected ? AppColors.destructive : statusColor;
     return Opacity(
       opacity: disconnected ? 0.45 : 1,
