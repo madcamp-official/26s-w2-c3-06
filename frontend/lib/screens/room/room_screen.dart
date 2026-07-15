@@ -94,6 +94,46 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 매 호출마다 토큰을 발급해 "내가 아직 최신 팝업일 때만" 플래그를 지우게 해서 막는다.
   int _dialogToken = 0;
 
+  // 턴이 바뀔 때 확인 버튼을 눌러야 닫히는 팝업을 띄우면 설명 페이즈 내내 계속 끊기므로,
+  // 화면 상단에 잠깐 떴다 스스로 사라지는 배너를 직접 오버레이로 띄운다.
+  OverlayEntry? _turnToastEntry;
+
+  void _showTurnToast(String text, {required bool isMine}) {
+    _turnToastEntry?.remove();
+    final overlay = Overlay.of(context);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 12,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: PixelBox(
+              color: isMine ? AppColors.primary : AppColors.card,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  text,
+                  style: PixelFont.title(fontSize: 13, color: isMine ? Colors.white : AppColors.foreground),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    _turnToastEntry = entry;
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (_turnToastEntry == entry) {
+        entry.remove();
+        _turnToastEntry = null;
+      }
+    });
+  }
+
   Future<T?> _showManagedDialog<T>({
     required WidgetBuilder builder,
     bool barrierDismissible = false,
@@ -136,6 +176,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   @override
   void dispose() {
+    _turnToastEntry?.remove();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -808,6 +849,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         _showDisconnectedDialog();
       }
     });
+    // 설명 차례가 바뀐 걸 못 알아챈다는 피드백 — 확인 버튼이 필요한 팝업 대신, 잠깐 떴다
+    // 사라지는 배너로 매 턴마다 알려준다(내 차례인지 아닌지 문구를 다르게 보여준다).
+    ref.listen<String?>(roomProvider.select((v) => v.currentTurnPlayerId), (prev, next) {
+      if (next == null || next == prev) return;
+      final s = ref.read(roomProvider);
+      if (next == _myUid) {
+        _showTurnToast('내 차례예요! 제시어를 설명해주세요', isMine: true);
+      } else {
+        _showTurnToast('${s.nicknameOf(next)}님 차례예요', isMine: false);
+      }
+    });
 
     if (s.chatLog.length != _lastChatLen) {
       _lastChatLen = s.chatLog.length;
@@ -848,14 +900,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     final hideForKeyboard = !isDesktop && keyboardOpen;
+    // 투표 중엔 확정 상태/버튼을 반드시 볼 수 있어야 하므로, 접힘·키보드에 의한 숨김을
+    // 무시하고 항상 펼쳐 보여준다(접혀 있으면 확정했는지조차 확인할 방법이 없었다).
+    final forceShowPanel = s.phase == GamePhase.voting;
     // 키보드와 무관하게, 채팅을 더 넓게 보고 싶을 때 직접 접었다 펼 수 있는 토글도 둔다.
-    final showContextPanel = !hideForKeyboard && !_contextPanelCollapsed;
+    final showContextPanel = forceShowPanel || (!hideForKeyboard && !_contextPanelCollapsed);
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
         if (!hideForKeyboard) _playerProfileRow(s, isHost),
         Expanded(child: _chatFeed(s)),
-        if (!hideForKeyboard) _contextPanelToggle(showContextPanel),
+        if (!hideForKeyboard && !forceShowPanel) _contextPanelToggle(showContextPanel),
         if (showContextPanel) _contextPanel(s, isHost),
         _inputBar(s),
       ],
@@ -934,9 +989,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.title(fontSize: 16, color: AppColors.foreground, height: 1.1),
                   overflow: TextOverflow.ellipsis,
                 ),
-                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를
-                // 보여준다 — 타이머는 이제 상단바가 아니라 각 페이즈 패널(채팅 입력창 위)
-                // 에 표시된다.
+                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를 보여준다.
                 if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
                   Text(
                     '카테고리: ${s.category}',
@@ -952,6 +1005,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
+          // 타이머는 패널이 접히거나 키보드에 가려도 항상 보여야 해서 상단바 오른쪽에 크게
+          // 고정 표시한다(설정 패널 안에 있으면 접혔을 때 아예 안 보이던 문제가 있었다).
+          if (s.phaseDeadline != null) ...[
+            const SizedBox(width: 8),
+            _headerTimer(s),
+          ],
           if (showActions) ...[
             if (isHost && _canInviteFriends) ...[
               HoverTap(
@@ -967,6 +1026,35 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  /// 상단바 오른쪽에 크게 보이는 타이머. 토론 중엔 -10초/+10초 조절 버튼도 양옆에 붙인다.
+  Widget _headerTimer(RoomViewState s) {
+    final isDiscussion = s.phase == GamePhase.discussion;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (isDiscussion) ...[
+          _timerAdjustButton(
+            icon: Icons.remove_circle_outline,
+            enabled: s.canShortenDiscussion,
+            onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(-10),
+          ),
+          const SizedBox(width: 4),
+        ],
+        const Icon(Icons.timer_outlined, size: 18, color: AppColors.primary),
+        const SizedBox(width: 4),
+        CountdownText(deadline: s.phaseDeadline!, style: PixelFont.title(fontSize: 18, color: AppColors.primary)),
+        if (isDiscussion) ...[
+          const SizedBox(width: 4),
+          _timerAdjustButton(
+            icon: Icons.add_circle_outline,
+            enabled: s.canExtendDiscussion,
+            onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(10),
+          ),
+        ],
+      ],
     );
   }
 
@@ -987,30 +1075,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           style: PixelFont.title(fontSize: 10, color: Colors.white, height: 1),
         ),
       ),
-    );
-  }
-
-  /// 토론 중 채팅창 위 패널에 타이머를 두고, 그 양옆에 -10초/+10초 버튼을 붙인다.
-  /// 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장 각각 한 번씩만
-  /// 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
-  Widget _discussionTimerRow(RoomViewState s) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _timerAdjustButton(
-          icon: Icons.remove_circle_outline,
-          enabled: s.canShortenDiscussion,
-          onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(-10),
-        ),
-        const SizedBox(width: 6),
-        CountdownText(deadline: s.phaseDeadline!, style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
-        const SizedBox(width: 6),
-        _timerAdjustButton(
-          icon: Icons.add_circle_outline,
-          enabled: s.canExtendDiscussion,
-          onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(10),
-        ),
-      ],
     );
   }
 
@@ -1370,24 +1434,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(statusText,
-                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
-              ),
-              if (s.phaseDeadline != null) ...[
-                const SizedBox(width: 6),
-                const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
-                const SizedBox(width: 4),
-                CountdownText(
-                  deadline: s.phaseDeadline!,
-                  style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
-                ),
-              ],
-            ],
-          ),
+          // 타이머는 접히거나 키보드에 가려도 항상 보여야 해서 상단바로 옮겼다(_headerTimer 참고).
+          Text(statusText,
+              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
         ],
       ),
     );
@@ -1400,13 +1449,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
-              if (s.phaseDeadline != null) _discussionTimerRow(s),
-            ],
-          ),
+          // 타이머·조절 버튼은 상단바로 옮겼다(_headerTimer 참고).
+          Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
         ],
       ),
     );
