@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL as ANTHROPIC_MODEL } from './anthropicClient';
-import { getOpenAI, hasOpenAIKey, OPENAI_MODEL } from './openaiClient';
+import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_JUDGE_MODEL } from './openaiClient';
 import {
   categoryCandidatesPrompt,
   wordPairPrompt,
@@ -43,11 +43,17 @@ const provider = resolveProvider();
 
 // 프롬프트 문구·JSON 파싱·거절 감지 등 나머지 로직은 provider와 무관하게 전부 동일하게
 // 재사용한다 — 여기서 실제 API 호출 부분만 provider별로 분기한다.
-async function completeText(prompt: string, maxTokens: number, system?: string): Promise<string> {
+async function completeText(
+  prompt: string,
+  maxTokens: number,
+  system?: string,
+  openaiModelOverride?: string,
+): Promise<string> {
   if (provider === 'openai') {
     const res = await getOpenAI().chat.completions.create({
-      model: OPENAI_MODEL,
-      max_tokens: maxTokens,
+      model: openaiModelOverride ?? OPENAI_MODEL,
+      // gpt-5.4 계열부터 max_tokens가 아니라 max_completion_tokens를 요구한다(400 에러).
+      max_completion_tokens: maxTokens,
       messages: [
         ...(system ? [{ role: 'system' as const, content: system }] : []),
         { role: 'user' as const, content: prompt },
@@ -168,7 +174,7 @@ const realLLM: LiarGameLLM = {
   async judgeLiarGuess(guess, realWord, category) {
     // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·표기 차이 허용과 동음이의어의 카테고리 맥락
     // 해석까지 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
-    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8);
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8, undefined, OPENAI_JUDGE_MODEL);
     return raw.trim().toLowerCase().startsWith('true');
   },
 };
