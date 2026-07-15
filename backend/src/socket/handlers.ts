@@ -307,6 +307,12 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     gameEngine.castVote(io, room, uid, payload.votedPlayerId);
   });
 
+  socket.on('vote:confirm', () => {
+    const room = currentRoom();
+    if (!room) return;
+    gameEngine.confirmVote(io, room, uid);
+  });
+
   socket.on('liar:guessWord', (payload: { guess: string }) => {
     const room = currentRoom();
     if (!room || !payload.guess?.trim()) return;

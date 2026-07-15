@@ -78,6 +78,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
   String? _myVote;
 
+  // 후보 선택(변경 가능)과 별개로, "투표 확정"을 눌러야 서버 집계에 확정으로 반영된다.
+  // 확정 후 후보를 바꾸면 서버 쪽 확정도 취소되므로 여기서도 함께 false로 되돌린다.
+  bool _myVoteConfirmed = false;
+
   // 이 화면의 팝업은 항상 한 번에 하나만 떠 있어야 한다 — 새 팝업을 열어야 하는데 이미
   // 하나가 떠 있으면(예: 역전 기회 입력 중에 시간 만료로 결과가 먼저 와버린 경우) 팝업 위에
   // 팝업을 쌓지 않고 이전 것을 먼저 닫는다. 모든 다이얼로그는 showPixelDialog를 직접 부르지
@@ -305,8 +309,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     return HoverTap(
                       onTap: () => setDialogState(() => draft = p.id),
                       child: PixelBox(
-                        color: selected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-                        border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: 2),
+                        // 은은한 주황 틴트(15%)가 실기기 화면에서 오히려 어둡게 보인다는
+                        // 피드백이 있어, 선택 상태를 밝은 초록으로 뚜렷하게 표시한다.
+                        color: selected ? AppColors.success.withValues(alpha: 0.22) : AppColors.card,
+                        border: Border.all(color: selected ? AppColors.success : AppColors.border, width: 2),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -319,7 +325,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                             const SizedBox(height: 4),
                             Text(
                               p.nickname,
-                              style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                              style: PixelFont.body(
+                                fontSize: 11,
+                                color: selected ? AppColors.success : AppColors.foreground,
+                                fontWeight: selected ? FontWeight.bold : null,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
@@ -356,7 +366,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
 
     if (confirmed == null || !mounted) return;
-    setState(() => _myVote = confirmed);
+    // 이미 확정한 뒤 후보를 바꾸면 서버 쪽 확정도 취소되므로(gameEngine.castVote 참고),
+    // 다시 "투표 확정"을 눌러야 하는 상태로 되돌린다.
+    setState(() {
+      if (confirmed != _myVote) _myVoteConfirmed = false;
+      _myVote = confirmed;
+    });
     ref.read(roomProvider.notifier).castVote(confirmed);
   }
 
@@ -711,7 +726,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 게임이 실제로 시작/종료되면 "게임 시작"/"제출" 버튼의 로딩 표시도 함께 내린다.
     ref.listen<GamePhase>(roomProvider.select((v) => v.phase), (prev, next) {
       if (next == GamePhase.voting && prev != GamePhase.voting) {
-        setState(() => _myVote = null);
+        setState(() {
+          _myVote = null;
+          _myVoteConfirmed = false;
+        });
         // 투표 페이즈 진입 시 화면 가운데 팝업으로 바로 투표를 띄운다.
         _openVoteDialog(ref.read(roomProvider));
       }
@@ -1371,13 +1389,37 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           if (s.votesInCount != null && s.totalVoteCount != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('투표 ${s.votesInCount}/${s.totalVoteCount}',
+              child: Text('확정 ${s.votesInCount}/${s.totalVoteCount}',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             ),
           const SizedBox(height: 8),
-          AppButton(
-            label: _myVote == null ? '투표하기' : '투표 변경하기 (${s.nicknameOf(_myVote!)})',
-            onPressed: () => _openVoteDialog(s),
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: AppButton(
+                  label: _myVote == null ? '투표하기' : '투표 변경하기 (${s.nicknameOf(_myVote!)})',
+                  onPressed: () => _openVoteDialog(s),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 후보 선택과 별개로, 이 버튼을 눌러야 서버 집계에 "확정"으로 반영된다.
+              // 전원이 확정하면 제한시간을 다 기다리지 않고 곧바로(3초 뒤) 결과로 넘어간다.
+              Expanded(
+                flex: 2,
+                child: AppButton(
+                  label: _myVoteConfirmed ? '확정완료 ✓' : '투표 확정',
+                  variant: _myVoteConfirmed ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                  accentColor: _myVoteConfirmed ? AppColors.success : null,
+                  onPressed: _myVote == null || _myVoteConfirmed
+                      ? null
+                      : () {
+                          setState(() => _myVoteConfirmed = true);
+                          ref.read(roomProvider.notifier).confirmVote();
+                        },
+                ),
+              ),
+            ],
           ),
         ],
       ),

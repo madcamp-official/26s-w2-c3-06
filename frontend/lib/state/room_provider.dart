@@ -556,6 +556,8 @@ class RoomNotifier extends Notifier<RoomViewState> {
 
   void castVote(String votedPlayerId) => _socket.castVote(votedPlayerId);
 
+  void confirmVote() => _socket.confirmVote();
+
   void guessWord(String guess) => _socket.guessWord(guess);
 
   /// 방 나가기/소켓 재연결 등으로 완전히 초기 상태로 되돌릴 때.

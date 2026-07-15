@@ -39,6 +39,13 @@ interface DiscussionAdjustUsage {
   shortened: Set<string>;
 }
 const discussionAdjustUsageByRoom = new Map<string, DiscussionAdjustUsage>();
+// 이번 투표 페이즈에서 "투표 확정"을 누른 uid들 — 후보를 고르는 것(castVote)과는 별개로,
+// 전원이 명시적으로 확정해야(또는 시간 만료) 투표가 끝난다.
+const voteConfirmedByRoom = new Map<string, Set<string>>();
+// 전원 확정 후 바로 집계하지 않고 3초 유예를 두는 타이머(마음이 바뀌어 다시 후보를 바꿀
+// 짧은 틈을 준다) — 투표 페이즈 전체 제한시간 타이머(phaseTimers)와는 별개로 관리한다.
+const voteGraceTimers = new Map<string, NodeJS.Timeout>();
+const VOTE_ALL_CONFIRMED_GRACE_MS = 3000;
 
 function isBotId(id: string): boolean {
   return id.startsWith('bot-');
@@ -51,8 +58,12 @@ function clearRoomTimers(roomCode: string): void {
   const t2 = phaseTimers.get(roomCode);
   if (t2) clearTimeout(t2);
   phaseTimers.delete(roomCode);
+  const t3 = voteGraceTimers.get(roomCode);
+  if (t3) clearTimeout(t3);
+  voteGraceTimers.delete(roomCode);
   discussionDeadlineByRoom.delete(roomCode);
   discussionAdjustUsageByRoom.delete(roomCode);
+  voteConfirmedByRoom.delete(roomCode);
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -452,6 +463,7 @@ function startVoting(io: Server, room: RoomState): void {
   if (!game) return;
   game.phase = 'voting';
   game.votes = {};
+  voteConfirmedByRoom.set(room.roomCode, new Set());
 
   broadcastChat(io, room, 'system', 'system', '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.');
   io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC });
@@ -469,28 +481,71 @@ function startVoting(io: Server, room: RoomState): void {
       if (room.currentGame !== game) return;
       const target = pickRandom(game.participantIds.filter((id) => id !== bot.id));
       castVote(io, room, bot.id, target);
+      // 봇은 사람처럼 마음이 바뀔 일이 없으니 고르는 즉시 확정한다.
+      confirmVote(io, room, bot.id);
     }, delay);
   }
 }
 
+function emitVoteProgress(io: Server, room: RoomState, game: GameState): void {
+  const confirmed = voteConfirmedByRoom.get(room.roomCode);
+  const votesInCount = confirmed?.size ?? 0;
+  const totalCount = game.participantIds.length;
+  io.to(room.roomCode).emit('vote:progress', { votesInCount, totalCount });
+}
+
 // 익명 투표, 서버 내부 집계 전용 (PLAN: 개인별 선택은 어떤 클라이언트에도 전송 안 함).
-// 투표 대상은 제한시간(VOTE_TIME_LIMIT_SEC) 안에서는 자유롭게 바꿀 수 있고(재투표 시 기존
-// 선택을 덮어씀), 전원이 투표를 마치면 30초를 다 기다리지 않고 바로 종료한다.
+// 투표 대상은 제한시간(VOTE_TIME_LIMIT_SEC) 안에서는 자유롭게 바꿀 수 있다(재투표 시 기존
+// 선택을 덮어씀) — 다만 이것만으로는 투표가 끝나지 않고, confirmVote로 명시적으로 확정해야
+// (또는 시간 만료) 집계로 넘어간다. 이미 확정한 뒤 선택을 바꾸면 그 확정은 취소되어
+// 다시 확정을 눌러야 한다.
 export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   if (!game.participantIds.includes(votedPlayerId)) return;
+  if (game.votes[voterId] === votedPlayerId) return;
 
   game.votes[voterId] = votedPlayerId;
-  const votesInCount = Object.keys(game.votes).length;
-  const totalCount = game.participantIds.length;
-  io.to(room.roomCode).emit('vote:progress', { votesInCount, totalCount });
 
-  if (votesInCount >= totalCount) {
-    const timer = phaseTimers.get(room.roomCode);
-    if (timer) clearTimeout(timer);
-    phaseTimers.delete(room.roomCode);
-    resolveVoting(io, room);
+  const confirmed = voteConfirmedByRoom.get(room.roomCode);
+  if (confirmed?.delete(voterId)) {
+    emitVoteProgress(io, room, game);
+    // 전원 확정 유예(3초) 중이었다면, 더 이상 전원 확정 상태가 아니므로 취소한다
+    // (원래의 투표 제한시간 타이머(phaseTimers)는 건드리지 않아 그대로 fallback으로 남는다).
+    const grace = voteGraceTimers.get(room.roomCode);
+    if (grace) {
+      clearTimeout(grace);
+      voteGraceTimers.delete(room.roomCode);
+    }
+  }
+}
+
+// 투표를 최종 확정한다. 아직 아무도 안 골랐으면(votes[uid] 없음) 무시한다.
+// 전원이 확정하면 제한시간을 다 기다리지 않고 3초 뒤 집계로 넘어간다(마음이 바뀌어
+// 다시 후보를 바꿀 짧은 틈을 준다).
+export function confirmVote(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'voting') return;
+  if (!game.votes[uid]) return;
+
+  const confirmed = voteConfirmedByRoom.get(room.roomCode) ?? new Set<string>();
+  voteConfirmedByRoom.set(room.roomCode, confirmed);
+  confirmed.add(uid);
+  emitVoteProgress(io, room, game);
+
+  if (confirmed.size >= game.participantIds.length) {
+    const existingGrace = voteGraceTimers.get(room.roomCode);
+    if (existingGrace) clearTimeout(existingGrace);
+    voteGraceTimers.set(
+      room.roomCode,
+      setTimeout(() => {
+        voteGraceTimers.delete(room.roomCode);
+        const timer = phaseTimers.get(room.roomCode);
+        if (timer) clearTimeout(timer);
+        phaseTimers.delete(room.roomCode);
+        resolveVoting(io, room);
+      }, VOTE_ALL_CONFIRMED_GRACE_MS),
+    );
   }
 }
 
@@ -498,6 +553,9 @@ function resolveVoting(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   phaseTimers.delete(room.roomCode);
+  const grace = voteGraceTimers.get(room.roomCode);
+  if (grace) clearTimeout(grace);
+  voteGraceTimers.delete(room.roomCode);
 
   const tally = new Map<string, number>();
   for (const votedId of Object.values(game.votes)) {

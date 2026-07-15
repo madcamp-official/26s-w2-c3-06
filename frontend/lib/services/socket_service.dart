@@ -230,6 +230,10 @@ class SocketService {
     _socket?.emit('vote:cast', {'votedPlayerId': votedPlayerId});
   }
 
+  void confirmVote() {
+    _socket?.emit('vote:confirm');
+  }
+
   void guessWord(String guess) {
     _socket?.emit('liar:guessWord', {'guess': guess});
   }
