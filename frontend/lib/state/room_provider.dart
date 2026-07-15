@@ -535,7 +535,14 @@ class RoomNotifier extends Notifier<RoomViewState> {
     _socket.updateDraftConfig(category: category, aiBotCount: aiBotCount);
   }
 
-  void submitDescription(String text) => _socket.submitDescription(text);
+  // 설명 제출 후 서버는 AI 교란 코멘트 생성을 기다린 다음에야 다음 턴을 시작한다
+  // (turn:started). 그 사이 프론트가 이전 턴의 타이머를 계속 들고 있으면 이미 끝난
+  // 시간이 0에서 멈춰있거나 계속 흐르는 것처럼 보이므로, 여기서 바로 지워 다음 턴이
+  // 실제로 시작되는 시점에만 타이머가 새로 나타나게 한다.
+  void submitDescription(String text) {
+    _socket.submitDescription(text);
+    state = state.copyWith(clearCurrentTurnPlayerId: true, clearPhaseDeadline: true);
+  }
 
   void adjustDiscussionTime(int deltaSec) => _socket.adjustDiscussionTime(deltaSec);
 
