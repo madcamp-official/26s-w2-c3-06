@@ -423,6 +423,15 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 
   const deadline = discussionDeadlineByRoom.get(room.roomCode) ?? Date.now();
   const remainingSec = (deadline - Date.now()) / 1000;
+
+  // 남은 시간이 10초 미만인데 단축을 누르면 어중간하게 몇 초 줄이는 대신 바로 투표로 넘긴다.
+  if (deltaSec < 0 && remainingSec < 10) {
+    const timer = phaseTimers.get(room.roomCode);
+    if (timer) clearTimeout(timer);
+    startVoting(io, room);
+    return;
+  }
+
   const nextRemainingSec = Math.max(DISCUSSION_MIN_REMAINING_SEC, remainingSec + deltaSec);
 
   const timer = phaseTimers.get(room.roomCode);
