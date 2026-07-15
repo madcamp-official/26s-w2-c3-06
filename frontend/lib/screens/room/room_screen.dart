@@ -905,9 +905,16 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 if (s.phase == GamePhase.discussion && s.phaseDeadline != null)
                   _discussionTimerRow(s)
                 else if (s.phase == GamePhase.describing && s.phaseDeadline != null)
-                  CountdownText(
-                    deadline: s.phaseDeadline!,
-                    style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
+                      const SizedBox(width: 4),
+                      CountdownText(
+                        deadline: s.phaseDeadline!,
+                        style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                      ),
+                    ],
                   )
                 else
                   Text(
