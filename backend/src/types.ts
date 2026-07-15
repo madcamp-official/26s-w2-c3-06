@@ -32,6 +32,9 @@ export interface GameState {
   liarWord: string;
   liarIds: string[]; // 서버 전용 비밀. MVP: 길이 1 고정. 추후 라이어 수 선택 시 증가
   participantIds: string[]; // 방 플레이어 + 이번 게임에 호스트가 추가한 봇
+  // 게임 시작 시점의 참가자 표시 정보 스냅샷. 도중에 나간 사람은 room.players에서 빠지므로,
+  // 그 이후의 닉네임 조회(퇴장 안내 채팅, 재접속자에게 내려주는 게임 상태)는 이걸로 해석한다.
+  participants: { id: string; nickname: string; isBot: boolean }[];
   aiBotCount: number;
   phase: GamePhase;
   playerOrder: string[]; // 설명 순서. 게임 단위로 한 번 정해 모든 라운드에서 고정 사용
