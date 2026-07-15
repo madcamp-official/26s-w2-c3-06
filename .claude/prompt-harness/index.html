@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM 프롬프트 하네스</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #1a1d24; --panel2: #22262f; --border: #2e333d;
+    --fg: #e6e8ec; --muted: #9aa2ad; --accent: #6ea8fe; --accent2: #f0a35e;
+    --good: #4ec98a; --bad: #e06c6c; --openai: #74aa9c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .status { font-size: 12px; color: var(--muted); }
+  header .status b { color: var(--fg); }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { padding: 8px 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; color: var(--muted); }
+  .tab.active { color: var(--fg); border-color: var(--accent); background: var(--panel2); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .controls { display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  label { font-size: 13px; color: var(--muted); min-width: 96px; }
+  input[type=text] { flex: 1; min-width: 180px; padding: 9px 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font: inherit; }
+  input[type=text]:disabled { opacity: .5; }
+  input[type=checkbox] { width: 16px; height: 16px; }
+  button.run { align-self: flex-start; padding: 10px 22px; background: var(--accent); color: #08111f; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+  button.run:disabled { opacity: .5; cursor: default; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-top: 20px; }
+  .col h2 { font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; border-top: 3px solid var(--openai); }
+  .col h2 .model { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .col .body { padding: 14px; }
+  .field { margin-bottom: 12px; }
+  .field .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 3px; }
+  .field .v { font-size: 15px; }
+  .word { font-size: 18px; font-weight: 600; }
+  .word.citizen { color: var(--good); }
+  .word.liar { color: var(--accent2); }
+  .cands { display: flex; flex-direction: column; gap: 5px; }
+  .cand { padding: 5px 10px; background: var(--panel2); border-radius: 6px; border: 1px solid transparent; display: flex; justify-content: space-between; }
+  .cand.picked { border-color: var(--accent); }
+  .cand .badge { font-size: 11px; color: var(--accent); }
+  .pairs-list { display: flex; flex-direction: column; gap: 6px; }
+  .pair { padding: 7px 10px; background: var(--panel2); border-radius: 6px; border: 1px solid transparent; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pair.picked { border-color: var(--accent); background: rgba(110,168,254,.08); }
+  .pair .word { font-size: 15px; font-weight: 600; }
+  .pair .vs { color: var(--muted); font-size: 11px; }
+  .pair .badge { font-size: 11px; color: var(--accent); margin-left: auto; }
+  .chip-btn { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; line-height: 1.4; white-space: nowrap; }
+  .chip-btn:hover { border-color: var(--accent); color: var(--fg); }
+  .word-wrap { display: inline-flex; align-items: center; gap: 5px; }
+  .cat-line { display: flex; align-items: center; gap: 8px; }
+  /* 프론트(게임)의 프리셋 카테고리 칩 — 클릭하면 해당 카테고리 입력칸을 채운다 */
+  .cat-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 0 2px 108px; }
+  .cat-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); cursor: pointer; }
+  .cat-chip:hover { border-color: var(--accent); color: var(--fg); }
+  @media (max-width: 700px) { .cat-chips { margin-left: 0; } }
+  .err { color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+  details { margin-top: 10px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre { background: #0b0d11; border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; }
+  .spinner { color: var(--muted); font-size: 13px; }
+  .elapsed { font-size: 11px; color: var(--muted); font-weight: 400; }
+  .prompts { margin-top: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .prompts > summary, .prompts .phead { padding: 11px 16px; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .prompts > summary::-webkit-details-marker { display: none; }
+  .prompts .pbody { padding: 14px 16px; }
+  .prompts .pitem { margin-bottom: 16px; }
+  .prompts .pitem:last-child { margin-bottom: 0; }
+  .prompts .plabel { font-size: 12px; color: var(--muted); margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+  label.radio { min-width: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--fg); cursor: pointer; }
+  /* 채팅 */
+  .chat-log { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; min-height: 120px; display: flex; flex-direction: column; gap: 10px; }
+  .chat-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+  .msg { display: flex; flex-direction: column; gap: 3px; max-width: 82%; }
+  .msg .who { font-size: 11px; color: var(--muted); }
+  .msg .bubble { padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.45; }
+  .msg.turn { align-self: flex-start; }
+  .msg.turn .bubble { background: var(--panel2); border: 1px solid var(--border); }
+  .msg.turn .tagw { font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+  .msg.turn .tagw.citizen { background: rgba(78,201,138,.15); color: var(--good); }
+  .msg.turn .tagw.liar { background: rgba(240,163,94,.15); color: var(--accent2); }
+  .msg.chat { align-self: flex-start; }
+  .msg.chat .bubble { background: var(--panel2); border: 1px solid var(--border); }
+  /* 하네스에서만 보이는 표식(실제 게임 클라이언트엔 이런 구분이 전혀 없음) */
+  .msg.chat .imp-tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; background: rgba(240,163,94,.15); color: var(--accent2); }
+  .msg .del { cursor: pointer; color: var(--muted); font-size: 11px; align-self: flex-start; }
+  .pick-body .gen-text { font-size: 15px; margin-bottom: 8px; }
+  .refused-tag { font-size: 11px; color: var(--bad); border: 1px solid var(--bad); border-radius: 999px; padding: 1px 7px; margin-left: 6px; }
+  .verdict { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .verdict .v-yes { color: var(--good); font-weight: 700; }
+  .verdict .v-no { color: var(--bad); font-weight: 700; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧪 LLM 프롬프트 하네스</h1>
+  <div class="status" id="status">상태 확인 중…</div>
+</header>
+<main>
+  <div class="tabs">
+    <div class="tab active" data-tab="wordpair">제시어 생성 (generateWordPair)</div>
+    <div class="tab" data-tab="explain">단어 설명 (explainWord)</div>
+    <div class="tab" data-tab="chat">채팅 (설명 턴 · 토론 사칭)</div>
+    <div class="tab" data-tab="judge">정답 판정 (judgeLiarGuess)</div>
+  </div>
+
+  <!-- 제시어 생성 -->
+  <section id="tab-wordpair">
+    <div class="panel controls">
+      <div class="row">
+        <label>카테고리</label>
+        <input type="text" id="wp-category" placeholder="예: 지하철 역 / 편의점 음식 …" disabled />
+      </div>
+      <div class="cat-chips" data-catfill="wp-category"></div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="wp-random" checked />
+        <span class="hint">AI가 카테고리 후보 3개를 뽑아 랜덤 선택 (체크 시 위 입력 무시)</span>
+      </div>
+      <div class="row">
+        <label>사용한 카테고리</label>
+        <input type="text" id="wp-usedcats" placeholder="랜덤 시 회피용, 쉼표로 구분 (선택)" />
+      </div>
+      <div class="row">
+        <label>사용한 단어</label>
+        <input type="text" id="wp-usedwords" placeholder="회피용, 쉼표로 구분 (선택)" />
+      </div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <span class="hint">🔍 웹 검색으로 실존·친숙도 확인 (정식 기능 · 항상 켜짐 · OpenAI Responses API web_search 툴)</span>
+      </div>
+      <button class="run" id="wp-run">생성 ▶</button>
+    </div>
+    <div class="col" id="wp-col" hidden><h2><span>OpenAI</span><span class="model" id="wp-model"></span></h2><div class="body" id="wp-body"></div></div>
+    <div class="prompts" id="wp-prompts" hidden></div>
+  </section>
+
+  <!-- 단어 설명 -->
+  <section id="tab-explain" hidden>
+    <div class="panel controls">
+      <div class="row">
+        <label>카테고리</label>
+        <input type="text" id="ex-category" placeholder="예: 동물 / 라면 … (같은 단어도 카테고리로 뜻이 갈림)" />
+      </div>
+      <div class="cat-chips" data-catfill="ex-category"></div>
+      <div class="row">
+        <label>단어</label>
+        <input type="text" id="ex-word" placeholder="예: 너구리 / 왕십리역 …" />
+      </div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <span class="hint">🔍 웹 검색으로 사실 확인 (정식 기능 · 항상 켜짐 · OpenAI Responses API web_search 툴)</span>
+      </div>
+      <button class="run" id="ex-run">설명 생성 ▶</button>
+    </div>
+    <div class="col" id="ex-col" hidden><h2><span>OpenAI</span><span class="model" id="ex-model"></span></h2><div class="body" id="ex-body"></div></div>
+    <div class="prompts" id="ex-prompts" hidden></div>
+  </section>
+
+  <!-- 채팅 (설명 턴 + 토론 사칭) -->
+  <section id="tab-chat" hidden>
+    <div class="panel controls">
+      <div class="row">
+        <label>카테고리</label>
+        <input type="text" id="ch-category" placeholder="예: 신화 속 동물" />
+      </div>
+      <div class="cat-chips" data-catfill="ch-category"></div>
+      <div class="row">
+        <label>시민 제시어</label>
+        <input type="text" id="ch-citizen" placeholder="예: 유니콘" />
+        <label style="min-width:64px">라이어</label>
+        <input type="text" id="ch-liar" placeholder="예: 페가수스" />
+      </div>
+      <div class="row">
+        <label>참가자 목록</label>
+        <input type="text" id="ch-participants" placeholder="쉼표로 구분, 예: 참가자1,참가자2,참가자3" value="참가자1,참가자2,참가자3,참가자4" />
+      </div>
+      <div class="hint">
+        <b>설명 페이즈</b>: 참가자별로 배정 단어를 골라 직접 설명을 쓰거나 봇에게 생성시켜 턴을 순서대로 쌓는다(AI 개입 없이 바로 다음 턴으로 넘어감).<br/>
+        <b>토론 페이즈</b>: 실제 게임은 5초 간격으로 참가자 한 명인 척 일반 채팅과 구분 불가능한 메시지를 흘려보낸다. 아래에서 직접 채팅을 쌓은 뒤 "사칭 메시지 생성"으로 재현한다(생성된 메시지엔 하네스에서만 보이는 🎭 표식을 붙임 — 실제 게임 클라이언트엔 이 표식이 없다).
+      </div>
+    </div>
+
+    <div class="chat-wrap">
+      <div class="chat-log" id="ch-log"></div>
+
+      <div class="panel controls" style="margin-top:14px">
+        <div class="row">
+          <label>발화자</label>
+          <input type="text" id="ch-speaker" placeholder="참가자1" style="max-width:160px" />
+          <label style="min-width:80px">배정 단어</label>
+          <label class="radio"><input type="radio" name="ch-assign" value="citizen" checked /> <span id="ch-assign-citizen">시민</span></label>
+          <label class="radio"><input type="radio" name="ch-assign" value="liar" /> <span id="ch-assign-liar">라이어</span></label>
+        </div>
+        <div class="row">
+          <label>설명</label>
+          <input type="text" id="ch-desc" placeholder="직접 설명 입력 후 '설명 추가', 또는 봇으로 생성" />
+          <button class="chip-btn" id="ch-add" style="padding:8px 14px">설명 추가</button>
+          <button class="chip-btn" id="ch-gen-turn" style="padding:8px 14px">🤖 봇으로 설명 생성</button>
+        </div>
+        <div class="row">
+          <label>토론 채팅</label>
+          <input type="text" id="ch-msg" placeholder="발화자가 말하는 자유 채팅(토론) 한 줄" />
+          <button class="chip-btn" id="ch-add-msg" style="padding:8px 14px">채팅 추가</button>
+        </div>
+        <div class="row">
+          <button class="chip-btn" id="ch-gen-imp" style="padding:8px 14px">🎭 사칭 메시지 생성</button>
+          <button class="chip-btn" id="ch-reset" style="padding:8px 14px">채팅 초기화</button>
+        </div>
+      </div>
+
+      <!-- 봇 턴/사칭 메시지 생성 결과를 보여주고 "채택" 버튼으로 채팅에 반영 -->
+      <div class="col" id="ch-col" hidden><h2><span id="ch-col-title">OpenAI</span><span class="model" id="ch-model"></span></h2><div class="body" id="ch-body"></div></div>
+      <div class="prompts" id="ch-prompts" hidden></div>
+    </div>
+  </section>
+
+  <!-- 정답 판정 (judgeLiarGuess) -->
+  <section id="tab-judge" hidden>
+    <div class="panel controls">
+      <div class="row">
+        <label>카테고리</label>
+        <input type="text" id="jg-category" placeholder="예: 라면 / 음식 … (동음이의어 맥락 판단)" />
+      </div>
+      <div class="cat-chips" data-catfill="jg-category"></div>
+      <div class="row">
+        <label>진짜 제시어</label>
+        <input type="text" id="jg-real" placeholder="예: 버거" />
+      </div>
+      <div class="row">
+        <label>라이어 답</label>
+        <input type="text" id="jg-guess" placeholder="예: burger / 햄버거 / 핫도그 …" />
+      </div>
+      <div class="hint">정답 판정은 전적으로 모델의 <b>LLM 판정</b>에 의존합니다(퍼지 매칭 제거됨).
+        오타·표기 차이 허용 여부는 프롬프트 지침을 모델이 따르는지에 달려 있습니다.</div>
+      <button class="run" id="jg-run">판정 ▶</button>
+    </div>
+    <div class="col" id="jg-col" hidden><h2><span>OpenAI</span><span class="model" id="jg-model"></span></h2><div class="body" id="jg-body"></div></div>
+    <div class="prompts" id="jg-prompts" hidden></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let models = { openai: '', openaiExplain: '' };
+
+function modelMs(model, data) {
+  const ms = data && typeof data.ms === 'number' ? ` · ${data.ms}ms` : '';
+  return `${model}${ms}`;
+}
+
+// 상태 표시
+fetch('/api/status').then(r => r.json()).then(s => {
+  models.openai = s.openai.model; models.openaiExplain = s.openai.explainModel;
+  $('status').innerHTML = `OpenAI <b>${s.openai.model}</b> ${s.openai.hasKey ? '🟢' : '🔴 키없음'}`;
+}).catch(() => $('status').textContent = '상태 확인 실패');
+
+// 탭
+const TABS = ['wordpair', 'explain', 'chat', 'judge'];
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+  TABS.forEach(t => $('tab-' + t).hidden = name !== t);
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+
+function escAttr(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// 프론트(game: room_screen.dart의 _presetCategories)와 동일한 프리셋 카테고리 목록.
+const PRESET_CATEGORIES = [
+  '음식', '동물', '영화', '스포츠', '직업', '나라',
+  '반려동물', '해양동물', '곤충', '공룡', '학교', '놀이공원', '편의점',
+  '병원', '도서관', '지하철역', '호텔',
+  '가전제품', '악기',
+  '디즈니', '마블', '한국영화', '해외영화',
+  '위인', '색깔', '랜드마크',
+  '가수', '걸그룹',
+  '빵', '자동차브랜드', '라면', '과자',
+  '사자성어', '취미',
+];
+// 각 카테고리 입력칸 아래에 프리셋 칩을 렌더한다. 클릭하면 해당 입력칸을 채운다.
+document.querySelectorAll('.cat-chips').forEach(box => {
+  const target = box.dataset.catfill;
+  box.innerHTML = PRESET_CATEGORIES
+    .map(c => `<button class="cat-chip" data-fillcat="${escAttr(c)}" data-target="${target}">${esc(c)}</button>`)
+    .join('');
+});
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-fillcat]');
+  if (!chip) return;
+  const input = $(chip.dataset.target);
+  if (!input) return;
+  input.value = chip.dataset.fillcat;
+  // 제시어 생성 탭: 카테고리를 직접 고르면 'AI 랜덤' 체크는 해제하고 입력을 활성화.
+  if (chip.dataset.target === 'wp-category' && $('wp-random').checked) {
+    $('wp-random').checked = false;
+    $('wp-category').disabled = false;
+  }
+  input.focus();
+});
+
+// 제시어 결과의 "설명↗" 버튼 → 카테고리+단어를 explainWord 탭에 채우고 바로 실행.
+function sendToExplain(category, word) {
+  $('ex-category').value = category || '';
+  $('ex-word').value = word || '';
+  switchTab('explain');
+  runExplain();
+}
+// 제시어 결과의 "채팅↗" 버튼 → 카테고리+제시어 쌍을 채팅 탭에 채우고 전환(기존 대화는 초기화).
+function sendToChat(category, citizen, liar) {
+  $('ch-category').value = category || '';
+  $('ch-citizen').value = citizen || '';
+  $('ch-liar').value = liar || '';
+  refreshAssignLabels();
+  chatMessages = [];
+  clearPicker();
+  renderChat();
+  switchTab('chat');
+}
+// 제시어 결과의 "판정↗" 버튼 → 카테고리+진짜 제시어를 정답 판정 탭에 채우고 전환(라이어 답은 사용자 입력).
+function sendToJudge(category, real) {
+  $('jg-category').value = category || '';
+  $('jg-real').value = real || '';
+  $('jg-guess').value = '';
+  switchTab('judge');
+  $('jg-guess').focus();
+}
+// 동적으로 생성되는 버튼들은 이벤트 위임으로 처리.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  if (b.dataset.act === 'explain') sendToExplain(b.dataset.cat, b.dataset.word);
+  else if (b.dataset.act === 'tochat') sendToChat(b.dataset.cat, b.dataset.citizen, b.dataset.liar);
+  else if (b.dataset.act === 'tojudge') sendToJudge(b.dataset.cat, b.dataset.real);
+});
+
+// 랜덤 체크박스 → 카테고리 입력 비활성
+$('wp-random').onchange = () => { $('wp-category').disabled = $('wp-random').checked; };
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// 결과 패널은 모델 "응답"(raws)만 보여준다. 파싱 실패 시에도 raws가 담겨오므로 원문을 볼 수
+// 있게 한다(에러일 땐 자동으로 펼친다).
+function renderRaws(data) {
+  if (!data.raws?.length) return '';
+  const open = data.ok ? '' : ' open';
+  let h = `<details${open}><summary>모델 원문 응답 보기</summary>`;
+  data.raws.forEach(r => { h += `<div class="k">${esc(r.label)}</div><pre>${esc(r.text)}</pre>`; });
+  return h + `</details>`;
+}
+
+function renderWordPair(data, elId) {
+  const el = $(elId);
+  if (!data.ok) {
+    // 파싱 실패해도 모델이 뭘 뱉었는지 원문을 보여준다.
+    el.innerHTML = `<div class="err">⚠ ${esc(data.error)}</div>` + renderRaws(data);
+    return;
+  }
+  const cat = data.category;
+  let html = '';
+  if (data.categoryCandidates) {
+    html += `<div class="field"><div class="k">카테고리 후보 (랜덤 선택)</div><div class="cands">`;
+    data.categoryCandidates.forEach((c, i) => {
+      const picked = i === data.pickedCategoryIndex;
+      html += `<div class="cand ${picked ? 'picked' : ''}"><span>${esc(c)}</span>${picked ? '<span class="badge">✓ 선택됨</span>' : ''}</div>`;
+    });
+    html += `</div></div>`;
+  } else {
+    html += `<div class="field"><div class="k">카테고리 (직접 지정)</div><div class="v">${esc(cat)}</div></div>`;
+  }
+  // 각 제시어에 "설명↗" 버튼 — 클릭하면 이 카테고리+단어로 explainWord 탭을 채우고 바로 실행한다.
+  const wordChip = (w, cls) => `<span class="word-wrap"><span class="word ${cls}">${esc(w)}</span><button class="chip-btn" data-act="explain" data-cat="${escAttr(cat)}" data-word="${escAttr(w)}" title="이 단어를 카테고리와 함께 단어 설명으로 보내기">설명↗</button></span>`;
+  const searchTag = data.searched ? ' <span class="tag">🔍 검색됨</span>' : '';
+  html += `<div class="field"><div class="k">제시어 쌍 후보 (랜덤 선택)${searchTag} — <span style="color:var(--good)">시민</span> vs <span style="color:var(--accent2)">라이어</span></div><div class="pairs-list">`;
+  (data.wordPairs || []).forEach((p, i) => {
+    const picked = i === data.pickedPairIndex;
+    const badge = picked ? '<span class="badge">✓ 선택됨</span>' : '';
+    // 이 카테고리+쌍을 채팅 탭에 통째로 넣는 버튼.
+    const chatBtn = `<button class="chip-btn" data-act="tochat" data-cat="${escAttr(cat)}" data-citizen="${escAttr(p.citizenWord)}" data-liar="${escAttr(p.liarWord)}" title="이 카테고리·제시어 쌍을 채팅 탭에 넣기" style="${picked ? '' : 'margin-left:auto'}">채팅↗</button>`;
+    // 이 카테고리+진짜 제시어(시민 단어)를 정답 판정 탭에 넣는 버튼(라이어 답은 사용자가 입력).
+    const judgeBtn = `<button class="chip-btn" data-act="tojudge" data-cat="${escAttr(cat)}" data-real="${escAttr(p.citizenWord)}" title="이 카테고리·진짜 제시어를 정답 판정 탭에 넣기">판정↗</button>`;
+    html += `<div class="pair ${picked ? 'picked' : ''}">${wordChip(p.citizenWord, 'citizen')}<span class="vs">vs</span>${wordChip(p.liarWord, 'liar')}${badge}${chatBtn}${judgeBtn}</div>`;
+  });
+  html += `</div></div>`;
+  html += renderRaws(data);
+  el.innerHTML = html;
+}
+
+function renderExplain(data, elId) {
+  const el = $(elId);
+  if (!data.ok) {
+    el.innerHTML = `<div class="err">⚠ ${esc(data.error)}</div>` + renderRaws(data);
+    return;
+  }
+  const searchTag = data.searched ? ' <span class="tag">🔍 검색됨</span>' : '';
+  let html = `<div class="field"><div class="k">설명${searchTag}</div><div class="v">${data.explanation ? esc(data.explanation) : '<span class="err">null (생성 실패)</span>'}</div></div>`;
+  html += renderRaws(data);
+  el.innerHTML = html;
+}
+
+function renderPrompts(data, elId) {
+  const el = $(elId);
+  const prompts = (data && data.prompts) || [];
+  if (!prompts.length) { el.hidden = true; return; }
+  let items = '';
+  for (const p of prompts) {
+    items += `<div class="pitem"><div class="plabel">${esc(p.label)}</div><pre>${esc(p.text)}</pre></div>`;
+  }
+  el.innerHTML = `<div class="phead">📝 전송된 프롬프트</div><div class="pbody">${items}</div>`;
+  el.hidden = false;
+}
+
+// 단일 provider(OpenAI) 호출 — opts: { colId, bodyElId, modelElId, model?, render(data, elId), promptsElId? }
+function runSolo(url, bodyBase, opts) {
+  $(opts.colId).hidden = false;
+  $(opts.modelElId).textContent = opts.model ?? models.openai;
+  $(opts.bodyElId).innerHTML = '<div class="spinner">생성 중… ⏳</div>';
+  return fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyBase),
+  }).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    opts.render(data, opts.bodyElId);
+    $(opts.modelElId).textContent = modelMs(opts.model ?? models.openai, data);
+    if (opts.promptsElId) renderPrompts(data, opts.promptsElId);
+    return data;
+  }).catch((e) => {
+    $(opts.bodyElId).innerHTML = `<div class="err">⚠ ${esc(e.message)}</div>`;
+    if (opts.promptsElId) $(opts.promptsElId).hidden = true;
+  });
+}
+
+async function runWordPair() {
+  const btn = $('wp-run'); btn.disabled = true;
+  const body = {
+    random: $('wp-random').checked,
+    category: $('wp-category').value,
+    usedCategories: $('wp-usedcats').value,
+    usedWords: $('wp-usedwords').value,
+  };
+  await runSolo('/api/word-pair', body, {
+    colId: 'wp-col', bodyElId: 'wp-body', modelElId: 'wp-model',
+    render: renderWordPair, promptsElId: 'wp-prompts',
+  });
+  btn.disabled = false;
+}
+
+async function runExplain() {
+  const word = $('ex-word').value.trim();
+  const category = $('ex-category').value.trim();
+  if (!word) { alert('단어를 입력하세요.'); return; }
+  if (!category) { alert('카테고리를 입력하세요.'); return; }
+  const btn = $('ex-run'); btn.disabled = true;
+  await runSolo('/api/explain-word', { word, category }, {
+    colId: 'ex-col', bodyElId: 'ex-body', modelElId: 'ex-model',
+    model: models.openaiExplain, render: renderExplain, promptsElId: 'ex-prompts',
+  });
+  btn.disabled = false;
+}
+
+$('wp-run').onclick = runWordPair;
+$('ex-run').onclick = runExplain;
+$('wp-category').addEventListener('keydown', e => { if (e.key === 'Enter') runWordPair(); });
+$('ex-word').addEventListener('keydown', e => { if (e.key === 'Enter') runExplain(); });
+$('ex-category').addEventListener('keydown', e => { if (e.key === 'Enter') runExplain(); });
+
+// ─────────────────────────── 채팅 (설명 턴 · 토론 사칭) ───────────────────────────
+// messages: { type:'turn', nickname, assign:'citizen'|'liar', word, text }
+//         | { type:'chat', nickname, text, impersonated?: boolean }
+let chatMessages = [];
+
+function chatCtxCommon() {
+  return {
+    category: $('ch-category').value.trim(),
+    citizen: $('ch-citizen').value.trim(),
+    liar: $('ch-liar').value.trim(),
+  };
+}
+function participantList() {
+  return $('ch-participants').value.split(',').map(s => s.trim()).filter(Boolean);
+}
+// priorTurns = 지금까지의 설명 턴들
+function priorTurns() {
+  return chatMessages.filter(m => m.type === 'turn').map(m => ({ nickname: m.nickname, text: m.text }));
+}
+function assignedWord(assign) {
+  const { citizen, liar } = chatCtxCommon();
+  return assign === 'liar' ? liar : citizen;
+}
+function currentAssign() {
+  return document.querySelector('input[name="ch-assign"]:checked').value;
+}
+
+function renderChat() {
+  const log = $('ch-log');
+  if (!chatMessages.length) { log.innerHTML = '<div class="chat-empty">아직 대화가 없습니다. 설명을 추가하거나 봇으로 생성해 보세요.</div>'; return; }
+  log.innerHTML = chatMessages.map((m, i) => {
+    if (m.type === 'chat') {
+      const impTag = m.impersonated ? '<span class="imp-tag">🎭 AI 사칭 (하네스 전용 표식)</span>' : '';
+      return `<div class="msg chat"><div class="who">${esc(m.nickname)}${impTag} <span class="del" data-chdel="${i}">삭제</span></div><div class="bubble">${esc(m.text)}</div></div>`;
+    }
+    const tag = `<span class="tagw ${m.assign}">${m.assign === 'liar' ? '라이어' : '시민'}: ${esc(m.word)}</span>`;
+    return `<div class="msg turn"><div class="who">${esc(m.nickname)}${tag} <span class="del" data-chdel="${i}">삭제</span></div><div class="bubble">${esc(m.text)}</div></div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+function addTurnMessage(text, assign, nickname) {
+  chatMessages.push({ type: 'turn', nickname: nickname || nextSpeaker(), assign, word: assignedWord(assign), text });
+  renderChat();
+}
+function addChatMessage(nickname, text, impersonated = false) {
+  chatMessages.push({ type: 'chat', nickname, text, impersonated });
+  renderChat();
+}
+function nextSpeaker() {
+  const s = $('ch-speaker').value.trim();
+  if (s) return s;
+  return '참가자' + (chatMessages.filter(m => m.type === 'turn').length + 1);
+}
+
+// 배정 단어 라디오 라벨을 실제 제시어로 갱신
+function refreshAssignLabels() {
+  const { citizen, liar } = chatCtxCommon();
+  $('ch-assign-citizen').textContent = '시민' + (citizen ? ` (${citizen})` : '');
+  $('ch-assign-liar').textContent = '라이어' + (liar ? ` (${liar})` : '');
+}
+['ch-citizen', 'ch-liar'].forEach(id => $(id).addEventListener('input', refreshAssignLabels));
+
+// 봇 턴/사칭 메시지 생성 결과를 픽커에 렌더하고 "채택" 버튼으로 채팅에 반영
+let pickerKind = null; // 'turn' | 'imp'
+let pickerImpTarget = null;
+let pickerLastAssign = 'citizen', pickerLastSpeaker = '';
+
+function renderPicker(d, elId) {
+  const el = $(elId);
+  if (!d || !d.ok) { el.innerHTML = `<div class="err">⚠ ${esc(d?.error || '실패')}</div>` + (d ? renderRaws(d) : ''); return; }
+  const refused = d.refused ? '<span class="refused-tag">게임에서 거절로 걸러짐</span>' : '';
+  el.innerHTML = `<div class="pick-body"><div class="gen-text">${esc(d.text)}${refused}</div>`
+    + `<button class="chip-btn" id="ch-adopt" style="padding:6px 14px">이걸로 채택 ↩</button></div>`;
+}
+function clearPicker() {
+  $('ch-col').hidden = true; $('ch-prompts').hidden = true;
+  $('ch-body').innerHTML = '';
+  pickerKind = null; pickerImpTarget = null;
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#ch-adopt')) return;
+  if (pickerKind === 'turn') addTurnMessage(lastAdoptedText, pickerLastAssign, pickerLastSpeaker);
+  else if (pickerKind === 'imp') addChatMessage(pickerImpTarget, lastAdoptedText, true);
+  clearPicker();
+});
+let lastAdoptedText = '';
+
+async function genBotTurn() {
+  const { category } = chatCtxCommon();
+  const assign = currentAssign();
+  const word = assignedWord(assign);
+  if (!category || !word) { alert('카테고리와 (배정 단어에 해당하는) 제시어를 입력하세요.'); return; }
+  pickerLastAssign = assign; pickerLastSpeaker = nextSpeaker();
+  pickerKind = 'turn';
+  $('ch-col-title').textContent = '설명 턴';
+  const data = await runSolo('/api/bot-turn', { category, assignedWord: word, priorTurns: priorTurns() }, {
+    colId: 'ch-col', bodyElId: 'ch-body', modelElId: 'ch-model',
+    render: (d, elId) => { lastAdoptedText = d?.ok ? d.text : ''; renderPicker(d, elId); },
+    promptsElId: 'ch-prompts',
+  });
+}
+
+let lastImpersonated = null;
+async function genImpersonation() {
+  const { category } = chatCtxCommon();
+  const participants = participantList();
+  if (!category) { alert('카테고리를 입력하세요.'); return; }
+  if (participants.length < 1) { alert('참가자 목록을 입력하세요(쉼표로 구분).'); return; }
+  // 게임(gameEngine.ts)과 동일하게, 참가자가 둘 이상이면 직전 사칭 대상은 이번 회차에서 피한다.
+  const pool = participants.length > 1 ? participants.filter(p => p !== lastImpersonated) : participants;
+  const target = pool[Math.floor(Math.random() * pool.length)];
+  lastImpersonated = target;
+  pickerImpTarget = target;
+  const otherParticipantNicknames = participants.filter(p => p !== target);
+  const recentDiscussion = chatMessages.filter(m => m.type === 'chat').slice(-12).map(m => ({ nickname: m.nickname, text: m.text }));
+  pickerKind = 'imp';
+  $('ch-col-title').textContent = `사칭 메시지 (대상: ${target})`;
+  const explanations = priorTurns();
+  await runSolo('/api/impersonation', { category, otherParticipantNicknames, recentDiscussion, explanations }, {
+    colId: 'ch-col', bodyElId: 'ch-body', modelElId: 'ch-model',
+    render: (d, elId) => { lastAdoptedText = d?.ok ? d.text : ''; renderPicker(d, elId); },
+    promptsElId: 'ch-prompts',
+  });
+}
+
+$('ch-add').onclick = () => {
+  const text = $('ch-desc').value.trim();
+  if (!text) { alert('설명을 입력하세요.'); return; }
+  const { category } = chatCtxCommon();
+  if (!category || !assignedWord(currentAssign())) { alert('카테고리와 제시어를 먼저 입력하세요.'); return; }
+  addTurnMessage(text, currentAssign(), nextSpeaker());
+  $('ch-desc').value = '';
+};
+$('ch-add-msg').onclick = () => {
+  const text = $('ch-msg').value.trim();
+  if (!text) { alert('채팅 내용을 입력하세요.'); return; }
+  addChatMessage(nextSpeaker(), text, false);
+  $('ch-msg').value = '';
+};
+$('ch-gen-turn').onclick = genBotTurn;
+$('ch-gen-imp').onclick = genImpersonation;
+$('ch-reset').onclick = () => { chatMessages = []; lastImpersonated = null; clearPicker(); renderChat(); };
+$('ch-desc').addEventListener('keydown', e => { if (e.key === 'Enter') $('ch-add').click(); });
+$('ch-msg').addEventListener('keydown', e => { if (e.key === 'Enter') $('ch-add-msg').click(); });
+
+// 위임: 삭제
+document.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-chdel]');
+  if (del) { chatMessages.splice(Number(del.dataset.chdel), 1); renderChat(); return; }
+});
+renderChat();
+refreshAssignLabels();
+
+// ─────────────────────────── 정답 판정 (judgeLiarGuess) ───────────────────────────
+// 퍼지 매칭은 제거됨 — 판정은 전적으로 모델의 LLM 응답에 의존한다.
+function renderJudge(data, elId) {
+  const el = $(elId);
+  if (!data.ok) { el.innerHTML = `<div class="err">⚠ ${esc(data.error)}</div>` + renderRaws(data); return; }
+  const llm = data.verdict;
+  let html = `<div class="field"><div class="k">판정</div><div class="verdict"><span class="${llm ? 'v-yes' : 'v-no'}">${llm ? '✅ true (정답 처리)' : '❌ false (오답 처리)'}</span></div></div>`;
+  html += renderRaws(data);
+  el.innerHTML = html;
+}
+
+async function runJudge() {
+  const category = $('jg-category').value.trim();
+  const realWord = $('jg-real').value.trim();
+  const guess = $('jg-guess').value.trim();
+  if (!category) { alert('카테고리를 입력하세요.'); return; }
+  if (!realWord || !guess) { alert('진짜 제시어와 라이어 답을 모두 입력하세요.'); return; }
+  const btn = $('jg-run'); btn.disabled = true;
+  await runSolo('/api/judge', { category, realWord, guess }, {
+    colId: 'jg-col', bodyElId: 'jg-body', modelElId: 'jg-model',
+    render: renderJudge, promptsElId: 'jg-prompts',
+  });
+  btn.disabled = false;
+}
+$('jg-run').onclick = runJudge;
+$('jg-guess').addEventListener('keydown', e => { if (e.key === 'Enter') runJudge(); });
+</script>
+</body>
+</html>

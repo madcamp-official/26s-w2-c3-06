@@ -1,3 +1,5 @@
 .vscode/
 .claude/*
 !.claude/agents/
+!.claude/prompt-harness/
+.claude/prompt-harness/node_modules/
