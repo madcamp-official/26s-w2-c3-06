@@ -1454,7 +1454,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 const SizedBox(width: 8),
                 Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
                 if (me != null) ...[
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 16),
                   Expanded(
                     flex: 2,
                     child: AppButton(
