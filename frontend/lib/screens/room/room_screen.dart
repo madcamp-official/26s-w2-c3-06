@@ -1253,6 +1253,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               loading: _startingGame,
               onPressed: canStart && !_startingGame ? _startGame : null,
             ),
+            // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
+            // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
+            if (_startingGame) ...[
+              const SizedBox(height: 6),
+              Text('AI가 제시어를 생성하는 중이에요...',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            ],
           ] else ...[
             const SizedBox(height: 10),
             // 방장이 아닌 참가자 화면도 위로 쌓지 않고 가로 한 줄로 나열한다.
