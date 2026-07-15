@@ -246,11 +246,22 @@ erDiagram
 ## 산출물 및 실행 방법
 
 - **산출물 설명:** 실시간 멀티플레이 AI 라이어게임 **L-AI-R GAME**. 온라인 방에서 사람과 AI 봇이 함께 제시어를 설명하고, AI가 토론에 몰래 끼어들어 교란하며, 익명 투표로 라이어를 찾는 크로스플랫폼 게임. 배포 주소: https://l-ai-r-game.madcamp-kaist.org
+- **Android APK:** 빌드 없이 바로 설치해볼 수 있도록 리포 루트에 릴리즈 APK([`l-ai-r-game.apk`](./l-ai-r-game.apk))를 함께 올려뒀다. 설치 방법은 아래 "Android APK로 바로 설치" 참고.
 - **실행 환경:** iOS / Android / Web (Flutter 단일 코드베이스). 백엔드는 Node.js 22 + PostgreSQL. 배포는 Railway 단일 서비스(백엔드가 Flutter 웹 정적 파일도 함께 서빙).
-- **실행 방법:** 아래 참고 — 로컬은 Postgres(Docker) → 백엔드 → 프론트 순으로 띄운다.
+- **실행 방법:** 아래 참고 — Android는 APK를 바로 설치하거나, 로컬은 Postgres(Docker) → 백엔드 → 프론트 순으로 띄운다.
 - **시연 영상 / 이미지:** (선택)
 
-### 실행 방법
+### Android APK로 바로 설치
+
+소스 빌드 없이 배포된 서버(`l-ai-r-game.madcamp-kaist.org`)에 바로 접속하는 릴리즈 APK를 리포 루트에 올려뒀다.
+
+1. [`l-ai-r-game.apk`](./l-ai-r-game.apk)를 안드로이드 기기로 전송(카카오톡/이메일/USB 등)하거나 기기 브라우저에서 GitHub 리포로 직접 다운로드
+2. 기기에서 "설정 → 보안 → 출처를 알 수 없는 앱 설치 허용" 켜기 (앱 설치 시 안내 팝업에서 바로 허용해도 됨)
+3. 다운로드한 apk 파일을 탭해 설치 후 실행 — 별도 설정 없이 배포된 백엔드로 바로 연결된다
+
+adb가 있다면 `adb install l-ai-r-game.apk`로도 설치 가능하다.
+
+### 실행 방법 (소스 빌드)
 
 ```bash
 # 0) 사전 준비: Docker 데몬이 떠 있어야 한다 (Colima 사용 시 `colima start` 먼저)
