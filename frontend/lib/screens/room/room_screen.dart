@@ -57,7 +57,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 방장 대기방 드래프트(로컬 입력 → game:draftConfig로 서버에 실시간 공유).
   int _botCount = 0;
   String? _selectedChip;
-  bool _aiRandom = false;
+  bool _aiRandom = true;
   bool _leaving = false;
   int _lastChatLen = 0;
   // 키보드가 열리면서 화면(=스크롤 뷰포트)이 줄어들 때, 스크롤은 "맨 아래"라는 위치가
@@ -822,7 +822,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           _startingGame = false;
           _hostDraftSeeded = false;
           _selectedChip = null;
-          _aiRandom = false;
+          _aiRandom = true;
           _botCount = 0;
           _customCategoryController.clear();
         });
@@ -923,11 +923,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       _botCount = s.draftAiBotCount;
       final cat = s.draftCategory;
       if (cat == null) {
-        _aiRandom = false;
-        // 방장이 아직 아무 카테고리도 고르지 않은 새 방은 프리셋 첫 번째 칩(음식)을
-        // 기본 선택으로 보여주고, 서버 draftConfig에도 같은 값을 반영해 다른 참가자
-        // 화면과 실제 게임 시작 카테고리가 어긋나지 않게 한다.
-        _selectedChip = _presetCategories.first;
+        // 방장이 아직 아무 카테고리도 고르지 않은 새 방은 "AI 랜덤"을 기본 선택으로
+        // 보여주고, 서버 draftConfig에도 같은 값을 반영해 다른 참가자 화면과 실제
+        // 게임 시작 카테고리가 어긋나지 않게 한다.
+        _aiRandom = true;
+        _selectedChip = null;
         WidgetsBinding.instance.addPostFrameCallback((_) => _pushDraft());
       } else if (_presetCategories.contains(cat) || s.customCategories.contains(cat)) {
         _selectedChip = cat;
