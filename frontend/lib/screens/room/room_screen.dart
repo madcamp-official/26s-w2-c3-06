@@ -890,6 +890,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
+          if (s.llmMock) ...[
+            _mockBadge(),
+            const SizedBox(width: 8),
+          ],
           Text(emoji, style: const TextStyle(fontSize: 20)),
           const SizedBox(width: 10),
           Expanded(
@@ -939,6 +943,26 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 서버가 실제 LLM 대신 결정적 mock 응답으로 동작 중일 때(API 키 미설정 등)만 보이는
+  /// 배지. 제시어/AI 설명/코멘트가 전부 고정 mock 값이라는 걸 바로 알 수 있게 상시 노출한다.
+  Widget _mockBadge() {
+    return Tooltip(
+      message: '서버가 실제 LLM 대신 mock 응답으로 동작 중입니다 (API 키 미설정)',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: AppColors.destructive,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: AppColors.primaryBorder, width: 1.5),
+        ),
+        child: Text(
+          'MOCK',
+          style: PixelFont.title(fontSize: 10, color: Colors.white, height: 1),
+        ),
       ),
     );
   }
