@@ -1030,7 +1030,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// 쓴다. 인원이 많아 한 줄에 안 들어가면 가로로 스크롤해서 볼 수 있다.
   Widget _playerProfileRow(RoomViewState s, bool isHost) {
     final isWaiting = s.phase == GamePhase.waiting || s.phase == GamePhase.ended;
-    final botCount = isWaiting ? (isHost ? _botCount : s.draftAiBotCount) : s.participants.where((p) => p.isBot).length;
 
     final cards = <Widget>[
       for (final p in s.players)
@@ -1038,20 +1037,41 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           avatar: UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 13, imageUrl: _avatarUrlFor(p.id)),
           nickname: p.nickname,
           isMe: p.id == _myUid,
+          isCurrentTurn: !isWaiting && s.currentTurnPlayerId == p.id,
           statusText: !isWaiting ? null : (p.id == s.hostId ? '👑방장' : (p.isReady ? '✓준비' : '대기')),
           statusColor: p.id == s.hostId
               ? AppColors.primary
               : (p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText),
         ),
-      for (var i = 0; i < botCount; i++)
-        _PlayerProfileCard(
+    ];
+
+    if (isWaiting) {
+      // 대기 중엔 봇이 아직 실존하지 않아(방장이 고르고 있는 숫자일 뿐) 실제 id가 없으니
+      // 그냥 번호로 자리만 채운다.
+      final botCount = isHost ? _botCount : s.draftAiBotCount;
+      for (var i = 0; i < botCount; i++) {
+        cards.add(_PlayerProfileCard(
           avatar: UserAvatar(avatarIndex: 0, radius: 13, isBot: true),
           nickname: '봇${i + 1}',
           isMe: false,
-          statusText: isWaiting ? '✓준비' : null,
+          isCurrentTurn: false,
+          statusText: '✓준비',
           statusColor: AppColors.readyBadgeText,
-        ),
-    ];
+        ));
+      }
+    } else {
+      // 게임 진행 중엔 실제 봇 id(participants)로 그려야 "지금 차례" 판정이 가능하다.
+      for (final p in s.participants.where((p) => p.isBot)) {
+        cards.add(_PlayerProfileCard(
+          avatar: UserAvatar(avatarIndex: 0, radius: 13, isBot: true),
+          nickname: p.nickname,
+          isMe: false,
+          isCurrentTurn: s.currentTurnPlayerId == p.id,
+          statusText: null,
+          statusColor: null,
+        ));
+      }
+    }
 
     // 카드 높이를 고정 SizedBox로 강제하면(전에 78px로 고정했던 것) 폰트 렌더링에 따라
     // 내용이 살짝 넘칠 수 있어(RenderFlex overflow) 실제로 겪었던 문제였다. 대신
@@ -1557,6 +1577,7 @@ class _PlayerProfileCard extends StatelessWidget {
   final Widget avatar;
   final String nickname;
   final bool isMe;
+  final bool isCurrentTurn;
   final String? statusText;
   final Color? statusColor;
 
@@ -1564,6 +1585,7 @@ class _PlayerProfileCard extends StatelessWidget {
     required this.avatar,
     required this.nickname,
     required this.isMe,
+    required this.isCurrentTurn,
     required this.statusText,
     this.statusColor,
   });
@@ -1573,8 +1595,8 @@ class _PlayerProfileCard extends StatelessWidget {
     return PixelBox(
       width: 50,
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
-      color: isMe ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-      border: Border.all(color: isMe ? AppColors.primary : AppColors.border, width: isMe ? 2 : 1.5),
+      color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+      border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
       shadowOffset: null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
