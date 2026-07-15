@@ -238,7 +238,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (r.accusedNickname == null) {
       accusedText = '아무도 지목되지 않았어요';
     } else {
-      accusedText = '${r.accusedNickname} (라이어 ${r.wasLiar ? '⭕ 맞음' : '❌ 아님'})';
+      accusedText = '${r.accusedNickname} (라이어 ${r.wasLiar ? '⭕' : '❌'})';
     }
     String liarGuessText;
     if (r.liarGuessCorrect == null) {
@@ -283,7 +283,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// (투표 변경하기) 마음이 바뀐 선택으로 다시 제출할 수 있다.
   Future<void> _openVoteDialog(RoomViewState s) async {
     final myUid = _myUid;
-    final candidates = s.participants.where((p) => p.id != myUid).toList();
+    // 후보는 나 자신을 제외하고, 서버가 지금 유효하다고 알려준 목록(voteCandidateIds)
+    // 안에서만 고를 수 있다 — 동점 재투표면 직전 동점자로 제한된다.
+    final candidates = s.participants
+        .where((p) => p.id != myUid && s.voteCandidateIds.contains(p.id))
+        .toList();
     String? draft = _myVote;
 
     final confirmed = await _showManagedDialog<String>(
@@ -437,6 +441,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       barrierDismissible: false,
       maxWidth: 380,
       builder: (dialogContext) {
+        void submit() {
+          final g = guessController.text.trim();
+          if (g.isEmpty) return;
+          setState(() => _submittingGuess = true);
+          ref.read(roomProvider.notifier).guessWord(g);
+          Navigator.of(dialogContext).pop();
+        }
+
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -454,18 +466,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
             ),
             const SizedBox(height: 16),
-            AppTextField(controller: guessController, hintText: '진짜 제시어'),
+            AppTextField(controller: guessController, hintText: '진짜 제시어', onSubmitted: (_) => submit()),
             const SizedBox(height: 12),
-            AppButton(
-              label: '제출',
-              onPressed: () {
-                final g = guessController.text.trim();
-                if (g.isEmpty) return;
-                setState(() => _submittingGuess = true);
-                ref.read(roomProvider.notifier).guessWord(g);
-                Navigator.of(dialogContext).pop();
-              },
-            ),
+            AppButton(label: '제출', onPressed: submit),
           ],
         );
       },
@@ -701,6 +704,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                         setSheetState(() {});
                         _pushDraft();
                       },
+                      onSubmitted: (_) => Navigator.of(sheetContext).pop(),
                     ),
                     const SizedBox(height: 12),
                     AppButton(label: '확인', onPressed: () => Navigator.of(sheetContext).pop()),
@@ -908,7 +912,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     return PixelBox(
       margin: const EdgeInsets.all(10),
       // 안의 글자만 키우고 바 자체 높이는 고정해서 그대로 유지한다.
-      height: 56,
+      // 설명 턴 타이머 아이콘이 추가되면서 44px(56-패딩12) 콘텐츠 영역을 살짝 넘겨
+      // "bottom overflowed"가 나던 걸 여유를 좀 더 둬서 해결한다.
+      height: 60,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
@@ -928,19 +934,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.title(fontSize: 16, color: AppColors.foreground, height: 1.1),
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (s.phase == GamePhase.discussion && s.phaseDeadline != null)
-                  _discussionTimerRow(s)
-                else if (s.phase == GamePhase.describing && s.phaseDeadline != null)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
-                      const SizedBox(width: 4),
-                      CountdownText(
-                        deadline: s.phaseDeadline!,
-                        style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
-                      ),
-                    ],
+                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를
+                // 보여준다 — 타이머는 이제 상단바가 아니라 각 페이즈 패널(채팅 입력창 위)
+                // 에 표시된다.
+                if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
+                  Text(
+                    '카테고리: ${s.category}',
+                    style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground, height: 1.1),
+                    overflow: TextOverflow.ellipsis,
                   )
                 else
                   Text(
@@ -989,9 +990,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
-  /// 토론 중엔 채팅창 위 패널이 아니라 상단바에 타이머를 두고, 그 양옆에 -10초/+10초
-  /// 버튼을 붙인다. 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장
-  /// 각각 한 번씩만 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
+  /// 토론 중 채팅창 위 패널에 타이머를 두고, 그 양옆에 -10초/+10초 버튼을 붙인다.
+  /// 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장 각각 한 번씩만
+  /// 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
   Widget _discussionTimerRow(RoomViewState s) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1029,7 +1030,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// 쓴다. 인원이 많아 한 줄에 안 들어가면 가로로 스크롤해서 볼 수 있다.
   Widget _playerProfileRow(RoomViewState s, bool isHost) {
     final isWaiting = s.phase == GamePhase.waiting || s.phase == GamePhase.ended;
-    final botCount = isWaiting ? (isHost ? _botCount : s.draftAiBotCount) : s.participants.where((p) => p.isBot).length;
 
     final cards = <Widget>[
       for (final p in s.players)
@@ -1037,20 +1037,41 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           avatar: UserAvatar(avatarIndex: _avatarIndexFor(p.id, s), radius: 13, imageUrl: _avatarUrlFor(p.id)),
           nickname: p.nickname,
           isMe: p.id == _myUid,
+          isCurrentTurn: !isWaiting && s.currentTurnPlayerId == p.id,
           statusText: !isWaiting ? null : (p.id == s.hostId ? '👑방장' : (p.isReady ? '✓준비' : '대기')),
           statusColor: p.id == s.hostId
               ? AppColors.primary
               : (p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText),
         ),
-      for (var i = 0; i < botCount; i++)
-        _PlayerProfileCard(
+    ];
+
+    if (isWaiting) {
+      // 대기 중엔 봇이 아직 실존하지 않아(방장이 고르고 있는 숫자일 뿐) 실제 id가 없으니
+      // 그냥 번호로 자리만 채운다.
+      final botCount = isHost ? _botCount : s.draftAiBotCount;
+      for (var i = 0; i < botCount; i++) {
+        cards.add(_PlayerProfileCard(
           avatar: UserAvatar(avatarIndex: 0, radius: 13, isBot: true),
           nickname: '봇${i + 1}',
           isMe: false,
-          statusText: isWaiting ? '✓준비' : null,
+          isCurrentTurn: false,
+          statusText: '✓준비',
           statusColor: AppColors.readyBadgeText,
-        ),
-    ];
+        ));
+      }
+    } else {
+      // 게임 진행 중엔 실제 봇 id(participants)로 그려야 "지금 차례" 판정이 가능하다.
+      for (final p in s.participants.where((p) => p.isBot)) {
+        cards.add(_PlayerProfileCard(
+          avatar: UserAvatar(avatarIndex: 0, radius: 13, isBot: true),
+          nickname: p.nickname,
+          isMe: false,
+          isCurrentTurn: s.currentTurnPlayerId == p.id,
+          statusText: null,
+          statusColor: null,
+        ));
+      }
+    }
 
     // 카드 높이를 고정 SizedBox로 강제하면(전에 78px로 고정했던 것) 폰트 렌더링에 따라
     // 내용이 살짝 넘칠 수 있어(RenderFlex overflow) 실제로 겪었던 문제였다. 대신
@@ -1349,10 +1370,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머는 상단바로 옮겼다(_header 참고) — 설명 턴 타이머는 조절 버튼이 없으니
-          // 토론 타이머와 달리 카운트다운 숫자만 상단바에 그대로 보여준다.
-          Text(statusText,
-              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(statusText,
+                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              ),
+              if (s.phaseDeadline != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
+                const SizedBox(width: 4),
+                CountdownText(
+                  deadline: s.phaseDeadline!,
+                  style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -1365,8 +1400,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머·시간 조절(-10초/+10초)은 상단바로 옮겨졌다(_discussionTimerRow 참고).
-          Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+              if (s.phaseDeadline != null) _discussionTimerRow(s),
+            ],
+          ),
         ],
       ),
     );
@@ -1459,7 +1499,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
     // 설명 페이즈에서는 지금 차례인 사람만 입력할 수 있다 — 다른 참가자가 자유 채팅으로
     // 끼어들면 설명이 채팅에 묻히거나 눈치를 주는 용도로 악용될 수 있어서 막는다.
-    final describingNotMyTurn = s.phase == GamePhase.describing && !s.isMyTurn(_myUid);
+    // 단, currentTurnPlayerId가 비어있는 동안(설명 제출 직후~다음 턴 시작 전, AI 코멘트
+    // 생성 대기 중 — room_provider.submitDescription 참고)은 "차례인 사람"이 아무도 없으므로
+    // 막을 이유가 없다. 이 조건이 없으면 그 잠깐 사이 전원의 채팅이 막히고, 힌트 문구도
+    // "님이 설명 중..."처럼 이름이 빠진 채로 떠서 "가끔 입력이 안 된다"는 문제로 보였다.
+    final describingNotMyTurn =
+        s.phase == GamePhase.describing && s.currentTurnPlayerId != null && !s.isMyTurn(_myUid);
     final canChat = !describingNotMyTurn;
     final hint = describingMyTurn
         ? '제시어 설명 입력...'
@@ -1507,7 +1552,7 @@ class _ResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1515,6 +1560,7 @@ class _ResultRow extends StatelessWidget {
             width: 92,
             child: Text(label, style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground)),
           ),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               value,
@@ -1531,6 +1577,7 @@ class _PlayerProfileCard extends StatelessWidget {
   final Widget avatar;
   final String nickname;
   final bool isMe;
+  final bool isCurrentTurn;
   final String? statusText;
   final Color? statusColor;
 
@@ -1538,6 +1585,7 @@ class _PlayerProfileCard extends StatelessWidget {
     required this.avatar,
     required this.nickname,
     required this.isMe,
+    required this.isCurrentTurn,
     required this.statusText,
     this.statusColor,
   });
@@ -1547,8 +1595,8 @@ class _PlayerProfileCard extends StatelessWidget {
     return PixelBox(
       width: 50,
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
-      color: isMe ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-      border: Border.all(color: isMe ? AppColors.primary : AppColors.border, width: isMe ? 2 : 1.5),
+      color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+      border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
       shadowOffset: null,
       child: Column(
         mainAxisSize: MainAxisSize.min,

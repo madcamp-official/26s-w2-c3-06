@@ -81,6 +81,10 @@ class RoomViewState {
   final int? votesInCount;
   final int? totalVoteCount;
 
+  /// 지금 투표에서 고를 수 있는 후보 id 목록. 최초 투표면 참가자 전원, 동점 재투표면
+  /// 직전 동점자로 제한된다(vote:started로 매번 새로 옴).
+  final List<String> voteCandidateIds;
+
   /// 토론 단축/연장(±10초) 버튼을 내가 이미 썼는지 — 참가자 한 명당 각각 한 번씩만
   /// 허용되고, discussion:myAdjustState(개인화된 이벤트)로 서버가 갱신해준다.
   final bool canShortenDiscussion;
@@ -129,6 +133,7 @@ class RoomViewState {
     this.voteTimeLimitSec,
     this.votesInCount,
     this.totalVoteCount,
+    this.voteCandidateIds = const [],
     this.canShortenDiscussion = true,
     this.canExtendDiscussion = true,
     this.roundResolved,
@@ -198,6 +203,7 @@ class RoomViewState {
     int? voteTimeLimitSec,
     int? votesInCount,
     int? totalVoteCount,
+    List<String>? voteCandidateIds,
     bool? canShortenDiscussion,
     bool? canExtendDiscussion,
     RoundResolved? roundResolved,
@@ -237,6 +243,7 @@ class RoomViewState {
       voteTimeLimitSec: voteTimeLimitSec ?? this.voteTimeLimitSec,
       votesInCount: votesInCount ?? this.votesInCount,
       totalVoteCount: totalVoteCount ?? this.totalVoteCount,
+      voteCandidateIds: voteCandidateIds ?? this.voteCandidateIds,
       canShortenDiscussion: canShortenDiscussion ?? this.canShortenDiscussion,
       canExtendDiscussion: canExtendDiscussion ?? this.canExtendDiscussion,
       roundResolved: clearRoundResolved ? null : (roundResolved ?? this.roundResolved),
@@ -342,13 +349,14 @@ class RoomNotifier extends Notifier<RoomViewState> {
         canExtendDiscussion: adjust.canExtend,
       );
     });
-    _socket.onVoteStarted.listen((timeLimitSec) {
+    _socket.onVoteStarted.listen((event) {
       state = state.copyWith(
         phase: GamePhase.voting,
-        voteTimeLimitSec: timeLimitSec,
+        voteTimeLimitSec: event.timeLimitSec,
         votesInCount: 0,
         totalVoteCount: state.participants.length,
-        phaseDeadline: _deadlineFrom(timeLimitSec),
+        voteCandidateIds: event.candidateIds,
+        phaseDeadline: _deadlineFrom(event.timeLimitSec),
       );
     });
     _socket.onVoteProgress.listen((progress) {

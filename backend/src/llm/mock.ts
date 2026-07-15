@@ -33,12 +33,12 @@ export const mockLLM: LiarGameLLM = {
     return `(mock) 야 "${ctx.latestDescription.slice(0, 10)}..." 이거 완전 수상한데?ㅋㅋㅋ 노잼이야 ㅇㅈ?`;
   },
 
-  async explainWord(word: string) {
+  async explainWord(word: string, category: string) {
     // 난이도 무관 항상 설명을 생성하는 실제 동작에 맞춰, mock도 결정적 설명 문자열을 반환.
-    return `(mock) "${word}"에 대한 짧은 설명입니다.`;
+    return `(mock) "${category}" 카테고리의 "${word}"에 대한 짧은 설명입니다.`;
   },
 
-  async judgeLiarGuess(guess: string, realWord: string) {
+  async judgeLiarGuess(guess: string, realWord: string, _category: string) {
     return guess.trim().toLowerCase() === realWord.trim().toLowerCase();
   },
 };

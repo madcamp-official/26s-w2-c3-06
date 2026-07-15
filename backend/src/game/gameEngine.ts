@@ -1,7 +1,6 @@
 import type { Server } from 'socket.io';
 import type { GamePhase, GameState, Round, RoomState } from '../types';
 import { llm } from '../llm/wrapper';
-import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
@@ -86,8 +85,20 @@ function getParticipantNickname(room: RoomState, id: string): string {
   return bot?.nickname ?? id;
 }
 
+// 동점 재투표 시 새 Round가 rounds에 계속 push되므로(startTieBreakDescribing 참고),
+// "지금 진행 중인 라운드"는 항상 마지막 요소다.
 function currentRound(game: GameState): Round {
-  return game.rounds[0];
+  return game.rounds[game.rounds.length - 1];
+}
+
+// 설명 발화 순서 대상 — 평소엔 게임 전체 playerOrder, 동점 재설명 중이면 그 동점자들만.
+function currentTurnOrder(game: GameState): string[] {
+  return game.tieCandidates ?? game.playerOrder;
+}
+
+// 투표 후보 목록 — 평소엔(최초 투표) 참가자 전원, 동점 재투표면 그 동점자들만.
+function currentVoteCandidates(game: GameState): string[] {
+  return game.tieCandidates ?? game.participantIds;
 }
 
 // ── 게임 시작 ──
@@ -115,8 +126,8 @@ export async function startGame(
 
   // 모든 제시어에 AI가 텍스트 설명을 미리 만들어 함께 준다(난이도 무관). real/liar 딱 2개뿐이라 한 번씩만 생성.
   const [realExplanation, liarExplanation] = await Promise.all([
-    llm.explainWord(realWord).catch(() => null),
-    llm.explainWord(liarWord).catch(() => null),
+    llm.explainWord(realWord, category).catch(() => null),
+    llm.explainWord(liarWord, category).catch(() => null),
   ]);
 
   const bots: BotInfo[] = Array.from({ length: opts.aiBotCount }, (_, i) => ({
@@ -143,6 +154,7 @@ export async function startGame(
     usedWordsThisGame: [realWord, liarWord],
     rounds: [round],
     votes: {},
+    tieCandidates: null,
   };
   room.currentGame = game;
   roomManager.resetChatLog(room);
@@ -204,6 +216,7 @@ export function toPublicGameState(room: RoomState, game: GameState) {
     liarId: revealed ? game.liarIds[0] : null,
     // 설명 순서·투표 판정 결과는 게임 단위 필드. votes(개별 투표 내역)만 서버 전용이라 제외한다.
     playerOrder: game.playerOrder,
+    tieCandidates: game.tieCandidates,
     votedOutId: game.votedOutId,
     wasLiar: game.wasLiar,
     liarGuess: game.liarGuess,
@@ -226,6 +239,41 @@ export function resendYourWord(io: Server, room: RoomState, uid: string): void {
   }
 }
 
+// room:rejoin 시, 마침 설명(턴) 페이즈 중이었다면(최초 설명이든 동점자 재설명이든) 지금
+// 차례인 사람 기준으로 turn:started를 다시 보내준다 — 재접속한 사람 본인 차례가 아니어도
+// "지금 누구 차례인지"는 알아야 화면이 맞게 그려진다. 실제 턴 타이머는 리셋되지 않고
+// 원래 스케줄대로 진행되므로, 남은 시간이 다시 보낸 timeLimitSec보다 짧을 수 있다
+// (resendLiarGuessPromptIfPending과 동일한 이유로 단순화함).
+export function resendTurnStateIfPending(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'describing') return;
+  const order = currentTurnOrder(game);
+  const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  if (idx >= order.length) return;
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (socketId) {
+    io.to(socketId).emit('turn:started', { playerId: order[idx], timeLimitSec: TURN_TIME_LIMIT_SEC });
+  }
+}
+
+// room:rejoin 시, 마침 투표 페이즈 중이었다면 후보 목록과 현재 확정 진행률을 다시 보내준다.
+// 개인별 선택(votes)은 절대 포함하지 않는다(익명 투표 원칙).
+export function resendVoteStateIfPending(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'voting') return;
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (!socketId) return;
+  io.to(socketId).emit('vote:started', {
+    timeLimitSec: VOTE_TIME_LIMIT_SEC,
+    candidateIds: currentVoteCandidates(game),
+  });
+  const confirmed = voteConfirmedByRoom.get(room.roomCode);
+  io.to(socketId).emit('vote:progress', {
+    votesInCount: confirmed?.size ?? 0,
+    totalCount: game.participantIds.length,
+  });
+}
+
 // room:rejoin 시, 마침 라이어 역전승 판정 대상으로 지목된 상태였다면 프롬프트를 다시 보내준다.
 // 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, 남은 시간이 표시값보다
 // 짧을 수 있다(재접속이 잦지 않은 30초 남짓의 좁은 구간이라 우선순위를 낮춰 단순화함).
@@ -244,14 +292,15 @@ export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid:
 function startTurn(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
+  const order = currentTurnOrder(game);
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
 
-  if (idx >= game.playerOrder.length) {
+  if (idx >= order.length) {
     endDescribingPhase(io, room);
     return;
   }
 
-  const playerId = game.playerOrder[idx];
+  const playerId = order[idx];
   io.to(room.roomCode).emit('turn:started', { playerId, timeLimitSec: TURN_TIME_LIMIT_SEC });
 
   if (isBotId(playerId)) {
@@ -269,7 +318,7 @@ async function runBotTurn(io: Server, room: RoomState, botId: string): Promise<v
   const round = currentRound(game);
   // 다른 곳에서 이미 넘어갔으면(방 정리 등) 무시
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (game.playerOrder[idx] !== botId) return;
+  if (currentTurnOrder(game)[idx] !== botId) return;
 
   try {
     const assignedWord = game.liarIds.includes(botId) ? game.liarWord : game.realWord;
@@ -289,7 +338,7 @@ function handleTurnTimeout(io: Server, room: RoomState, playerId: string): void 
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (game.playerOrder[idx] !== playerId) return;
+  if (currentTurnOrder(game)[idx] !== playerId) return;
   // PLAN 타이머 만료 규칙: 미제출은 그냥 못 하는 것으로 처리(빈 채로 다음 턴).
   advanceTurn(io, room);
 }
@@ -304,7 +353,7 @@ export async function submitDescription(
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
   const idx = turnIndexByRoom.get(room.roomCode) ?? 0;
-  if (game.playerOrder[idx] !== uid) return;
+  if (currentTurnOrder(game)[idx] !== uid) return;
 
   const timer = turnTimers.get(room.roomCode);
   if (timer) clearTimeout(timer);
@@ -328,7 +377,7 @@ async function submitDescriptionInternal(
   // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음).
   // 다음 턴 시작(또는 마지막 턴이면 "모든 설명이 끝났습니다" 페이즈 전환 안내)보다
   // 먼저 끝나도록 기다려, 채팅 순서가 "설명 → AI 코멘트 → 다음 안내"로 항상 고정되게 한다.
-  await generateAndBroadcastComment(io, room, text, round);
+  await generateAndBroadcastComment(io, room, playerId, text);
 
   // 코멘트를 기다리는 동안 방이 정리되는 등 상태가 바뀌었을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'describing') return;
@@ -338,20 +387,31 @@ async function submitDescriptionInternal(
 async function generateAndBroadcastComment(
   io: Server,
   room: RoomState,
+  speakerId: string,
   latestDescription: string,
-  round: Round,
 ): Promise<void> {
   const game = room.currentGame;
   if (!game) return;
   try {
-    const priorTurns = round.turns.slice(0, -1).map((t) => ({
-      nickname: getParticipantNickname(room, t.playerId),
-      text: t.text,
-    }));
+    // room.chatLog는 새 게임 시작 시에만 초기화되므로 지금 게임 범위로 이미 한정돼 있다.
+    // 방금 push된 latestDescription 메시지가 마지막 항목이므로 그것만 제외하고, 설명·AI
+    // 코멘트를 시간 순서 그대로 넘긴다 — 코멘트가 자기 이전 코멘트를 참고해 같은 대상을
+    // 계속 몰아가는 연속성을 가지려면 과거 aiComment도 기록에 포함돼야 한다.
+    const history = room.chatLog
+      .slice(0, -1)
+      .filter((m) => m.type === 'turnDescription' || m.type === 'aiComment')
+      .map((m) => ({
+        type: m.type as 'turnDescription' | 'aiComment',
+        nickname: m.type === 'aiComment' ? '분탕충봇' : getParticipantNickname(room, m.senderId),
+        text: m.text,
+      }));
+    const participantNicknames = game.participantIds.map((id) => getParticipantNickname(room, id));
     const comment = await llm.generateTurnComment({
       category: game.category,
       latestDescription,
-      priorTurns,
+      latestSpeakerNickname: getParticipantNickname(room, speakerId),
+      participantNicknames,
+      history,
     });
     broadcastChat(io, room, 'ai', 'aiComment', comment);
   } catch (err) {
@@ -364,7 +424,7 @@ function advanceTurn(io: Server, room: RoomState): void {
   turnIndexByRoom.set(room.roomCode, idx);
   const game = room.currentGame;
   if (!game) return;
-  if (idx >= game.playerOrder.length) {
+  if (idx >= currentTurnOrder(game).length) {
     endDescribingPhase(io, room);
   } else {
     startTurn(io, room);
@@ -374,6 +434,11 @@ function advanceTurn(io: Server, room: RoomState): void {
 function endDescribingPhase(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
+  if (game.tieCandidates) {
+    // 동점자 재설명이 끝났다 — 토론 없이 곧바로 그 동점자들만 대상으로 재투표한다.
+    startVoting(io, room);
+    return;
+  }
   game.phase = 'discussion';
   // 설명 페이즈 종료를 명시적으로 알려 클라이언트가 "현재 턴" 배너를 내리고 자유 채팅
   // 모드로 전환할 수 있게 한다 (이전엔 system 채팅 텍스트로만 암시됐음).
@@ -434,11 +499,13 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 
   const deadline = discussionDeadlineByRoom.get(room.roomCode) ?? Date.now();
   const remainingSec = (deadline - Date.now()) / 1000;
+  const nickname = getParticipantNickname(room, uid);
 
   // 남은 시간이 10초 미만인데 단축을 누르면 어중간하게 몇 초 줄이는 대신 바로 투표로 넘긴다.
   if (deltaSec < 0 && remainingSec < 10) {
     const timer = phaseTimers.get(room.roomCode);
     if (timer) clearTimeout(timer);
+    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 단축해 투표로 넘어갑니다.`);
     startVoting(io, room);
     return;
   }
@@ -453,6 +520,15 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
     setTimeout(() => startVoting(io, room), nextRemainingSec * 1000),
   );
   io.to(room.roomCode).emit('discussion:started', { timeLimitSec: Math.round(nextRemainingSec) });
+  broadcastChat(
+    io,
+    room,
+    'system',
+    'system',
+    deltaSec > 0
+      ? `${nickname}님이 토론 시간을 ${deltaSec}초 연장했습니다.`
+      : `${nickname}님이 토론 시간을 ${-deltaSec}초 단축했습니다.`,
+  );
   emitDiscussionAdjustState(io, room, uid);
 }
 
@@ -465,12 +541,25 @@ function startVoting(io: Server, room: RoomState): void {
   game.votes = {};
   voteConfirmedByRoom.set(room.roomCode, new Set());
 
-  broadcastChat(io, room, 'system', 'system', '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.');
-  io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC });
+  // 동점 재투표면 후보가 직전 동점자로 제한되고, 아니면(최초 투표) 전원이 후보다.
+  const candidateIds = currentVoteCandidates(game);
+
+  broadcastChat(
+    io,
+    room,
+    'system',
+    'system',
+    game.tieCandidates
+      ? `동점자(${candidateIds.map((id) => getParticipantNickname(room, id)).join(', ')})를 대상으로 재투표합니다.`
+      : '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.',
+  );
+  io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC, candidateIds });
 
   const timer = setTimeout(() => resolveVoting(io, room), VOTE_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
 
+  // 투표권은 후보 제한과 무관하게 참가자 전원에게 있다 — 다만 자기 자신이 후보인 경우
+  // 자기 자신에게는 투표할 수 없다(castVote가 검증).
   const bots = botsByRoom.get(room.roomCode) ?? [];
   for (const bot of bots) {
     const delay = 500 + Math.random() * (VOTE_TIME_LIMIT_SEC * 1000 * 0.5);
@@ -479,7 +568,9 @@ function startVoting(io: Server, room: RoomState): void {
       // 예약된 봇 투표가 남아있을 수 있음), 지금 진행 중인 게임에 잘못 투표되는 것을 막는다
       // — 그렇지 않으면 새 게임의 투표수가 조기에 채워져 타이머가 갑자기 사라지는 버그가 생긴다.
       if (room.currentGame !== game) return;
-      const target = pickRandom(game.participantIds.filter((id) => id !== bot.id));
+      const targets = candidateIds.filter((id) => id !== bot.id);
+      if (targets.length === 0) return;
+      const target = pickRandom(targets);
       castVote(io, room, bot.id, target);
       // 봇은 사람처럼 마음이 바뀔 일이 없으니 고르는 즉시 확정한다.
       confirmVote(io, room, bot.id);
@@ -501,7 +592,8 @@ function emitVoteProgress(io: Server, room: RoomState, game: GameState): void {
 export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
-  if (!game.participantIds.includes(votedPlayerId)) return;
+  if (voterId === votedPlayerId) return; // 자기 자신에게는 투표할 수 없다.
+  if (!currentVoteCandidates(game).includes(votedPlayerId)) return; // 지금 유효한 후보만 대상 가능.
   if (voteConfirmedByRoom.get(room.roomCode)?.has(voterId)) return;
   if (game.votes[voterId] === votedPlayerId) return;
 
@@ -550,7 +642,6 @@ function resolveVoting(io: Server, room: RoomState): void {
     tally.set(votedId, (tally.get(votedId) ?? 0) + 1);
   }
 
-  let votedOutId: string | undefined;
   let maxVotes = 0;
   let tied: string[] = [];
   for (const [id, count] of tally.entries()) {
@@ -561,8 +652,16 @@ function resolveVoting(io: Server, room: RoomState): void {
       tied.push(id);
     }
   }
-  if (tied.length > 0) votedOutId = pickRandom(tied);
 
+  // 0표(전원 기권)나 단독 최다 득표가 아니라 "2명 이상이 동률로 최다 득표"인 경우 —
+  // 그 동점자들만 한 번씩 추가 설명한 뒤, 그들만 대상으로 다시 투표한다. 최다 득표가
+  // 정확히 1명이 될 때까지 반복(재투표 횟수 제한 없음).
+  if (tied.length > 1) {
+    startTieBreakDescribing(io, room, tied);
+    return;
+  }
+
+  const votedOutId = tied.length === 1 ? tied[0] : undefined;
   game.votedOutId = votedOutId;
   game.wasLiar = votedOutId ? game.liarIds.includes(votedOutId) : false;
   game.phase = 'resolution';
@@ -588,6 +687,31 @@ function resolveVoting(io: Server, room: RoomState): void {
     game.winner = 'liar'; // 라이어가 지목되지 않음 → 라이어 승
     finalizeGame(io, room, { liarGuessCorrect: null, winner: 'liar' });
   }
+}
+
+// 투표가 동점으로 갈린 경우: 동점자만 기존 제시어에 대해 한 번씩 추가 설명한다(새 제시어
+// 생성·역할 재배정 없음). 토론 단계는 건너뛰고, 이 설명이 모두 끝나면(endDescribingPhase가
+// game.tieCandidates를 보고 판단) 곧바로 이 동점자들만 대상으로 재투표한다.
+function startTieBreakDescribing(io: Server, room: RoomState, tiedIds: string[]): void {
+  const game = room.currentGame;
+  if (!game) return;
+  // tiedIds는 득표 집계(투표 도착 순서) 기준이라 순서가 뒤섞여 있을 수 있다 — 기존 설명
+  // 순서(playerOrder) 기준으로 동점자만 필터링해 상대적 순서를 그대로 유지한다.
+  game.tieCandidates = game.playerOrder.filter((id) => tiedIds.includes(id));
+  game.phase = 'describing';
+  game.rounds.push({ roundNumber: game.rounds.length + 1, turns: [] });
+  turnIndexByRoom.set(room.roomCode, 0);
+
+  const names = game.tieCandidates.map((id) => getParticipantNickname(room, id)).join(', ');
+  broadcastChat(
+    io,
+    room,
+    'system',
+    'system',
+    `투표가 동점이에요(${names}). 동점자만 한 번씩 더 설명한 뒤 다시 투표합니다.`,
+  );
+
+  startTurn(io, room);
 }
 
 // ── 라이어 역전승 페이즈 ──
@@ -634,10 +758,12 @@ export async function submitLiarGuess(
 
   let correct: boolean;
   try {
-    correct = await llm.judgeLiarGuess(guess, game.realWord);
+    correct = await llm.judgeLiarGuess(guess, game.realWord, game.category);
   } catch (err) {
-    console.error('[gameEngine] judgeLiarGuess 실패, 유사 일치 비교로 폴백', err);
-    correct = isFuzzyMatch(guess, game.realWord);
+    // LLM 판정이 API 오류 등으로 실패한 경우에만 도는 폴백. 퍼지 매칭은 제거했으므로,
+    // 오타 관용 없는 보수적 기준(정규화 후 완전 일치)으로만 정답을 인정한다.
+    console.error('[gameEngine] judgeLiarGuess 실패, 정규화 완전 일치로 폴백', err);
+    correct = guess.trim().toLowerCase() === game.realWord.trim().toLowerCase();
   }
   // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'liarGuess') return;
@@ -646,6 +772,71 @@ export async function submitLiarGuess(
   game.liarGuessCorrect = correct;
   game.winner = correct ? 'liar' : 'citizens';
   finalizeGame(io, room, { liarGuessCorrect: correct, winner: game.winner });
+}
+
+// ── 진행 중 플레이어 이탈 처리 ──
+
+// 게임 진행 중(describing/discussion/voting/resolution/liarGuess)에 플레이어가 실제로
+// 방을 나갔을 때(명시적 나가기, 또는 재접속 유예 만료) 호출한다. 일시적 연결 끊김만으로는
+// 호출되지 않는다 — roomManager의 재접속 유예 기간이 끝나 확정적으로 제거된 시점에만 온다.
+export function handlePlayerLeft(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase === 'ended') return;
+  if (!game.participantIds.includes(uid)) return; // 이번 게임 참가자가 아니면 무관
+
+  const nickname = getParticipantNickname(room, uid);
+
+  if (game.liarIds.includes(uid)) {
+    // 라이어가 나갔다 — 더 이상 라이어를 잡아낼 의미가 없으므로 즉시 시민 승리로 종료한다.
+    broadcastChat(io, room, 'system', 'system', `${nickname}님(라이어)이 게임 도중 나가 게임을 종료합니다.`);
+    finalizeGame(io, room, { liarGuessCorrect: null, winner: 'citizens' });
+    return;
+  }
+
+  // 시민이 나갔다 — 이번 게임의 참가자 목록에서 완전히 제거해, 지금이든 나중이든
+  // 그 사람 차례가 다시 오지 않게 한다(설명 순서/투표 후보 모두에서 제외).
+  const order = currentTurnOrder(game);
+  const oldIdx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  const leftIdx = order.indexOf(uid);
+  const wasCurrentTurn = game.phase === 'describing' && leftIdx === oldIdx;
+
+  game.participantIds = game.participantIds.filter((id) => id !== uid);
+  game.playerOrder = game.playerOrder.filter((id) => id !== uid);
+  if (game.tieCandidates) {
+    game.tieCandidates = game.tieCandidates.filter((id) => id !== uid);
+  }
+  delete game.votes[uid];
+
+  broadcastChat(io, room, 'system', 'system', `${nickname}님이 게임 도중 나갔습니다.`);
+
+  if (game.phase === 'describing' && leftIdx !== -1 && leftIdx < oldIdx) {
+    // 이미 차례가 지나간 사람이 나갔다 — 배열이 한 칸 당겨지므로 인덱스도 하나 줄여
+    // "지금 차례"가 그대로 유지되게 한다(안 그러면 엉뚱한 다음 사람 차례로 밀려버림).
+    turnIndexByRoom.set(room.roomCode, oldIdx - 1);
+  }
+
+  if (wasCurrentTurn) {
+    // 나간 사람이 지금 차례였다 — 그 턴 타이머를 지우고 곧바로 다음 사람 차례로 넘긴다
+    // (playerOrder에서 이미 빠졌으므로 같은 인덱스가 자연히 다음 사람을 가리킨다).
+    const timer = turnTimers.get(room.roomCode);
+    if (timer) clearTimeout(timer);
+    turnTimers.delete(room.roomCode);
+    startTurn(io, room);
+  } else if (game.phase === 'voting') {
+    // 총원이 줄었으니 진행률을 다시 보내고, 남은 사람이 이미 전원 확정했다면 유예 없이
+    // 곧바로 집계로 넘어간다(나간 사람 하나 때문에 끝까지 기다릴 이유가 없다).
+    emitVoteProgress(io, room, game);
+    const confirmed = voteConfirmedByRoom.get(room.roomCode);
+    if (confirmed && game.participantIds.length > 0 && confirmed.size >= game.participantIds.length) {
+      const graceTimer = voteGraceTimers.get(room.roomCode);
+      if (graceTimer) clearTimeout(graceTimer);
+      voteGraceTimers.delete(room.roomCode);
+      const timer = phaseTimers.get(room.roomCode);
+      if (timer) clearTimeout(timer);
+      phaseTimers.delete(room.roomCode);
+      resolveVoting(io, room);
+    }
+  }
 }
 
 // ── 게임 종료 ──
@@ -665,8 +856,11 @@ function finalizeGame(
   // 반복 플레이 악용 방지(PLAN): 정상 게임은 최소 3명이면 충분 — 일부가 설명을 제출하지
   // 않아도 정상 게임으로 인정한다(설명 제출 여부는 개인별 참여도 보정에서 따로 반영됨).
   // 무효 게임이면 repeatMatchMultiplier=0으로 전원 0 EXP가 된다.
-  const submittedAll = (id: string): boolean =>
-    game.rounds.every((r) => r.turns.some((t) => t.playerId === id));
+  // 참여도는 최초 설명 라운드(rounds[0]) 기준으로만 판단한다 — 동점 재설명 라운드는
+  // 동점자만 포함하므로, 그걸 기준으로 삼으면 동점자가 아니었던 사람이 부당하게
+  // "설명 미제출"로 잡힌다.
+  const mainRound = game.rounds[0];
+  const submittedAll = (id: string): boolean => mainRound.turns.some((t) => t.playerId === id);
   const gameValid = game.participantIds.length >= 3;
 
   const winnerIsLiar = result.winner === 'liar';

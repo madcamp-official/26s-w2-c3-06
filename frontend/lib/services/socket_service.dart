@@ -33,7 +33,7 @@ class SocketService {
   final _turnStartedCtrl = StreamController<TurnStarted>.broadcast();
   final _discussionStartedCtrl = StreamController<int>.broadcast();
   final _discussionAdjustStateCtrl = StreamController<DiscussionAdjustState>.broadcast();
-  final _voteStartedCtrl = StreamController<int>.broadcast();
+  final _voteStartedCtrl = StreamController<VoteStarted>.broadcast();
   final _voteProgressCtrl = StreamController<VoteProgress>.broadcast();
   final _roundResolvedCtrl = StreamController<RoundResolved>.broadcast();
   final _liarGuessPromptCtrl = StreamController<int>.broadcast();
@@ -59,7 +59,7 @@ class SocketService {
   Stream<TurnStarted> get onTurnStarted => _turnStartedCtrl.stream;
   Stream<int> get onDiscussionStarted => _discussionStartedCtrl.stream;
   Stream<DiscussionAdjustState> get onDiscussionAdjustState => _discussionAdjustStateCtrl.stream;
-  Stream<int> get onVoteStarted => _voteStartedCtrl.stream;
+  Stream<VoteStarted> get onVoteStarted => _voteStartedCtrl.stream;
   Stream<VoteProgress> get onVoteProgress => _voteProgressCtrl.stream;
   Stream<RoundResolved> get onRoundResolved => _roundResolvedCtrl.stream;
   Stream<int> get onLiarGuessPrompt => _liarGuessPromptCtrl.stream;
@@ -138,7 +138,7 @@ class SocketService {
       'discussion:myAdjustState',
       (data) => _discussionAdjustStateCtrl.add(DiscussionAdjustState.fromJson(_map(data))),
     );
-    socket.on('vote:started', (data) => _voteStartedCtrl.add(_map(data)['timeLimitSec'] as int));
+    socket.on('vote:started', (data) => _voteStartedCtrl.add(VoteStarted.fromJson(_map(data))));
     socket.on('vote:progress', (data) => _voteProgressCtrl.add(VoteProgress.fromJson(_map(data))));
     socket.on('round:resolved', (data) => _roundResolvedCtrl.add(RoundResolved.fromJson(_map(data))));
     socket.on('liar:guessPrompt', (data) => _liarGuessPromptCtrl.add(_map(data)['timeLimitSec'] as int));
@@ -477,6 +477,23 @@ class DiscussionAdjustState {
     return DiscussionAdjustState(
       canShorten: json['canShorten'] as bool? ?? true,
       canExtend: json['canExtend'] as bool? ?? true,
+    );
+  }
+}
+
+/// vote:started 페이로드: `{ timeLimitSec, candidateIds }`. candidateIds는 최초 투표면
+/// 참가자 전원, 동점 재투표면 직전 동점자로 제한된 목록 — 투표 다이얼로그는 이 목록
+/// 안에서만(그리고 나 자신은 제외하고) 고를 수 있게 해야 한다.
+class VoteStarted {
+  final int timeLimitSec;
+  final List<String> candidateIds;
+
+  const VoteStarted({required this.timeLimitSec, required this.candidateIds});
+
+  factory VoteStarted.fromJson(Map<String, dynamic> json) {
+    return VoteStarted(
+      timeLimitSec: json['timeLimitSec'] as int,
+      candidateIds: (json['candidateIds'] as List).cast<String>(),
     );
   }
 }
