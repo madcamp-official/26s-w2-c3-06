@@ -186,7 +186,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       if (!mounted) return;
       setState(() => _avatarUrlCache[uid] = profile.avatarUrl);
     }).catchError((_) {
-      if (mounted) setState(() => _avatarUrlCache[uid] = null);
+      // 실패를 영구 캐싱하지 않는다: 게스트 로그인 직후 토큰이 아직 준비되지 않아
+      // 첫 요청이 실패하는 경우가 있어, 다음 rebuild에서 재시도할 수 있게 둔다.
+    }).whenComplete(() {
+      _avatarUrlFetching.remove(uid);
     });
     return null;
   }
