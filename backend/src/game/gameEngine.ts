@@ -11,7 +11,7 @@ import { awardExp, computeExpAward } from '../db/userRepo';
 // 대기 → 설정 → 설명 → 토론 → 투표 → 결과 → (역전승 시도) → 게임종료(대기로 복귀)
 //
 // 타이머 초 값은 PLAN에 명시되어 있지 않아 이 스캐폴드에서 합리적 기본값으로 잡았다. 튜닝 대상.
-export const TURN_TIME_LIMIT_SEC = 60;
+export const TURN_TIME_LIMIT_SEC = 45;
 export const DISCUSSION_TIME_LIMIT_SEC = 40;
 export const VOTE_TIME_LIMIT_SEC = 30;
 export const LIAR_GUESS_TIME_LIMIT_SEC = 30;
@@ -423,6 +423,15 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 
   const deadline = discussionDeadlineByRoom.get(room.roomCode) ?? Date.now();
   const remainingSec = (deadline - Date.now()) / 1000;
+
+  // 남은 시간이 10초 미만인데 단축을 누르면 어중간하게 몇 초 줄이는 대신 바로 투표로 넘긴다.
+  if (deltaSec < 0 && remainingSec < 10) {
+    const timer = phaseTimers.get(room.roomCode);
+    if (timer) clearTimeout(timer);
+    startVoting(io, room);
+    return;
+  }
+
   const nextRemainingSec = Math.max(DISCUSSION_MIN_REMAINING_SEC, remainingSec + deltaSec);
 
   const timer = phaseTimers.get(room.roomCode);
