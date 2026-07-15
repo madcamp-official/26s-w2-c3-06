@@ -309,10 +309,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     return HoverTap(
                       onTap: () => setDialogState(() => draft = p.id),
                       child: PixelBox(
-                        // 은은한 주황 틴트(15%)가 실기기 화면에서 오히려 어둡게 보인다는
-                        // 피드백이 있어, 선택 상태를 밝은 초록으로 뚜렷하게 표시한다.
-                        color: selected ? AppColors.success.withValues(alpha: 0.22) : AppColors.card,
-                        border: Border.all(color: selected ? AppColors.success : AppColors.border, width: 2),
+                        // 알파 블렌딩된 주황 틴트가 실기기에서 어둡게 보인다는 피드백이 있어,
+                        // 알파 없이 밝은 불투명 색(accent)을 채우고 테두리/글자로 주황을 유지한다.
+                        color: selected ? AppColors.accent : AppColors.card,
+                        border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: 2),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -327,7 +327,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                               p.nickname,
                               style: PixelFont.body(
                                 fontSize: 11,
-                                color: selected ? AppColors.success : AppColors.foreground,
+                                color: selected ? AppColors.primary : AppColors.foreground,
                                 fontWeight: selected ? FontWeight.bold : null,
                               ),
                               overflow: TextOverflow.ellipsis,
