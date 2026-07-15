@@ -1049,7 +1049,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 // 흐린 회색 subtext로는 눈에 잘 안 띈다는 피드백이 있어 강조색+굵게로 표시한다.
                 if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
                   Text(
-                    '카테고리: ${s.category}',
+                    '${s.category}',
                     style: PixelFont.title(fontSize: 14, color: AppColors.primary, height: 1.1),
                     overflow: TextOverflow.ellipsis,
                   )
