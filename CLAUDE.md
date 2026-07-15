@@ -24,12 +24,6 @@
 
 - 백엔드·프론트엔드 모두 `dev` 브랜치에서 함께 작업한다. `milleion`(백엔드 담당)·`ireyhye`(프론트엔드 담당) 모두 별도 병합 절차 없이 `dev`에 바로 커밋·push한다.
 
-# Working Branch
-
-**`milleion` 한정 규칙**: `milleion`이 작업 중인 세션에서는 기능/버그 수정 작업을 `dev`가 아니라 **`dev-2`**에서 진행한다. `dev-2`는 `dev`에서 분기한 작업용 브랜치. `dev-2`에서 커밋하기 전에는 **`git branch --show-current`로 현재 브랜치가 `dev-2`인지 반드시 먼저 확인**한다 — 같은 워킹 디렉토리를 다른 세션이 동시에 쓰면서 브랜치가 바뀌어 있을 수 있다. `dev-2`는 `origin/dev`를 upstream으로 추적하지 않도록 유지해 실수로 `dev`에 push되는 일을 막는다. 그리고 `milleion`이 채팅으로 명시적으로 merge를 지시하기 전까지 `dev`에 어떤 형태로도 손대지 않는다(커밋·merge·push·문서 수정 포함) — 위 Document Management의 "공유 문서는 dev에서 관리한다"는 예외도 `milleion`에게는 적용하지 않는다 — 문서 수정도 우선 `dev-2`에 커밋해두고, `milleion`이 명시적으로 dev merge를 지시할 때 함께 반영한다.
-
-**`ireyhye`는 이 브랜치 분리 규칙 대상이 아니다** — 기존대로 `dev`에서 바로 작업·커밋·push한다(위 Merge Policy 항목 참고). `dev-2`는 만들거나 커밋하지 않는다.
-
 # Branch Sync
 
-작업 중 로컬이 `origin/dev`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin dev`로 로컬을 최신화한다(`milleion` 세션은 `dev-2`에 반영). `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.
+작업 중 로컬이 `origin/dev`보다 뒤처진 것을 발견하면, `git fetch origin`을 실행한 뒤 `git pull origin dev`로 로컬을 최신화한다. `dev`에서 커밋하기 전에는 항상 이 확인을 먼저 수행한다.
