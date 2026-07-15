@@ -1527,14 +1527,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
                 if (me != null) ...[
                   const SizedBox(width: 16),
-                  Expanded(
-                    flex: 2,
-                    child: AppButton(
-                      label: me.isReady ? '준비완료 ✓' : '준비하기',
-                      variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
-                      dense: true,
-                      onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
-                    ),
+                  AppButton(
+                    label: me.isReady ? '준비완료 ✓' : '준비하기',
+                    variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                    dense: true,
+                    fullWidth: false,
+                    onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
                   ),
                 ],
               ],
