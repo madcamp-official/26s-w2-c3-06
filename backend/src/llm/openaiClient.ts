@@ -5,6 +5,8 @@ import OpenAI from 'openai';
 export const OPENAI_MODEL = 'gpt-5.4-mini';
 // 정답 판정(judgeLiarGuess)은 단순 참/거짓 분류라 가장 저렴한 티어로 충분 — 생성용 모델과 분리.
 export const OPENAI_JUDGE_MODEL = 'gpt-5.4-nano';
+// 단어 설명(explainWord)도 창작이 아니라 단순 정보 전달이라 가장 저렴한 티어로 충분.
+export const OPENAI_EXPLAIN_MODEL = 'gpt-5.4-nano';
 
 let client: OpenAI | null = null;
 

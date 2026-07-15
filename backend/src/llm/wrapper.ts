@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL as ANTHROPIC_MODEL } from './anthropicClient';
-import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_JUDGE_MODEL } from './openaiClient';
+import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_JUDGE_MODEL, OPENAI_EXPLAIN_MODEL } from './openaiClient';
 import {
   categoryCandidatesPrompt,
   wordPairCandidatesPrompt,
@@ -167,7 +167,7 @@ const realLLM: LiarGameLLM = {
   },
 
   async explainWord(word, category) {
-    const raw = await completeText(explainWordPrompt(word, category), 200);
+    const raw = await completeText(explainWordPrompt(word, category), 200, undefined, OPENAI_EXPLAIN_MODEL);
     return raw.trim().length > 0 ? raw.trim() : null;
   },
 
