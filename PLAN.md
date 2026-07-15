@@ -421,7 +421,7 @@ interface LiarGameLLM {
 
 **구현**:
 - `wrapper.ts`의 `completeText` helper에 `search` boolean 파라미터 추가.
-- **OpenAI**: `search=true`일 때 Chat Completions 대신 Responses API(`client.responses.create`) 호출, 매개변수 변경(`input` 대신 `messages` 대신, `max_output_tokens` 대신 `max_completion_tokens` 대신, 응답 읽기: `res.output_text`), `tools: [{type: 'web_search'}]` 추가.
+- **OpenAI**: `search=true`일 때 Chat Completions 대신 Responses API(`client.responses.create`) 호출 — `messages` 대신 `input`, `max_completion_tokens` 대신 `max_output_tokens`, 응답은 `res.output_text`로 읽음. `tools: [{type: 'web_search'}]` 추가.
 - **Anthropic**: `web_search_20250305` tool 추가(`max_uses: 8`).
 - 토큰 예산 상향: search mode는 왕복(reasoning 또는 검색) 소모가 커서 `completeText` 내부 최소값 상향 (OpenAI 8192, Anthropic 1024). 제시어 쌍 생성은 2500토큰 할당.
 
