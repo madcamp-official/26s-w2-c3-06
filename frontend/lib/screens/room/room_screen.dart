@@ -1539,6 +1539,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               )
             else
               Row(
+                // 카테고리는 왼쪽 끝, 준비 버튼은 오른쪽 끝에 붙이고 봇 수는 그 사이 남는
+                // 공간에 고르게 배분한다 — 예전엔 버튼이 오른쪽 끝까지 안 닿고 빈 여백이
+                // 남아있었다.
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Flexible(
                     child: Text(
@@ -1547,14 +1551,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  // 봇 수를 카테고리와 준비 버튼 사이 남는 공간 한가운데에 둔다 — 카테고리에
-                  // 바짝 붙지도, 버튼에 바짝 붙지도 않게.
-                  Expanded(
-                    child: Center(
-                      child: Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
-                    ),
-                  ),
-                  if (me != null) ...[
+                  Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  if (me != null)
                     AppButton(
                       label: me.isReady ? '준비완료 ✓' : '준비하기',
                       variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
@@ -1562,7 +1560,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                       fullWidth: false,
                       onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
                     ),
-                  ],
                 ],
               ),
           ],
