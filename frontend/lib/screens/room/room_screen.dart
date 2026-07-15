@@ -1103,7 +1103,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         child: SizedBox(
           width: double.infinity,
           child: Text(
-            expanded ? '▲' : '▼',
+            expanded ? '▼ 설정 닫기' : '▲ 설정 열기',
             textAlign: TextAlign.center,
             style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
           ),
