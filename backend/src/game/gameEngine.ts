@@ -1,7 +1,6 @@
 import type { Server } from 'socket.io';
 import type { GamePhase, GameState, Round, RoomState } from '../types';
 import { llm } from '../llm/wrapper';
-import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
@@ -581,8 +580,10 @@ export async function submitLiarGuess(
   try {
     correct = await llm.judgeLiarGuess(guess, game.realWord);
   } catch (err) {
-    console.error('[gameEngine] judgeLiarGuess 실패, 유사 일치 비교로 폴백', err);
-    correct = isFuzzyMatch(guess, game.realWord);
+    // LLM 판정이 API 오류 등으로 실패한 경우에만 도는 폴백. 퍼지 매칭은 제거했으므로,
+    // 오타 관용 없는 보수적 기준(정규화 후 완전 일치)으로만 정답을 인정한다.
+    console.error('[gameEngine] judgeLiarGuess 실패, 정규화 완전 일치로 폴백', err);
+    correct = guess.trim().toLowerCase() === game.realWord.trim().toLowerCase();
   }
   // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'liarGuess') return;
