@@ -44,14 +44,15 @@
 
 참가자(사람+봇) 중 라이어(고정 1명)는 **자신이 라이어인지 모른 채** 진짜 제시어와 비슷하지만 다른 가짜 제시어를 받는다. 각자 제시어를 직접 말하지 않고 설명한 뒤 익명 투표로 라이어를 지목한다. 지목된 사람이 실제 라이어면 진짜 제시어를 맞혀 역전승할 기회를 주고, 실제 라이어가 아니면 역전승 기회 없이 그 즉시 라이어 팀 승리로 게임이 끝난다. 세부 규칙(최소 참가 인원, 준비 상태 게이팅, 카테고리 지정 방식 등)은 "Socket.IO 이벤트 계약"의 `game:configure` 참고.
 
-AI는 다섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
+AI는 여섯 지점에 개입해 "LLM Wrapper" 요소를 드러낸다:
 1. 방장이 지정(또는 AI 랜덤)한 카테고리로 진짜/가짜 제시어 쌍을 생성
 2. 방장이 선택한 수만큼 AI 봇이 플레이어로 참여해 설명 생성 (봇도 자신이 라이어인지 모름 — 사람과 동일 조건)
-3. **매 턴** 설명이 제출될 때마다 AI가 일부러 헷갈리게 하는 "교란" 코멘트를 닉네임으로 지칭해 단다
-4. 모든 제시어에 대해 AI가 짧은 텍스트 설명을 미리 만들어 함께 내려준다 (난이도 무관, 이미지 생성은 하지 않음) — 유저는 "AI 설명보기" 버튼으로 원할 때 펼쳐 본다
-5. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
+3. **설명 페이즈**는 AI 개입 없이, 각 턴마다 배정된 사람이 한 번씩 설명하고 끝난다.
+4. **토론 페이즈**에서 AI가 5초 간격으로 무작위 실제 참가자(사람)인 척 자유 채팅에 끼어들어 교란한다 — 실제 그 참가자의 senderId로 일반 채팅과 동일하게 나가 AI 개입이라는 티가 전혀 나지 않으며, 게임 종료 후에도 공개되지 않는다.
+5. 모든 제시어에 대해 AI가 짧은 텍스트 설명을 미리 만들어 함께 내려준다 (난이도 무관, 이미지 생성은 하지 않음) — 유저는 "AI 설명보기" 버튼으로 원할 때 펼쳐 본다
+6. 역전승 시도 시 AI가 정답 여부를 유사도 기반으로 판정한다 (오타·맞춤법 오류·한글/영어 표기 차이 허용)
 
-**방 UI는 그룹 채팅 형식**으로, 턴 설명·AI 교란 코멘트·시스템 안내·자유 채팅이 하나의 피드에 흐른다. 채팅은 새 게임 시작 시에만 초기화된다(데이터 모델 `chatLog` 참고).
+**방 UI는 그룹 채팅 형식**으로, 턴 설명·시스템 안내·자유 채팅(AI의 토론 사칭 메시지 포함)이 하나의 피드에 흐른다. 채팅은 새 게임 시작 시에만 초기화된다(데이터 모델 `chatLog` 참고).
 
 ### 경험치(EXP) 및 레벨 정책
 
@@ -233,7 +234,7 @@ interface GameState {
 interface ChatMessage {
   id: string;
   senderId: string | 'ai' | 'system';
-  type: 'chat' | 'turnDescription' | 'aiComment' | 'system';
+  type: 'chat' | 'turnDescription' | 'system';
   text: string;
   timestamp: number;
 }
@@ -358,7 +359,7 @@ enum FriendshipStatus {
 - `room:playerListUpdated` `{ players }` (`Player[]`) — 입장/퇴장 및 `player:ready` 토글 시 방 전체에 브로드캐스트 (`Player.isReady` 포함)
 - `room:rejoined` `{ roomCode, hostId, title, emoji, visibility, maxPlayers, players, customCategories, chatLog, currentGame, draftConfig }` — `room:rejoin` 성공 시 해당 소켓에만, 채팅 로그·현재 게임 상태까지 포함해 복원. 진행 중이던 라운드가 있으면 그 페이즈에 맞는 타이머 이벤트(`turn:started`/`vote:started`/`discussion:started`/`liar:guessPrompt`)를 원래 종료 예정 시각 기준 실제 남은 시간으로 재계산해 재전송하고, `round:yourWord`/`liar:guessPrompt`(자신이 지목된 상태였다면)도 함께 보낸다
 - `room:error` `{ message: string }` — 잘못된 코드, 이미 진행 중인 방 입장 시도, 호스트 아님 등 실패 케이스에서 요청한 소켓에만 전송
-- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'aiComment'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, AI 교란 코멘트, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨
+- `chat:message` `{ id, senderId: string|'ai'|'system', type: 'chat'|'turnDescription'|'system', text, timestamp }` — **통합 채팅 피드**. 자유 채팅, 턴 설명, 시스템 안내(새 게임 시작/투표 결과/제시어 공개 등) 모두 이 이벤트로 전달되어 클라이언트는 하나의 리스트에 append만 하면 됨. 토론 페이즈 중 서버가 5초 간격으로 실제 참가자(사람) 한 명을 무작위로 골라 그 사람의 진짜 senderId로 흘려보내는 AI 사칭 메시지도 `type: 'chat'`으로 이 경로를 그대로 타므로, 클라이언트는 이를 구분할 방법이 없다(의도된 설계 — 게임 종료 후에도 공개하지 않음)
 - `chat:typingUpdated` `{ playerId, isTyping }` — 어떤 참가자가 채팅 입력 중인지(보낸 본인 제외 방 전체 브로드캐스트). 수신 측은 표시 후 일정 시간(5초) 안에 `true` 재전송이 없으면 스스로 지워, `false` 유실·연결 끊김에도 표시가 남지 않게 한다. 서버도 `chat:send` 처리·퇴장·연결 끊김 시점에 `false`를 함께 브로드캐스트해 즉시 꺼지게 한다
 - `game:started` `{ gameNumber, category, participants }` — 클라이언트도 채팅 뷰 초기화. `category`는 결과 화면 등에서 표시하기 위한 필드, `participants: { id, nickname, isBot }[]`는 봇 포함 전체 참가자 목록(하위호환 추가) — `room:playerListUpdated`는 사람만 추적하므로 투표 후보·턴 배너에 봇을 표시하려면 이 필드가 필요
 - `round:yourWord` (해당 소켓에만 개별 전송) `{ word, explanation }` — `explanation`은 해당 단어의 짧은 AI 설명. 서버가 게임 시작 시 미리 생성해 함께 실어 보내며(난이도 무관 항상 생성, 생성 실패 시에만 생략), 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 본다(온디맨드 재요청 이벤트는 없음). 진짜/가짜 여부·라이어 여부는 어떤 payload에도 포함하지 않음(본인도 모름)
@@ -405,10 +406,7 @@ enum FriendshipStatus {
 ## LLM 래퍼 (`backend/src/llm/wrapper.ts`)
 
 ```ts
-interface LiarGameLLM {
-  generateWordPair(category: string | null, usedWords: string[], usedCategories: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
-  generateBotTurn(ctx: BotTurnContext): Promise<string>;
-  generateTurnComment(ctx: TurnCommentContext): Promise<string>;
+  generateImpersonationMessage(ctx: ImpersonationContext): Promise<string>;
   explainWord(word: string, category: string): Promise<string | null>;
   judgeLiarGuess(guess: string, realWord: string, category: string): Promise<boolean>;
 }
@@ -419,9 +417,9 @@ interface LiarGameLLM {
 - 인터페이스 변경: `explainWord`와 `judgeLiarGuess` 모두 **`category` 파라미터 추가** — 동음이의어(예: "너구리"는 "동물" 카테고리면 라쿤독, "라면"이면 인스턴트라면) 해석을 위해 카테고리 맥락이 필수.
 - `generateWordPair`: 카테고리 후보 3개 중 무작위 선택 후, 제시어 쌍 후보 3개(`wordPairCandidatesPrompt`)를 받아 역시 무작위 선택. **이제 모든 후보가 실제 웹 검색으로 한국인 친숙도와 실존 여부를 검증** — 검증 실패 후보는 폐기하고 대체. 프롬프트는 중복/장황성을 제거해 재작성되었으며, 외국어 사용 규칙 강화(예: "Ouija 보드" → "위저보드") 및 유사도 기준 재정의("국제적 유명도" → "한국 평범한 성인의 일상 접촉도").
 - `generateBotTurn`: 음슴체(`~함`, `~임`, `~음` 종결) 강제. 봇이 이전 설명들을 보고 자신의 배정 단어와 맞지 않는다 판단하면(즉 라이어일 가능성 높음), 그 설명들로부터 실제 단어를 추측해 그 추측한 단어를 설명 — 라이어 티가 덜 난다. 단어 자체와 결정적 특징 금지, 메타 발언(추론 과정) 금지, 길이 ~15-20자 단일 절 제한.
-- `generateTurnComment`: 봇 캐릭터명 "분탕충봇" 으로 변경(이전 "잼민이봇"). 이제 **전체 interleaved 채팅 기록**(설명과 분탕충봇 자신의 이전 코멘트, 시간 순서) + 최신 발언자 닉네임 + 전체 참가자 닉네임을 받음 — 자신의 과거 코멘트를 보고 같은 "몰아가는 대상"을 일관되게 추적하되, 최신 설명이 특히 수상하면 대상 전환 가능. 재미가 최우선 목표, 실제 라이어 탐지는 차선. 새 규칙: (a) 매번 "[닉네임]아/야"로 시작하지 않기(자연스러운 채팅처럼), (b) 설명을 따옴표로 직접 인용하지 않고 짧게 반응, (c) 길이 ~15-25자, 최대 2절. 모든 응답이 거절 패턴이거나 비정상적으로 길면 조용히 생략.
+- `generateImpersonationMessage` 프롬프트 핵심: **설명 페이즈에는 더 이상 AI가 개입하지 않는다** — 각 턴은 배정된 참가자가 한 번씩 설명하고 끝난다(이전의 "분탕충봇" 매 턴 코멘트는 폐지). 대신 **토론 페이즈** 동안 서버가 5초마다(`gameEngine.ts`의 `DISCUSSION_IMPERSONATION_INTERVAL_MS`) 실제 참가자(사람, 봇 제외) 한 명을 무작위로 골라 그 사람인 척 자유 채팅 메시지를 생성하고, 그 사람의 진짜 senderId로 `chat:message`(`type: 'chat'`)를 그대로 내보낸다 — 클라이언트·본인 포함 누구도 이를 AI 개입으로 구분할 수 없고, 게임 종료 후에도 공개하지 않는다(끝까지 비공개). 근거 없이 다른 참가자를 의심하거나 몰아가는 발언, 투표에 영향을 줄 만큼 직접적인 지목 발언도 허용된다. 실제 라이어가 누구인지·진짜/가짜 제시어가 무엇인지는 `ImpersonationContext` 자체에 그 필드가 없어 구조적으로 이 프롬프트에 입력될 수 없음 — 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. **별도 system 프롬프트**로 "참가자 전원이 동의한 게임 내 교란 기능"임을 먼저 명시해 모델이 이를 실제 기만 요청으로 오인해 거부하는 것을 방지하는 동시에, "네가 AI/봇이라는 사실이나 사칭·역할극 같은 메타 표현을 절대 출력에 담지 마라"고 강하게 못박는다(들키면 게임의 핵심 장치가 깨짐). 응답이 거절 문구처럼 보이거나(영文/한글 거절 패턴) 비정상적으로 길면 `wrapper.ts`의 `assertNotRefusal`이 에러로 처리해, 거절 텍스트가 그대로 게임 채팅에 노출되지 않고 조용히 이번 차례가 생략되게 한다.
 - `explainWord`: 카테고리 맥락으로 단어 해석해 1-2문 설명 생성. **실제 웹 검색으로 사실 확인**(위치, 연도, 소속 등) 후 검증된 내용만 포함. 출처 링크/URL 절대 포함 금지. 하십시오체(`-입니다/-습니다`) 사용.
-- `judgeLiarGuess`: LLM이 100% 담당. 전 단계의 편집거리 기반 사전 체크(`textMatch.ts`) **제거**. 오타/표기 차이 관대도는 이제 prompting 영역. 새로운 규칙 추가: 겉보기 비슷하지만 실제로는 다른 사물(예: 너구리와 라쿤은 혼동되지만 너구리는 Canidae, 라쿤은 Procyonidae로 서로 다른 동물)은 **절대 정답으로 인정하지 않음** — 표기만 다를 뿐 실제로 동일한 대상을 가리킬 때만 true 반환.
+- `judgeLiarGuess`: 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거") 허용 여부도 prompting 영역. 겉보기 비슷하지만 실제로는 다른 사물(예: 너구리와 라쿤은 혼동되지만 너구리는 Canidae, 라쿤은 Procyonidae로 서로 다른 동물)은 **절대 정답으로 인정하지 않음** — 표기만 다를 뿐 실제로 동일한 대상을 가리킬 때만 true 반환.
 
 ### Web search 통합 (실제 웹 검색 모드)
 

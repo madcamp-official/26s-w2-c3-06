@@ -19,6 +19,8 @@ const BOT_THINK_DELAY_MS = 1500;
 export const DISCUSSION_TIME_ADJUST_SEC = 10;
 // 단축을 남용해 0초/음수로 만들지 못하도록 최소 남은 시간.
 const DISCUSSION_MIN_REMAINING_SEC = 5;
+// 토론 중 AI가 실제 참가자인 척 끼어드는 간격 — 참가자에겐 절대 밝히지 않는다(끝까지 비공개).
+const DISCUSSION_IMPERSONATION_INTERVAL_MS = 5000;
 
 // 문서화된 GameState/Round는 그대로 두고, 타이머 핸들·봇 목록 같은 휘발성 런타임 부가정보는
 // roomCode로 키잉한 모듈 내부 맵으로 별도 관리한다(직렬화 대상 타입을 오염시키지 않기 위함).
@@ -57,6 +59,10 @@ const voteConfirmedByRoom = new Map<string, Set<string>>();
 // 짧은 틈을 준다) — 투표 페이즈 전체 제한시간 타이머(phaseTimers)와는 별개로 관리한다.
 const voteGraceTimers = new Map<string, NodeJS.Timeout>();
 const VOTE_ALL_CONFIRMED_GRACE_MS = 3000;
+// 토론 중 5초마다 실제 참가자인 척 채팅에 끼어드는 사칭 인터벌(roomCode 당 하나).
+const discussionImpersonationTimers = new Map<string, NodeJS.Timeout>();
+// 같은 사람을 연달아 두 번 사칭하면 부자연스러워 보여, 직전에 사칭한 uid를 기억해 피한다.
+const lastImpersonatedByRoom = new Map<string, string>();
 
 function isBotId(id: string): boolean {
   return id.startsWith('bot-');
@@ -78,6 +84,62 @@ function clearRoomTimers(roomCode: string): void {
   liarGuessDeadlineByRoom.delete(roomCode);
   discussionAdjustUsageByRoom.delete(roomCode);
   voteConfirmedByRoom.delete(roomCode);
+  stopDiscussionImpersonation(roomCode);
+}
+
+function stopDiscussionImpersonation(roomCode: string): void {
+  const t = discussionImpersonationTimers.get(roomCode);
+  if (t) clearInterval(t);
+  discussionImpersonationTimers.delete(roomCode);
+  lastImpersonatedByRoom.delete(roomCode);
+}
+
+// 실제 참가자인 척 채팅에 끼어드는 사칭 인터벌을 시작한다. 토론 페이즈 시작 시(endDescribingPhase)
+// 한 번만 호출되고, 투표로 넘어가는 순간(startVoting) 또는 게임 종료(clearRoomTimers)에 멈춘다.
+function startDiscussionImpersonation(io: Server, room: RoomState): void {
+  stopDiscussionImpersonation(room.roomCode);
+  const timer = setInterval(() => {
+    void runDiscussionImpersonationTick(io, room);
+  }, DISCUSSION_IMPERSONATION_INTERVAL_MS);
+  discussionImpersonationTimers.set(room.roomCode, timer);
+}
+
+// 실제 사람(봇 제외) 참가자 중 한 명을 무작위로 골라, 그 사람인 척 자유 채팅 메시지를
+// 하나 만들어 그 사람의 실제 senderId로 그대로 흘려보낸다 — 클라이언트 입장에서는 그
+// 참가자가 직접 보낸 일반 채팅과 완전히 동일하게 보이며, 어떤 표식도 남기지 않는다.
+async function runDiscussionImpersonationTick(io: Server, room: RoomState): Promise<void> {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'discussion') return;
+
+  const humanIds = game.participantIds.filter((id) => !isBotId(id));
+  if (humanIds.length === 0) return;
+
+  const lastTarget = lastImpersonatedByRoom.get(room.roomCode);
+  const pool = humanIds.length > 1 ? humanIds.filter((id) => id !== lastTarget) : humanIds;
+  const targetId = pickRandom(pool);
+
+  try {
+    const recentDiscussion = room.chatLog
+      .filter((m) => m.type === 'chat')
+      .slice(-12)
+      .map((m) => ({ nickname: getParticipantNickname(room, m.senderId), text: m.text }));
+    const otherParticipantNicknames = game.participantIds
+      .filter((id) => id !== targetId)
+      .map((id) => getParticipantNickname(room, id));
+
+    const text = await llm.generateImpersonationMessage({
+      category: game.category,
+      otherParticipantNicknames,
+      recentDiscussion,
+    });
+
+    // 응답을 기다리는 동안 토론이 이미 끝났을 수 있으니(비동기 호출 중 페이즈 전환) 다시 확인.
+    if (room.currentGame !== game || game.phase !== 'discussion') return;
+    lastImpersonatedByRoom.set(room.roomCode, targetId);
+    broadcastChat(io, room, targetId, 'chat', text);
+  } catch (err) {
+    console.error('[gameEngine] generateImpersonationMessage 실패, 이번 차례는 생략', err);
+  }
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -398,50 +460,7 @@ async function submitDescriptionInternal(
   const round = currentRound(game);
   round.turns.push({ playerId, text });
   broadcastChat(io, room, playerId, 'turnDescription', text);
-
-  // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음).
-  // 다음 턴 시작(또는 마지막 턴이면 "모든 설명이 끝났습니다" 페이즈 전환 안내)보다
-  // 먼저 끝나도록 기다려, 채팅 순서가 "설명 → AI 코멘트 → 다음 안내"로 항상 고정되게 한다.
-  await generateAndBroadcastComment(io, room, playerId, text);
-
-  // 코멘트를 기다리는 동안 방이 정리되는 등 상태가 바뀌었을 수 있으니 다시 확인.
-  if (room.currentGame?.phase !== 'describing') return;
   advanceTurn(io, room);
-}
-
-async function generateAndBroadcastComment(
-  io: Server,
-  room: RoomState,
-  speakerId: string,
-  latestDescription: string,
-): Promise<void> {
-  const game = room.currentGame;
-  if (!game) return;
-  try {
-    // room.chatLog는 새 게임 시작 시에만 초기화되므로 지금 게임 범위로 이미 한정돼 있다.
-    // 방금 push된 latestDescription 메시지가 마지막 항목이므로 그것만 제외하고, 설명·AI
-    // 코멘트를 시간 순서 그대로 넘긴다 — 코멘트가 자기 이전 코멘트를 참고해 같은 대상을
-    // 계속 몰아가는 연속성을 가지려면 과거 aiComment도 기록에 포함돼야 한다.
-    const history = room.chatLog
-      .slice(0, -1)
-      .filter((m) => m.type === 'turnDescription' || m.type === 'aiComment')
-      .map((m) => ({
-        type: m.type as 'turnDescription' | 'aiComment',
-        nickname: m.type === 'aiComment' ? '분탕충봇' : getParticipantNickname(room, m.senderId),
-        text: m.text,
-      }));
-    const participantNicknames = game.participantIds.map((id) => getParticipantNickname(room, id));
-    const comment = await llm.generateTurnComment({
-      category: game.category,
-      latestDescription,
-      latestSpeakerNickname: getParticipantNickname(room, speakerId),
-      participantNicknames,
-      history,
-    });
-    broadcastChat(io, room, 'ai', 'aiComment', comment);
-  } catch (err) {
-    console.error('[gameEngine] generateTurnComment 실패, 코멘트 생략', err);
-  }
 }
 
 function advanceTurn(io: Server, room: RoomState): void {
@@ -479,6 +498,9 @@ function endDescribingPhase(io: Server, room: RoomState): void {
   for (const player of room.players) {
     emitDiscussionAdjustState(io, room, player.id);
   }
+
+  // 토론 시간 동안 AI가 실제 참가자인 척 채팅에 끼어들며 교란한다(참가자에겐 절대 비공개).
+  startDiscussionImpersonation(io, room);
 }
 
 function emitDiscussionAdjustState(io: Server, room: RoomState, uid: string): void {
@@ -572,6 +594,9 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 function startVoting(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
+  // 토론에서 넘어오는 경로든(자연 종료·단축) 동점 재설명에서 곧장 넘어오는 경로든, 투표가
+  // 시작되면 토론용 사칭 인터벌은 더 이상 필요 없다.
+  stopDiscussionImpersonation(room.roomCode);
   game.phase = 'voting';
   game.votes = {};
   voteConfirmedByRoom.set(room.roomCode, new Set());

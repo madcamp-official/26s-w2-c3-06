@@ -5,12 +5,12 @@ import {
   categoryCandidatesPrompt,
   wordPairCandidatesPrompt,
   botTurnPrompt,
-  turnCommentPrompt,
-  turnCommentSystemPrompt,
+  impersonationPrompt,
+  impersonationSystemPrompt,
   explainWordPrompt,
   judgeLiarGuessPrompt,
 } from './prompts';
-import type { BotTurnContext, TurnCommentContext } from '../types';
+import type { BotTurnContext, ImpersonationContext } from '../types';
 import { mockLLM } from './mock';
 
 // PLAN "LLM 래퍼" 인터페이스. provider/모델을 나중에 쉽게 바꿀 수 있도록 얇게만 감싼다.
@@ -21,7 +21,7 @@ export interface LiarGameLLM {
     usedCategories: string[],
   ): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
-  generateTurnComment(ctx: TurnCommentContext): Promise<string>;
+  generateImpersonationMessage(ctx: ImpersonationContext): Promise<string>;
   explainWord(word: string, category: string): Promise<string | null>; // 카테고리 맥락으로 해석해 설명 텍스트 생성(생성 실패 시에만 null)
   judgeLiarGuess(guess: string, realWord: string, category: string): Promise<boolean>; // 역전승 정답 판정(카테고리 맥락)
 }
@@ -99,9 +99,9 @@ async function completeText(
 }
 
 // 프롬프트를 아무리 다듬어도 모델이 드물게 거절 응답을 내놓을 수 있다. 그 텍스트를 그대로
-// 게임 채팅에 "AI 코멘트"·"봇의 설명"인 것처럼 흘려보내면 안 되므로, 거절처럼 보이는 응답은
-// 여기서 걸러 에러로 처리한다 — 호출부(gameEngine)가 이미 실패 시 "코멘트 생략"으로 조용히
-// 넘어가도록 되어 있어, 플레이어에게는 그냥 이번 턴에 코멘트가 없는 것처럼만 보인다.
+// 게임 채팅에 "봇의 설명"·"사칭 메시지"인 것처럼 흘려보내면 안 되므로, 거절처럼 보이는 응답은
+// 여기서 걸러 에러로 처리한다 — 호출부(gameEngine)가 이미 실패 시 조용히 생략하도록 되어
+// 있어, 플레이어에게는 그냥 이번 차례에 메시지가 없는 것처럼만 보인다.
 const REFUSAL_PATTERNS = [
   /i can.?t help/i,
   /i cannot/i,
@@ -192,8 +192,8 @@ const realLLM: LiarGameLLM = {
     return text;
   },
 
-  async generateTurnComment(ctx) {
-    const text = await completeText(turnCommentPrompt(ctx), 128, turnCommentSystemPrompt);
+  async generateImpersonationMessage(ctx) {
+    const text = await completeText(impersonationPrompt(ctx), 128, impersonationSystemPrompt);
     assertNotRefusal(text, 160);
     return text;
   },
