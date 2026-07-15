@@ -1274,7 +1274,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _describingPanel(RoomViewState s, bool isHost) {
     final myTurn = s.isMyTurn(_myUid);
-    final turnNick = s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!);
+    // 설명 제출 직후~다음 턴 시작 전(AI 코멘트 생성 대기 중)에는 currentTurnPlayerId가
+    // 잠깐 비어있다(room_provider.submitDescription 참고) — 다음 턴 안내 문구를 보여준다.
+    final waitingNextTurn = s.currentTurnPlayerId == null;
+    final turnNick = waitingNextTurn ? '' : s.nicknameOf(s.currentTurnPlayerId!);
+    final statusText = waitingNextTurn
+        ? 'AI 코멘트 생성 중... 곧 다음 턴이 시작돼요'
+        : (myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...');
     return _panelBox(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1283,7 +1289,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           _myWordCard(s),
           // 타이머는 상단바로 옮겼다(_header 참고) — 설명 턴 타이머는 조절 버튼이 없으니
           // 토론 타이머와 달리 카운트다운 숫자만 상단바에 그대로 보여준다.
-          Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
+          Text(statusText,
               style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
         ],
       ),
