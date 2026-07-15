@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,6 +62,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _aiRandom = false;
   bool _leaving = false;
   int _lastChatLen = 0;
+
+  // 내 "입력 중" 상태 전송 관리. 입력이 이어지는 동안 2초마다 chat:typing(true)을
+  // 재전송하고(수신 측 5초 만료 타이머를 계속 연장시키는 하트비트 — room_provider 참고),
+  // 3초간 입력 변화가 없거나 입력창이 비면/전송하면 false를 보낸다.
+  DateTime? _typingLastSentAt;
+  Timer? _typingStopTimer;
+  static const _typingResendEvery = Duration(seconds: 2);
+  static const _typingStopAfter = Duration(seconds: 3);
   bool _hostDraftSeeded = false;
 
   // 메시지 입력창 위 페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 채팅을 더 넓게 보고
@@ -184,6 +194,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   @override
   void dispose() {
     _turnToastEntry?.remove();
+    _typingStopTimer?.cancel();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -619,9 +630,35 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
+  /// 채팅 입력창 내용이 바뀔 때마다 호출 — 내 입력 중 상태를 방에 알린다.
+  void _onChatInputChanged(String text) {
+    final notifier = ref.read(roomProvider.notifier);
+    if (text.trim().isEmpty) {
+      _stopTypingSignal();
+      return;
+    }
+    final now = DateTime.now();
+    if (_typingLastSentAt == null || now.difference(_typingLastSentAt!) >= _typingResendEvery) {
+      _typingLastSentAt = now;
+      notifier.sendTyping(true);
+    }
+    _typingStopTimer?.cancel();
+    _typingStopTimer = Timer(_typingStopAfter, _stopTypingSignal);
+  }
+
+  /// 입력 중 표시를 끈다(입력창이 비었거나, 한동안 입력이 없거나, 메시지를 전송했을 때).
+  void _stopTypingSignal() {
+    _typingStopTimer?.cancel();
+    _typingStopTimer = null;
+    if (_typingLastSentAt == null) return;
+    _typingLastSentAt = null;
+    ref.read(roomProvider.notifier).sendTyping(false);
+  }
+
   void _sendChatOrDescription(RoomViewState s) {
     final text = _chatController.text.trim();
     if (text.isEmpty) return;
+    _stopTypingSignal();
     final notifier = ref.read(roomProvider.notifier);
     if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
       notifier.submitDescription(text);
@@ -942,6 +979,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         Expanded(child: _chatFeed(s)),
         if (!hideForKeyboard && !forceShowPanel) _contextPanelToggle(showContextPanel),
         if (showContextPanel) _contextPanel(s, isHost),
+        _typingIndicator(s),
         _inputBar(s),
       ],
     );
@@ -1588,6 +1626,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
   }
 
+  /// 입력창 바로 위에 "OO님이 입력 중..."을 보여준다(chat:typingUpdated 기반).
+  /// 서버가 socket.to로 본인을 제외하고 보내지만, 같은 계정 다중 탭 등 예외를 대비해
+  /// 내 uid는 한 번 더 걸러낸다. 아무도 입력 중이 아니면 자리 자체를 차지하지 않는다.
+  Widget _typingIndicator(RoomViewState s) {
+    final others = s.typingUserIds.where((id) => id != _myUid).toList();
+    if (others.isEmpty) return const SizedBox.shrink();
+    final label = others.length == 1
+        ? '${s.nicknameOf(others.first)}님이 입력 중'
+        : '${s.nicknameOf(others.first)}님 외 ${others.length - 1}명이 입력 중';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: _TypingDotsText(label: label),
+      ),
+    );
+  }
+
   Widget _inputBar(RoomViewState s) {
     // 대기/종료 페이즈엔 하단 컨텍스트 패널에 컨트롤이 있으니 자유 채팅만 노출.
     final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
@@ -1623,6 +1679,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 focusNode: _chatFocusNode,
                 hintText: hint,
                 enabled: canChat,
+                onChanged: canChat ? _onChatInputChanged : null,
                 onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
               ),
             ),
@@ -1641,6 +1698,54 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "OO님이 입력 중" 뒤에 점(. → .. → ...)이 반복해서 붙는 애니메이션 텍스트.
+/// 점 개수가 바뀔 때 텍스트 폭이 흔들리지 않도록 점 3개 폭을 미리 확보해 둔다.
+class _TypingDotsText extends StatefulWidget {
+  final String label;
+
+  const _TypingDotsText({required this.label});
+
+  @override
+  State<_TypingDotsText> createState() => _TypingDotsTextState();
+}
+
+class _TypingDotsTextState extends State<_TypingDotsText> {
+  Timer? _timer;
+  int _tick = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      setState(() => _tick = (_tick + 1) % 3);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = PixelFont.body(fontSize: 10, color: AppColors.mutedForeground);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(widget.label, style: style),
+        // Stack으로 보이지 않는 '...'가 항상 폭을 잡아줘 점이 늘어나도 레이아웃이 안 흔들린다.
+        Stack(
+          children: [
+            Text('...', style: style.copyWith(color: Colors.transparent)),
+            Text('.' * (_tick + 1), style: style),
+          ],
+        ),
+      ],
     );
   }
 }
