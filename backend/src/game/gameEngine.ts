@@ -97,7 +97,11 @@ function getParticipantNickname(room: RoomState, id: string): string {
   const human = room.players.find((p) => p.id === id);
   if (human) return human.nickname;
   const bot = (botsByRoom.get(room.roomCode) ?? []).find((b) => b.id === id);
-  return bot?.nickname ?? id;
+  if (bot) return bot.nickname;
+  // 게임 도중 나간 사람은 room.players에서 이미 빠진 뒤 조회될 수 있다(퇴장 안내 채팅 등).
+  // uid가 그대로 노출되지 않도록 게임 시작 시점 스냅샷에서 닉네임을 찾는다.
+  const snapshot = room.currentGame?.participants.find((p) => p.id === id);
+  return snapshot?.nickname ?? id;
 }
 
 // 동점 재투표 시 새 Round가 rounds에 계속 push되므로(startTieBreakDescribing 참고),
@@ -155,6 +159,15 @@ export async function startGame(
   const liarIds = [pickRandom(participantIds)]; // MVP: 1명 고정 (PLAN TODO: 추후 방장이 수 선택)
   const playerOrder = shuffle(participantIds);
 
+  // 클라이언트가 투표 후보·턴 배너에 봇 닉네임까지 표시할 수 있도록 참가자 전체(봇 포함) 목록을
+  // 함께 보낸다. room:playerListUpdated는 사람만 추적하므로 이 정보를 별도로 실어야 함
+  // (하위호환 추가 — 기존 { gameNumber } 클라이언트도 그대로 동작).
+  // 게임 상태에도 스냅샷으로 저장해, 도중에 나간 참가자의 닉네임을 계속 해석할 수 있게 한다.
+  const participants = [
+    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
+    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
+  ];
+
   const round: Round = { roundNumber: 1, turns: [] };
   const game: GameState = {
     gameNumber: room.gameHistory.length + 1,
@@ -163,6 +176,7 @@ export async function startGame(
     liarWord,
     liarIds,
     participantIds,
+    participants,
     aiBotCount: opts.aiBotCount,
     phase: 'setup',
     playerOrder,
@@ -175,13 +189,6 @@ export async function startGame(
   roomManager.resetChatLog(room);
   turnIndexByRoom.set(room.roomCode, 0);
 
-  // 클라이언트가 투표 후보·턴 배너에 봇 닉네임까지 표시할 수 있도록 참가자 전체(봇 포함) 목록을
-  // 함께 보낸다. room:playerListUpdated는 사람만 추적하므로 이 정보를 별도로 실어야 함
-  // (하위호환 추가 — 기존 { gameNumber } 클라이언트도 그대로 동작).
-  const participants = [
-    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
-    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
-  ];
   io.to(room.roomCode).emit('game:started', {
     gameNumber: game.gameNumber,
     category: game.category,
@@ -213,11 +220,9 @@ export async function startGame(
 const REVEALED_PHASES: GamePhase[] = ['resolution', 'liarGuess', 'ended'];
 
 export function toPublicGameState(room: RoomState, game: GameState) {
-  const bots = botsByRoom.get(room.roomCode) ?? [];
-  const participants = [
-    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
-    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
-  ];
+  // 게임 시작 시점 스냅샷을 그대로 내려준다 — 도중에 나간 참가자도 포함되어 있어,
+  // 재접속한 클라이언트가 그 사람의 설명/채팅을 uid가 아닌 닉네임으로 계속 그릴 수 있다.
+  const participants = game.participants;
   const revealed = REVEALED_PHASES.includes(game.phase);
   return {
     gameNumber: game.gameNumber,
