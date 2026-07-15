@@ -30,8 +30,20 @@ const botsByRoom = new Map<string, BotInfo[]>();
 const turnIndexByRoom = new Map<string, number>();
 const turnTimers = new Map<string, NodeJS.Timeout>();
 const phaseTimers = new Map<string, NodeJS.Timeout>();
-// 토론 종료 예정 시각(ms epoch). +10/-10초 조절 시 남은 시간을 다시 계산하는 데 쓴다.
+// 각 페이즈의 종료 예정 시각(ms epoch). room:rejoin 시 실제 남은 시간을 다시 계산해
+// 보내주는 데 쓴다(타이머 자체는 setTimeout이 원래 스케줄대로 소유). 토론 페이즈는
+// +10/-10초 조절도 있어 별도로 계속 갱신된다.
 const discussionDeadlineByRoom = new Map<string, number>();
+const turnDeadlineByRoom = new Map<string, number>();
+const voteDeadlineByRoom = new Map<string, number>();
+const liarGuessDeadlineByRoom = new Map<string, number>();
+
+// deadline(ms epoch)까지 남은 시간을 초 단위로 계산한다. 기록이 없으면(이론상 발생 안 함)
+// 원래 제한시간을 그대로 돌려준다.
+function remainingSecFrom(deadline: number | undefined, fallbackSec: number): number {
+  if (deadline === undefined) return fallbackSec;
+  return Math.max(0, Math.round((deadline - Date.now()) / 1000));
+}
 // 이번 토론 페이즈에서 단축/연장 버튼을 이미 쓴 uid들 — 참가자별로 각각 한 번씩만 허용한다.
 interface DiscussionAdjustUsage {
   extended: Set<string>;
@@ -61,6 +73,9 @@ function clearRoomTimers(roomCode: string): void {
   if (t3) clearTimeout(t3);
   voteGraceTimers.delete(roomCode);
   discussionDeadlineByRoom.delete(roomCode);
+  turnDeadlineByRoom.delete(roomCode);
+  voteDeadlineByRoom.delete(roomCode);
+  liarGuessDeadlineByRoom.delete(roomCode);
   discussionAdjustUsageByRoom.delete(roomCode);
   voteConfirmedByRoom.delete(roomCode);
 }
@@ -241,9 +256,10 @@ export function resendYourWord(io: Server, room: RoomState, uid: string): void {
 
 // room:rejoin 시, 마침 설명(턴) 페이즈 중이었다면(최초 설명이든 동점자 재설명이든) 지금
 // 차례인 사람 기준으로 turn:started를 다시 보내준다 — 재접속한 사람 본인 차례가 아니어도
-// "지금 누구 차례인지"는 알아야 화면이 맞게 그려진다. 실제 턴 타이머는 리셋되지 않고
-// 원래 스케줄대로 진행되므로, 남은 시간이 다시 보낸 timeLimitSec보다 짧을 수 있다
-// (resendLiarGuessPromptIfPending과 동일한 이유로 단순화함).
+// "지금 누구 차례인지"는 알아야 화면이 맞게 그려진다. 실제 턴 타이머(setTimeout)는 리셋되지
+// 않고 원래 스케줄대로 진행되므로, turnDeadlineByRoom에 기록해둔 실제 종료 시각 기준으로
+// 남은 시간을 다시 계산해 보낸다(그래야 재접속한 클라이언트도 다른 클라이언트와 같은
+// 카운트다운을 보게 된다).
 export function resendTurnStateIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
@@ -252,19 +268,21 @@ export function resendTurnStateIfPending(io: Server, room: RoomState, uid: strin
   if (idx >= order.length) return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (socketId) {
-    io.to(socketId).emit('turn:started', { playerId: order[idx], timeLimitSec: TURN_TIME_LIMIT_SEC });
+    const timeLimitSec = remainingSecFrom(turnDeadlineByRoom.get(room.roomCode), TURN_TIME_LIMIT_SEC);
+    io.to(socketId).emit('turn:started', { playerId: order[idx], timeLimitSec });
   }
 }
 
 // room:rejoin 시, 마침 투표 페이즈 중이었다면 후보 목록과 현재 확정 진행률을 다시 보내준다.
-// 개인별 선택(votes)은 절대 포함하지 않는다(익명 투표 원칙).
+// 개인별 선택(votes)은 절대 포함하지 않는다(익명 투표 원칙). 타이머도 turn과 동일하게
+// voteDeadlineByRoom 기준 실제 남은 시간으로 다시 계산한다.
 export function resendVoteStateIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (!socketId) return;
   io.to(socketId).emit('vote:started', {
-    timeLimitSec: VOTE_TIME_LIMIT_SEC,
+    timeLimitSec: remainingSecFrom(voteDeadlineByRoom.get(room.roomCode), VOTE_TIME_LIMIT_SEC),
     candidateIds: currentVoteCandidates(game),
   });
   const confirmed = voteConfirmedByRoom.get(room.roomCode);
@@ -275,15 +293,16 @@ export function resendVoteStateIfPending(io: Server, room: RoomState, uid: strin
 }
 
 // room:rejoin 시, 마침 라이어 역전승 판정 대상으로 지목된 상태였다면 프롬프트를 다시 보내준다.
-// 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, 남은 시간이 표시값보다
-// 짧을 수 있다(재접속이 잦지 않은 30초 남짓의 좁은 구간이라 우선순위를 낮춰 단순화함).
+// 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, liarGuessDeadlineByRoom에
+// 기록해둔 종료 시각 기준으로 실제 남은 시간을 계산해 보낸다.
 export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'liarGuess') return;
   if (game.votedOutId !== uid) return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (socketId) {
-    io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+    const timeLimitSec = remainingSecFrom(liarGuessDeadlineByRoom.get(room.roomCode), LIAR_GUESS_TIME_LIMIT_SEC);
+    io.to(socketId).emit('liar:guessPrompt', { timeLimitSec });
   }
 }
 
@@ -302,6 +321,7 @@ function startTurn(io: Server, room: RoomState): void {
 
   const playerId = order[idx];
   io.to(room.roomCode).emit('turn:started', { playerId, timeLimitSec: TURN_TIME_LIMIT_SEC });
+  turnDeadlineByRoom.set(room.roomCode, Date.now() + TURN_TIME_LIMIT_SEC * 1000);
 
   if (isBotId(playerId)) {
     setTimeout(() => void runBotTurn(io, room, playerId), BOT_THINK_DELAY_MS);
@@ -468,10 +488,20 @@ function emitDiscussionAdjustState(io: Server, room: RoomState, uid: string): vo
 
 // 재접속(room:rejoin) 시 본인이 이미 단축/연장을 썼는지 다시 알려준다 — 새로고침해도
 // 한도가 초기화된 것처럼 보이지 않게(실제 한도는 서버가 어차피 강제하지만, 버튼이 계속
-// 눌리는 것처럼 보이는 UI 혼란을 막기 위함).
+// 눌리는 것처럼 보이는 UI 혼란을 막기 위함). 아울러 discussion:started를 discussionDeadlineByRoom
+// 기준 실제 남은 시간으로 다시 보내, 재접속한 클라이언트의 카운트다운이 다른 클라이언트와
+// 어긋나지 않게 한다(예: 남들 화면엔 20초 남았는데 본인만 40초로 리셋되는 문제 방지).
 export function resendDiscussionAdjustStateIfPending(io: Server, room: RoomState, uid: string): void {
   if (room.currentGame?.phase !== 'discussion') return;
   emitDiscussionAdjustState(io, room, uid);
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (socketId) {
+    const timeLimitSec = remainingSecFrom(
+      discussionDeadlineByRoom.get(room.roomCode),
+      DISCUSSION_TIME_LIMIT_SEC,
+    );
+    io.to(socketId).emit('discussion:started', { timeLimitSec });
+  }
 }
 
 // 토론 시간을 ±10초 조절한다. 방장 전용이 아니라 누구나 누를 수 있지만(방장의 "투표로
@@ -554,6 +584,7 @@ function startVoting(io: Server, room: RoomState): void {
       : '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.',
   );
   io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC, candidateIds });
+  voteDeadlineByRoom.set(room.roomCode, Date.now() + VOTE_TIME_LIMIT_SEC * 1000);
 
   const timer = setTimeout(() => resolveVoting(io, room), VOTE_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
@@ -729,6 +760,7 @@ function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
 
   const socketId = roomManager.getSocketIdByUid(liarId);
   if (socketId) io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+  liarGuessDeadlineByRoom.set(room.roomCode, Date.now() + LIAR_GUESS_TIME_LIMIT_SEC * 1000);
 
   const timer = setTimeout(() => {
     const g = room.currentGame;
