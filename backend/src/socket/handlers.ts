@@ -154,6 +154,8 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     });
     io.to(room.roomCode).emit('room:playerListUpdated', { players: room.players });
     gameEngine.resendYourWord(io, room, uid);
+    gameEngine.resendTurnStateIfPending(io, room, uid);
+    gameEngine.resendVoteStateIfPending(io, room, uid);
     gameEngine.resendLiarGuessPromptIfPending(io, room, uid);
     gameEngine.resendDiscussionAdjustStateIfPending(io, room, uid);
   });

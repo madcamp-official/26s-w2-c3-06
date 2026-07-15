@@ -38,8 +38,14 @@ export interface GameState {
   usedWordsThisGame: string[];
   rounds: Round[]; // 설명 라운드들. MVP: 길이 1
 
-  // 투표·판정은 게임당 한 번(모든 설명 라운드 종료 후). 라운드가 아니라 게임에 귀속된다.
+  // 투표·판정은 게임 단위. 라운드가 아니라 게임에 귀속된다(동점 재투표 시 rounds가 늘어도
+  // votes는 "이번 투표" 한 번만의 집계 — 재투표 시작 시 초기화됨).
   votes: Record<string, string>; // 서버 전용, 클라이언트로 절대 전송 안 함
+
+  // null이면 아직 동점이 발생하지 않은 일반 진행(최초 설명은 전원, 최초 투표는 전원 대상).
+  // 배열이면 직전 투표에서 동점이 된 플레이어 id 목록 — 이 목록이 동시에 "지금 재설명
+  // 라운드의 발화 순서 대상"이자 "다음 재투표의 유효 후보 목록"이다(둘이 항상 같은 집합).
+  tieCandidates: string[] | null;
   votedOutId?: string;
   wasLiar?: boolean;
   liarGuess?: string;

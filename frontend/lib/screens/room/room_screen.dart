@@ -283,7 +283,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// (투표 변경하기) 마음이 바뀐 선택으로 다시 제출할 수 있다.
   Future<void> _openVoteDialog(RoomViewState s) async {
     final myUid = _myUid;
-    final candidates = s.participants.where((p) => p.id != myUid).toList();
+    // 후보는 나 자신을 제외하고, 서버가 지금 유효하다고 알려준 목록(voteCandidateIds)
+    // 안에서만 고를 수 있다 — 동점 재투표면 직전 동점자로 제한된다.
+    final candidates = s.participants
+        .where((p) => p.id != myUid && s.voteCandidateIds.contains(p.id))
+        .toList();
     String? draft = _myVote;
 
     final confirmed = await _showManagedDialog<String>(
