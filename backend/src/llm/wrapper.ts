@@ -96,11 +96,36 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// 모델이 JSON만 반환하도록 프롬프트했지만, 유효한 JSON 뒤에 설명 문장이나 두 번째 블록을
+// 덧붙이는 경우가 있다. 첫 '{'부터 중괄호 균형을 맞춰 첫 완결 객체 하나만 잘라내(문자열 리터럴
+// 안의 중괄호는 무시), 뒤에 붙은 잡텍스트가 있어도 안전하게 파싱한다. 코드펜스도 먼저 제거.
+function extractFirstJsonObject(raw: string): string | null {
+  const cleaned = raw.replace(/```(?:json)?/gi, '');
+  const start = cleaned.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return cleaned.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJsonBlock<T>(raw: string, label: string): T {
-  // 모델이 JSON만 반환하도록 프롬프트했지만, 방어적으로 첫 JSON 블록만 파싱.
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`${label}: JSON 파싱 실패 — ${raw}`);
-  return JSON.parse(match[0]) as T;
+  const json = extractFirstJsonObject(raw);
+  if (!json) throw new Error(`${label}: JSON 파싱 실패 — ${raw}`);
+  return JSON.parse(json) as T;
 }
 
 const realLLM: LiarGameLLM = {
