@@ -249,7 +249,11 @@ erDiagram
 - **Android APK:** 빌드 없이 바로 설치해볼 수 있도록 리포 루트에 릴리즈 APK([`l-ai-r-game.apk`](./l-ai-r-game.apk))를 함께 올려뒀다. 설치 방법은 아래 "Android APK로 바로 설치" 참고.
 - **실행 환경:** iOS / Android / Web (Flutter 단일 코드베이스). 백엔드는 Node.js 22 + PostgreSQL. 배포는 Railway 단일 서비스(백엔드가 Flutter 웹 정적 파일도 함께 서빙).
 - **실행 방법:** 아래 참고 — Android는 APK를 바로 설치하거나, 로컬은 Postgres(Docker) → 백엔드 → 프론트 순으로 띄운다.
-- **시연 영상 / 이미지:** (선택)
+- **시연 영상 / 이미지:** 로비 입장부터 결과 확인까지 핵심 흐름 스크린샷
+
+  | 로비 | 카테고리 선택 | 설명 페이즈 | 투표 | 결과 |
+  |---|---|---|---|---|
+  | ![로비](images/screenshot-lobby.png) | ![카테고리 선택](images/screenshot-category.png) | ![설명 페이즈](images/screenshot-describing.png) | ![투표](images/screenshot-voting.png) | ![결과](images/screenshot-result.png) |
 
 ### Android APK로 바로 설치
 
