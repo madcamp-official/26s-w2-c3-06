@@ -144,6 +144,7 @@ async function runDiscussionImpersonationTick(io: Server, room: RoomState): Prom
 
     const text = await llm.generateImpersonationMessage({
       category: game.category,
+      targetNickname: getParticipantNickname(room, targetId),
       otherParticipantNicknames,
       recentDiscussion,
       explanations,
