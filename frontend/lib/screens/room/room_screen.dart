@@ -366,12 +366,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
 
     if (confirmed == null || !mounted) return;
-    // 이미 확정한 뒤 후보를 바꾸면 서버 쪽 확정도 취소되므로(gameEngine.castVote 참고),
-    // 다시 "투표 확정"을 눌러야 하는 상태로 되돌린다.
-    setState(() {
-      if (confirmed != _myVote) _myVoteConfirmed = false;
-      _myVote = confirmed;
-    });
+    // 이 다이얼로그는 확정 전에만 열 수 있으므로(_myVoteConfirmed면 버튼 자체가 비활성)
+    // 여기 도달했다는 건 아직 확정 전이라는 뜻이다.
+    setState(() => _myVote = confirmed);
     ref.read(roomProvider.notifier).castVote(confirmed);
   }
 
@@ -1399,7 +1396,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 flex: 3,
                 child: AppButton(
                   label: _myVote == null ? '투표하기' : '투표 변경하기 (${s.nicknameOf(_myVote!)})',
-                  onPressed: () => _openVoteDialog(s),
+                  // 확정 후에는 선택을 바꿀 수 없다(서버도 castVote를 무시함).
+                  onPressed: _myVoteConfirmed ? null : () => _openVoteDialog(s),
                 ),
               ),
               const SizedBox(width: 8),

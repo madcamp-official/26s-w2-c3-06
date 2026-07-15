@@ -495,29 +495,17 @@ function emitVoteProgress(io: Server, room: RoomState, game: GameState): void {
 }
 
 // 익명 투표, 서버 내부 집계 전용 (PLAN: 개인별 선택은 어떤 클라이언트에도 전송 안 함).
-// 투표 대상은 제한시간(VOTE_TIME_LIMIT_SEC) 안에서는 자유롭게 바꿀 수 있다(재투표 시 기존
-// 선택을 덮어씀) — 다만 이것만으로는 투표가 끝나지 않고, confirmVote로 명시적으로 확정해야
-// (또는 시간 만료) 집계로 넘어간다. 이미 확정한 뒤 선택을 바꾸면 그 확정은 취소되어
-// 다시 확정을 눌러야 한다.
+// 확정 전까지는 제한시간 안에서 자유롭게 바꿀 수 있지만(재투표 시 기존 선택을 덮어씀),
+// 이것만으로는 투표가 끝나지 않고 confirmVote로 명시적으로 확정해야(또는 시간 만료)
+// 집계로 넘어간다. 이미 확정한 후에는 선택을 바꿀 수 없다.
 export function castVote(io: Server, room: RoomState, voterId: string, votedPlayerId: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   if (!game.participantIds.includes(votedPlayerId)) return;
+  if (voteConfirmedByRoom.get(room.roomCode)?.has(voterId)) return;
   if (game.votes[voterId] === votedPlayerId) return;
 
   game.votes[voterId] = votedPlayerId;
-
-  const confirmed = voteConfirmedByRoom.get(room.roomCode);
-  if (confirmed?.delete(voterId)) {
-    emitVoteProgress(io, room, game);
-    // 전원 확정 유예(3초) 중이었다면, 더 이상 전원 확정 상태가 아니므로 취소한다
-    // (원래의 투표 제한시간 타이머(phaseTimers)는 건드리지 않아 그대로 fallback으로 남는다).
-    const grace = voteGraceTimers.get(room.roomCode);
-    if (grace) {
-      clearTimeout(grace);
-      voteGraceTimers.delete(room.roomCode);
-    }
-  }
 }
 
 // 투표를 최종 확정한다. 아직 아무도 안 골랐으면(votes[uid] 없음) 무시한다.
