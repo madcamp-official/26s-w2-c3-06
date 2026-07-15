@@ -1,7 +1,6 @@
 import type { Server } from 'socket.io';
 import type { GamePhase, GameState, Round, RoomState } from '../types';
 import { llm } from '../llm/wrapper';
-import { isFuzzyMatch } from '../llm/textMatch';
 import * as roomManager from './roomManager';
 import { broadcastChat } from './chat';
 import { recordGame } from '../db/gamePlayRepo';
@@ -127,8 +126,8 @@ export async function startGame(
 
   // 모든 제시어에 AI가 텍스트 설명을 미리 만들어 함께 준다(난이도 무관). real/liar 딱 2개뿐이라 한 번씩만 생성.
   const [realExplanation, liarExplanation] = await Promise.all([
-    llm.explainWord(realWord).catch(() => null),
-    llm.explainWord(liarWord).catch(() => null),
+    llm.explainWord(realWord, category).catch(() => null),
+    llm.explainWord(liarWord, category).catch(() => null),
   ]);
 
   const bots: BotInfo[] = Array.from({ length: opts.aiBotCount }, (_, i) => ({
@@ -378,7 +377,7 @@ async function submitDescriptionInternal(
   // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음).
   // 다음 턴 시작(또는 마지막 턴이면 "모든 설명이 끝났습니다" 페이즈 전환 안내)보다
   // 먼저 끝나도록 기다려, 채팅 순서가 "설명 → AI 코멘트 → 다음 안내"로 항상 고정되게 한다.
-  await generateAndBroadcastComment(io, room, text, round);
+  await generateAndBroadcastComment(io, room, playerId, text);
 
   // 코멘트를 기다리는 동안 방이 정리되는 등 상태가 바뀌었을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'describing') return;
@@ -388,20 +387,31 @@ async function submitDescriptionInternal(
 async function generateAndBroadcastComment(
   io: Server,
   room: RoomState,
+  speakerId: string,
   latestDescription: string,
-  round: Round,
 ): Promise<void> {
   const game = room.currentGame;
   if (!game) return;
   try {
-    const priorTurns = round.turns.slice(0, -1).map((t) => ({
-      nickname: getParticipantNickname(room, t.playerId),
-      text: t.text,
-    }));
+    // room.chatLog는 새 게임 시작 시에만 초기화되므로 지금 게임 범위로 이미 한정돼 있다.
+    // 방금 push된 latestDescription 메시지가 마지막 항목이므로 그것만 제외하고, 설명·AI
+    // 코멘트를 시간 순서 그대로 넘긴다 — 코멘트가 자기 이전 코멘트를 참고해 같은 대상을
+    // 계속 몰아가는 연속성을 가지려면 과거 aiComment도 기록에 포함돼야 한다.
+    const history = room.chatLog
+      .slice(0, -1)
+      .filter((m) => m.type === 'turnDescription' || m.type === 'aiComment')
+      .map((m) => ({
+        type: m.type as 'turnDescription' | 'aiComment',
+        nickname: m.type === 'aiComment' ? '분탕충봇' : getParticipantNickname(room, m.senderId),
+        text: m.text,
+      }));
+    const participantNicknames = game.participantIds.map((id) => getParticipantNickname(room, id));
     const comment = await llm.generateTurnComment({
       category: game.category,
       latestDescription,
-      priorTurns,
+      latestSpeakerNickname: getParticipantNickname(room, speakerId),
+      participantNicknames,
+      history,
     });
     broadcastChat(io, room, 'ai', 'aiComment', comment);
   } catch (err) {
@@ -748,10 +758,12 @@ export async function submitLiarGuess(
 
   let correct: boolean;
   try {
-    correct = await llm.judgeLiarGuess(guess, game.realWord);
+    correct = await llm.judgeLiarGuess(guess, game.realWord, game.category);
   } catch (err) {
-    console.error('[gameEngine] judgeLiarGuess 실패, 유사 일치 비교로 폴백', err);
-    correct = isFuzzyMatch(guess, game.realWord);
+    // LLM 판정이 API 오류 등으로 실패한 경우에만 도는 폴백. 퍼지 매칭은 제거했으므로,
+    // 오타 관용 없는 보수적 기준(정규화 후 완전 일치)으로만 정답을 인정한다.
+    console.error('[gameEngine] judgeLiarGuess 실패, 정규화 완전 일치로 폴백', err);
+    correct = guess.trim().toLowerCase() === game.realWord.trim().toLowerCase();
   }
   // 판정을 기다리는 동안 타임아웃이 먼저 게임을 끝냈을 수 있으니 다시 확인.
   if (room.currentGame?.phase !== 'liarGuess') return;
