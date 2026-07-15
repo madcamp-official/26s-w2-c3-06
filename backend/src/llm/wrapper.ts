@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL as ANTHROPIC_MODEL } from './anthropicClient';
-import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_JUDGE_MODEL, OPENAI_EXPLAIN_MODEL } from './openaiClient';
+import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_EXPLAIN_MODEL } from './openaiClient';
 import {
   categoryCandidatesPrompt,
   wordPairCandidatesPrompt,
@@ -174,7 +174,7 @@ const realLLM: LiarGameLLM = {
   async judgeLiarGuess(guess, realWord, category) {
     // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·표기 차이 허용과 동음이의어의 카테고리 맥락
     // 해석까지 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
-    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8, undefined, OPENAI_JUDGE_MODEL);
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8);
     return raw.trim().toLowerCase().startsWith('true');
   },
 };
