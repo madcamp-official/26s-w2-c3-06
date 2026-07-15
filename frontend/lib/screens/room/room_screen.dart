@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -139,6 +140,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     bool barrierDismissible = false,
     double maxWidth = 460,
   }) async {
+    // 채팅 입력 중에 팝업이 뜨면(투표 시작·결과 등) 다이얼로그가 닫힐 때 네비게이터가
+    // 채팅 입력창으로 포커스를 "프로그램적으로" 복원하는데, 웹에서는 이 경로가 브라우저
+    // input 요소와 연결이 끊긴 유령 포커스를 만들 수 있다(flutter#98786 — 새로고침 전까지
+    // 타이핑이 안 먹던 버그의 원인). 팝업을 열기 전에 미리 포커스를 풀어 복원 대상 자체를
+    // 없앤다. 닫힌 뒤에는 사용자가 입력창을 탭하면 새 포커스로 정상 연결된다.
+    _chatFocusNode.unfocus();
     if (_dialogOpen && mounted) {
       Navigator.of(context).pop();
     }
@@ -624,7 +631,21 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     _chatController.clear();
     // 엔터로 전송한 뒤에도 계속 이어서 칠 수 있도록 입력창 포커스를 다시 잡아준다
     // (웹에서는 onSubmitted 처리 중 포커스가 풀리는 경우가 있어 명시적으로 복원).
-    _chatFocusNode.requestFocus();
+    if (kIsWeb) {
+      _refocusChat();
+    } else {
+      _chatFocusNode.requestFocus();
+    }
+  }
+
+  /// 웹에서 hasFocus인 채로 브라우저 input 연결만 끊긴 유령 포커스 상태(flutter#98786)를
+  /// 복구/예방한다 — 이미 포커스가 있으면 requestFocus()가 no-op이 돼 연결이 재수립되지
+  /// 않으므로, 완전히 풀었다가 다음 프레임에 다시 잡아 실제 포커스 변화를 강제한다.
+  void _refocusChat() {
+    _chatFocusNode.unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _chatFocusNode.requestFocus();
+    });
   }
 
   // ── 방장 드래프트 반영 ──
@@ -1569,12 +1590,21 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       child: Row(
         children: [
           Expanded(
-            child: AppTextField(
-              controller: _chatController,
-              focusNode: _chatFocusNode,
-              hintText: hint,
-              enabled: canChat,
-              onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+            // 유령 포커스 상태(_refocusChat 참고)에서는 입력창을 탭해도 이미 hasFocus라
+            // 포커스 변화가 없어 스스로 복구되지 않는다 — 탭(pointer down)이 TextField의
+            // 포커스 처리보다 먼저 오는 이 지점에서 포커스를 미리 풀어, 어떤 경로로 입력이
+            // 죽었든 입력창을 한 번 탭하면 새 포커스 연결로 반드시 살아나게 한다.
+            child: Listener(
+              onPointerDown: (_) {
+                if (kIsWeb && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
+              },
+              child: AppTextField(
+                controller: _chatController,
+                focusNode: _chatFocusNode,
+                hintText: hint,
+                enabled: canChat,
+                onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+              ),
             ),
           ),
           const SizedBox(width: 8),
