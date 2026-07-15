@@ -31,8 +31,8 @@
   - 백엔드는 소켓 handshake 시 `firebase-admin`으로 ID 토큰만 검증.
   - Firebase Authentication은 인증만 담당하고, 닉네임/프로필/승패 기록 등 유저 데이터는 백엔드가 관리하는 로컬 DB(Postgres 등)에 저장. 익명 계정 link로 UID가 유지되므로, 게스트에서 가입 후 추가 마이그레이션 없이 데이터가 자동으로 이어짐. 방/게임/라운드 같은 휘발성 상태는 Node 서버 **인메모리**에 둔다.
 - **LLM: Anthropic Claude API / OpenAI API 중 택1 (환경변수로 전환)**
-  - 다섯 함수(제시어 쌍 생성, 봇 턴 생성, 매 턴 교란 코멘트, 낯선 단어 설명, 역전승 정답 유사판정) 모두 빈도가 높거나 지연에 민감 → Anthropic은 **Claude Haiku 4.5**, OpenAI는 **gpt-4o-mini**로 시작.
-  - LLM 호출부는 provider(회사)와 모델을 나중에 쉽게 바꿀 수 있도록 얇은 인터페이스로만 감싸고, 과한 멀티프로바이더 프레임워크는 만들지 않음 — 실제로 `backend/src/llm/anthropicClient.ts`/`openaiClient.ts` 두 얇은 클라이언트를 두고, `wrapper.ts`가 `LLM_PROVIDER` 환경변수(미지정 시 사용 가능한 키 기준 자동 선택, 둘 다 있으면 OpenAI 우선)로 어느 쪽을 쓸지만 결정한다. 프롬프트·파싱·거절감지 로직은 provider와 무관하게 완전히 공유.
+  - 다섯 함수(제시어 쌍 생성, 봇 턴 생성, 매 턴 교란 코멘트, 낯선 단어 설명, 역전승 정답 유사판정) 모두 빈도가 높거나 지연에 민감 → Anthropic: **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), OpenAI: **gpt-5.4-mini** (제시어 생성·봇 턴·교란 코멘트·판정용) / **gpt-5.4-nano** (단어 설명 전용, 저렴).
+  - LLM 호출부는 provider(회사)와 모델을 나중에 쉽게 바꿀 수 있도록 얇은 인터페이스로만 감싸고, 과한 멀티프로바이더 프레임워크는 만들지 않음 — 실제로 `backend/src/llm/anthropicClient.ts`/`openaiClient.ts` 두 얇은 클라이언트를 두고, `wrapper.ts`가 `LLM_PROVIDER` 환경변수(미지정 시 사용 가능한 키 기준 자동 선택, 둘 다 있으면 OpenAI 우선)로 어느 쪽을 쓸지만 결정한다. 현재 배포 환경은 **OpenAI**로 운영 중. 프롬프트·파싱·거절감지 로직은 provider와 무관하게 완전히 공유.
 
 ## 기능 명세
 
@@ -401,16 +401,33 @@ interface LiarGameLLM {
   generateWordPair(category: string | null, usedWords: string[], usedCategories: string[]): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWord(word: string): Promise<string | null>;   // 제시어 설명 텍스트. 난이도 무관 모든 단어에 대해 생성(생성 실패 시에만 null)
-  judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
+  explainWord(word: string, category: string): Promise<string | null>;
+  judgeLiarGuess(guess: string, realWord: string, category: string): Promise<boolean>;
 }
 ```
-- 다섯 함수 모두 Haiku 4.5로 시작. `category`가 null이면 카테고리 자체도 LLM이 생성.
-- `generateWordPair` 프롬프트 핵심: 같은 카테고리 안에서 연관성은 있지만 다른 두 단어를 생성 (예: 카테고리 "동물" → realWord "사자", liarWord "호랑이") — 너무 멀면 라이어가 바로 티나고, 너무 가까우면 설명이 똑같아짐. 너무 흔하고 뻔한 단어/카테고리도, 대부분이 못 알아들을 만큼 생소한 것도 피하라는 지침 포함. **LLM에게 하나만 확정해달라고 하면 매번 비슷하게 "무난한" 답으로 수렴하는 경향이 있어**, `category`가 null이면 먼저 카테고리 후보 3개(`categoryCandidatesPrompt`, 이 방에서 이미 쓴 `room.customCategories`는 회피)를 받아 서버 코드가 무작위로 하나를 고르고, 그 카테고리로 다시 제시어 쌍 후보 3개(`wordPairPrompt`, 이미 쓴 `usedWords`는 회피)를 받아 서버 코드가 무작위로 하나를 골라 확정한다 — 실제 무작위성은 LLM 샘플링이 아니라 서버 코드(`Math.random`)가 담당.
-- `generateBotTurn` 프롬프트 핵심: "너무 완벽하지 않게, 자연스럽게" — 봇도 자신에게 배정된 단어(진짜든 가짜든)만 알고 자신이 라이어인지는 모른다는 전제로 설명 생성 (사람 라이어와 동일 조건). 자신이 지금 '라이어게임' 참가자로 플레이 중이라는 프레이밍을 프롬프트 서두에 명시. 단어 자체나 그 단어를 바로 연상시키는 결정적 특징은 직접 말하지 않게 하고, 대신 "이 단어를 잘 안다"는 여유·확신이 은근히 묻어나는 간접적·개인적인 힌트로 설명하도록 지시(라이어가 아니라는 인상을 슬쩍 풍기는 효과). 응답은 반드시 반말.
-- `generateTurnComment` 프롬프트 핵심: 방금 제출된 설명을 보고 근거 없이 의심하는 드립을 던지는 코멘트를 생성. 실제 라이어가 누구인지·진짜/가짜 제시어가 무엇인지는 `TurnCommentContext` 자체에 그 필드가 없어 구조적으로 이 프롬프트에 입력될 수 없음 — 봇과 같은 원칙("정답을 모르는 관전자"처럼 행동)을 따라야 자연스러운 노이즈가 된다. 말투는 "초등학생이 단체 채팅방에서 떠드는" 유치하고 산만한 톤(반말, "ㅋㅋㅋ", "ㅇㅈ?" 등)으로 짓궂게 약올리되, 실제 욕설·혐오·인신공격은 금지. **별도 system 프롬프트**로 "참가자 전원이 동의한 게임 내 코미디 캐릭터 연기"임을 먼저 명시해, 모델이 이를 실제 기만 요청으로 오인해 거부하는 것을 방지한다(과거 "다른 플레이어를 의도적으로 헷갈리게 만들라"는 문구만으로는 Claude가 "정보를 꾸며내 속이라는 요청"으로 해석해 거부한 사례가 있었음). 응답이 거절 문구처럼 보이거나(영文/한글 거절 패턴) 비정상적으로 길면 `wrapper.ts`의 `assertNotRefusal`이 에러로 처리해, 거절 텍스트가 그대로 게임 채팅에 노출되지 않고 조용히 코멘트가 생략되게 한다.
-- `explainWord` 프롬프트 핵심: 제시어에 대한 짧은 텍스트 설명을 생성(이미지 생성은 하지 않음). 서버가 `game:configure` 직후 real/liar 두 단어 모두에 대해 미리 호출하고, 낯섦 여부와 무관하게 생성된 설명을 각 참가자의 `round:yourWord` payload(`explanation`)에 실어 보낸다. 클라이언트는 곧바로 노출하지 않고 "AI 설명보기" 버튼으로 유저가 원할 때 펼쳐 보게 한다 — 버튼은 이미 받은 설명을 표시할 뿐, 그 시점에 새로 생성을 요청하지 않는다.
-- `judgeLiarGuess` 프롬프트 핵심: 라이어의 역전승 답안과 진짜 제시어를 비교해 의미상 동일한지 판정. 오타·맞춤법 오류·한글/영어 표기 차이(예: "burger"/"버거")는 정답으로 인정. **LLM 판정만으로는 사소한 오타조차 오답 처리되는 경우가 있어**(예: "펜싱"을 "팬싱"으로 표기), `wrapper.ts`가 LLM을 호출하기 전에 `textMatch.ts`의 편집 거리 기반 결정적 체크(`isFuzzyMatch`)를 먼저 통과시킨다 — 짧은 단어는 편집 거리 1까지, 긴 단어는 길이의 20%까지 오타로 인정하고 통과하면 LLM 호출 없이 바로 정답 처리, 통과 못 하면(번역·동의어 등 표기가 많이 다른 경우) 기존처럼 LLM에게 맡긴다. LLM 호출 자체가 실패했을 때의 폴백도 완전 일치 대신 이 유사 일치로 처리.
+
+**핵심**
+- 현재 운영 중인 provider는 **OpenAI** (`OPENAI_MODEL = 'gpt-5.4-mini'` 사용). 단, `explainWord`는 정보 전달 목적이라 더 저렴한 `OPENAI_EXPLAIN_MODEL = 'gpt-5.4-nano'` 호출. Anthropic 모델 상수는 `claude-haiku-4-5-20251001` (백업 옵션, 환경변수 `LLM_PROVIDER`로 전환 가능). gpt-5.4 모델은 OpenAI의 reasoning 모델로, Chat Completions에는 `max_completion_tokens`(지원하지 않는 `max_tokens` 아님) 필수, 그리고 web search 옵션을 지원하지 않아 web search가 필요할 때는 전용 Responses API(`client.responses.create`)를 호출해야 함. `judgeLiarGuess`는 단순 참/거짓 판정이라 `reasoning_effort: 'none'`으로 호출해 불필요한 추론 토큰 오버헤드를 줄인다.
+- 인터페이스 변경: `explainWord`와 `judgeLiarGuess` 모두 **`category` 파라미터 추가** — 동음이의어(예: "너구리"는 "동물" 카테고리면 라쿤독, "라면"이면 인스턴트라면) 해석을 위해 카테고리 맥락이 필수.
+- `generateWordPair`: 카테고리 후보 3개 중 무작위 선택 후, 제시어 쌍 후보 3개(`wordPairCandidatesPrompt`)를 받아 역시 무작위 선택. **이제 모든 후보가 실제 웹 검색으로 한국인 친숙도와 실존 여부를 검증** — 검증 실패 후보는 폐기하고 대체. 프롬프트는 중복/장황성을 제거해 재작성되었으며, 외국어 사용 규칙 강화(예: "Ouija 보드" → "위저보드") 및 유사도 기준 재정의("국제적 유명도" → "한국 평범한 성인의 일상 접촉도").
+- `generateBotTurn`: 음슴체(`~함`, `~임`, `~음` 종결) 강제. 봇이 이전 설명들을 보고 자신의 배정 단어와 맞지 않는다 판단하면(즉 라이어일 가능성 높음), 그 설명들로부터 실제 단어를 추측해 그 추측한 단어를 설명 — 라이어 티가 덜 난다. 단어 자체와 결정적 특징 금지, 메타 발언(추론 과정) 금지, 길이 ~15-20자 단일 절 제한.
+- `generateTurnComment`: 봇 캐릭터명 "분탕충봇" 으로 변경(이전 "잼민이봇"). 이제 **전체 interleaved 채팅 기록**(설명과 분탕충봇 자신의 이전 코멘트, 시간 순서) + 최신 발언자 닉네임 + 전체 참가자 닉네임을 받음 — 자신의 과거 코멘트를 보고 같은 "몰아가는 대상"을 일관되게 추적하되, 최신 설명이 특히 수상하면 대상 전환 가능. 재미가 최우선 목표, 실제 라이어 탐지는 차선. 새 규칙: (a) 매번 "[닉네임]아/야"로 시작하지 않기(자연스러운 채팅처럼), (b) 설명을 따옴표로 직접 인용하지 않고 짧게 반응, (c) 길이 ~15-25자, 최대 2절. 모든 응답이 거절 패턴이거나 비정상적으로 길면 조용히 생략.
+- `explainWord`: 카테고리 맥락으로 단어 해석해 1-2문 설명 생성. **실제 웹 검색으로 사실 확인**(위치, 연도, 소속 등) 후 검증된 내용만 포함. 출처 링크/URL 절대 포함 금지. 하십시오체(`-입니다/-습니다`) 사용.
+- `judgeLiarGuess`: LLM이 100% 담당. 전 단계의 편집거리 기반 사전 체크(`textMatch.ts`) **제거**. 오타/표기 차이 관대도는 이제 prompting 영역. 새로운 규칙 추가: 겉보기 비슷하지만 실제로는 다른 사물(예: 너구리와 라쿤은 혼동되지만 너구리는 Canidae, 라쿤은 Procyonidae로 서로 다른 동물)은 **절대 정답으로 인정하지 않음** — 표기만 다를 뿐 실제로 동일한 대상을 가리킬 때만 true 반환.
+
+### Web search 통합 (실제 웹 검색 모드)
+
+**신규 기능**: `generateWordPair`와 `explainWord` 호출 시 실제 웹 검색이 **항상 활성화됨**(선택 아님). 이전에는 개발 환경 한정 prompt-tuning harness에만 있던 experimental feature를 정식 게임 기능으로 승격.
+
+**구현**:
+- `wrapper.ts`의 `completeText` helper에 `search` boolean 파라미터 추가.
+- **OpenAI**: `search=true`일 때 Chat Completions 대신 Responses API(`client.responses.create`) 호출, 매개변수 변경(`input` 대신 `messages` 대신, `max_output_tokens` 대신 `max_completion_tokens` 대신, 응답 읽기: `res.output_text`), `tools: [{type: 'web_search'}]` 추가.
+- **Anthropic**: `web_search_20250305` tool 추가(`max_uses: 8`).
+- 토큰 예산 상향: search mode는 왕복(reasoning 또는 검색) 소모가 커서 `completeText` 내부 최소값 상향 (OpenAI 8192, Anthropic 1024). 제시어 쌍 생성은 2500토큰 할당.
+
+**비용/지연 트레이드오프**: 모든 제시어 생성과 단어 설명 호출이 실제 웹 검색을 수행하므로 게임당 비용과 레이턴시 증가. 검색 없는 fallback이나 토글 없음 — 정확성 보장이 가치, 비용은 감수.
+- **쓰인 곳**: `generateWordPair`의 wordPairCandidatesPrompt 단계, `explainWord` 전체 (각각 `search=true`로 호출).
+- **prompts.ts 변경**: 해당 프롬프트에 web search로 검증하도록 명시(existence, Korean familiarity for words; factual details like location/year/affiliation for explanations); 검증 실패 후보는 폐기하고 재생성.
 
 ## 구현 현황
 
@@ -420,7 +437,7 @@ interface LiarGameLLM {
 
 이 문서의 MVP Socket.IO 계약과 "DB 스키마"(원래 선택 항목이었던 유저 전적·친구)까지 구현 완료됨. 실제 Firebase 서비스 계정 키·Anthropic/OpenAI API 키로 동작 검증 완료(방 생성→게임 진행→투표→결과→종료까지 end-to-end, DB 기록 포함).
 
-- **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Anthropic/OpenAI 이중 provider, 다섯 함수 전부, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(6시간마다)
+- **구현 완료**: `roomManager`(방 생성/입장/퇴장·4자리 코드·공개방 목록·`room:rejoin` 재접속), `gameEngine`(전체 페이즈 머신, 봇 자동 턴/투표/역전승 시도, 타이머 만료 규칙, 오지목 시 즉시 종료 분기), `socket/handlers`(이벤트 계약 전체 — `player:ready`, `game:draftConfig` 대기방 실시간 미리보기 포함, **신규: 소켓 연결 시 자동으로 현재 공개방 목록 푸시 — 클라이언트의 `room:listPublic` 요청이 소켓 초기화 타이밍과 무관하게 항상 최신 방 목록을 받도록 보장**), Firebase Auth(소켓 handshake + REST 양쪽 실제 `verifyIdToken`, 키 없으면 dev fallback), LLM 래퍼(Anthropic/OpenAI 이중 provider, 다섯 함수 전부 + web search 통합, 키 없으면 mock 폴백), DB(`User`/`GamePlay`/`Friendship` + `/api/users`, `/api/friends` REST — Socket.IO 계약에는 없는 프로필 조회용 확장, `User.level` 파생 필드 포함), 게스트 정리 cron(6시간마다)
 - **미구현으로 남은 것**: "MVP 제외(stretch)" 항목(라운드 재시작, 방별 네임스페이스, 다중 LLM 프로바이더 동시 지원, 라이어 다수 선택)뿐
 
 ### 프론트엔드
@@ -465,7 +482,7 @@ interface LiarGameLLM {
 - **백엔드 CORS origin 좁히기 — ✅ 완료**: `backend/src/index.ts`의 Express(`cors()`)와 Socket.IO(`cors.origin`) 둘 다 배포 도메인(`l-ai-r-game.madcamp-kaist.org`, `l-ai-r-game.up.railway.app`)과 로컬 개발용 `localhost:*`만 허용하도록 좁혔다. Origin 헤더가 없는 요청(네이티브 앱, 서버 간 호출)은 브라우저 CORS와 무관하므로 그대로 허용.
 - **Firebase Auth 승인된 도메인(authorized domains) 추가 — ✅ 완료**: Google 웹 로그인은 Firebase 콘솔의 Authentication → Settings → Authorized domains에 등록된 도메인에서만 동작한다. `l-ai-r-game.madcamp-kaist.org`와 `l-ai-r-game.up.railway.app` 둘 다 등록 완료(미등록 시 `auth/unauthorized-domain`으로 실패했었음). `localhost`·`*.firebaseapp.com`·`*.web.app`은 Firebase 프로젝트 생성 시 기본 등록되는 도메인이라 별도 조치 불필요.
 - **Firebase Auth 제공자 활성화 — ✅ 완료**: Firebase 콘솔 Authentication에서 익명 / 이메일·비밀번호 / Google 로그인 모두 켜져 있고 배포 환경에서 세 경로 모두 정상 동작 확인됨. Storage Rules(`avatars/{uid}` 본인만 쓰기)도 배포 전 재확인 과정에서 버그를 하나 발견해 수정했다 — `allow write`에 삭제까지 묶여 있어 `request.resource`가 없는 delete 요청이 항상 403으로 막혔던 문제로, `allow create, update`(크기·타입 검증)와 `allow delete`(소유자 확인만)를 분리해 해결(`backend/firebase/storage.rules`).
-- **백엔드 운영 환경변수**: (1) **Firebase Admin 서비스 계정 키 — ✅ 완료**: Railway `FIREBASE_SERVICE_ACCOUNT_JSON`에 주입돼 있다. 다만 `docker-entrypoint.sh`가 `#!/bin/sh`(컨테이너 내 dash)로 실행되는데 dash의 `echo`가 `\n` 등 백슬래시 이스케이프를 실제 개행으로 해석해버려 `private_key` 내부 개행이 제어 문자로 깨지는 버그가 있었다 — `verifyIdToken`이 모든 요청에서 항상 실패해(전적 조회·프로필 사진·소켓 인증 전부 막힘) 원인 파악에 시간이 걸렸다. 이스케이프를 해석하지 않는 `printf '%s'`로 교체해 해결. (2) **`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`** — 둘 다 없으면 제시어/봇/훈수가 고정 mock LLM으로 대체되니, 실제 게임 품질이 필요하면 최소 하나는 주입한다. `LLM_PROVIDER`로 명시 지정 가능(미지정 시 둘 다 있으면 OpenAI 우선) — 현재 `openai`로 동작 중.
+- **백엔드 운영 환경변수**: (1) **Firebase Admin 서비스 계정 키 — ✅ 완료**: Railway `FIREBASE_SERVICE_ACCOUNT_JSON`에 주입돼 있다. 다만 `docker-entrypoint.sh`가 `#!/bin/sh`(컨테이너 내 dash)로 실행되는데 dash의 `echo`가 `\n` 등 백슬래시 이스케이프를 실제 개행으로 해석해버려 `private_key` 내부 개행이 제어 문자로 깨지는 버그가 있었다 — `verifyIdToken`이 모든 요청에서 항상 실패해(전적 조회·프로필 사진·소켓 인증 전부 막힘) 원인 파악에 시간이 걸렸다. 이스케이프를 해석하지 않는 `printf '%s'`로 교체해 해결. (2) **`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`** — 둘 다 없으면 제시어/봇/훈수가 고정 mock LLM으로 대체되니, 실제 게임 품질이 필요하면 최소 하나는 주입한다. `LLM_PROVIDER`로 명시 지정 가능(미지정 시 둘 다 있으면 OpenAI 우선) — 현재 배포 환경은 **OpenAI(`gpt-5.4-mini`, `gpt-5.4-nano`)로 운영**. 주의: 제시어 생성과 단어 설명 모두 **실제 웹 검색을 포함**하므로, 게임 1판당 토큰 소모와 비용이 web search 없는 기본 모델보다 높음(정확성과 신뢰도 보장의 트레이드오프).
 
 ## 배포 및 DB 운영
 
