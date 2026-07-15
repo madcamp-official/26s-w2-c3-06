@@ -1,9 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic, hasAnthropicKey, MODEL as ANTHROPIC_MODEL } from './anthropicClient';
-import { getOpenAI, hasOpenAIKey, OPENAI_MODEL } from './openaiClient';
+import { getOpenAI, hasOpenAIKey, OPENAI_MODEL, OPENAI_EXPLAIN_MODEL } from './openaiClient';
 import {
   categoryCandidatesPrompt,
-  wordPairPrompt,
+  wordPairCandidatesPrompt,
   botTurnPrompt,
   turnCommentPrompt,
   turnCommentSystemPrompt,
@@ -12,7 +12,6 @@ import {
 } from './prompts';
 import type { BotTurnContext, TurnCommentContext } from '../types';
 import { mockLLM } from './mock';
-import { isFuzzyMatch } from './textMatch';
 
 // PLAN "LLM 래퍼" 인터페이스. provider/모델을 나중에 쉽게 바꿀 수 있도록 얇게만 감싼다.
 export interface LiarGameLLM {
@@ -23,8 +22,8 @@ export interface LiarGameLLM {
   ): Promise<{ category: string; realWord: string; liarWord: string }>;
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
-  explainWord(word: string): Promise<string | null>; // 난이도 무관 항상 설명 텍스트 생성(생성 실패 시에만 null)
-  judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
+  explainWord(word: string, category: string): Promise<string | null>; // 카테고리 맥락으로 해석해 설명 텍스트 생성(생성 실패 시에만 null)
+  judgeLiarGuess(guess: string, realWord: string, category: string): Promise<boolean>; // 역전승 정답 판정(카테고리 맥락)
 }
 
 // 실제 호출할 provider. .env의 LLM_PROVIDER로 명시 지정(anthropic|openai) — 나중에 다시
@@ -44,11 +43,39 @@ const provider = resolveProvider();
 
 // 프롬프트 문구·JSON 파싱·거절 감지 등 나머지 로직은 provider와 무관하게 전부 동일하게
 // 재사용한다 — 여기서 실제 API 호출 부분만 provider별로 분기한다.
-async function completeText(prompt: string, maxTokens: number, system?: string): Promise<string> {
+// search=true면 실제 웹 검색을 강제한다(제시어 생성·단어 설명의 정식 기능 — 선택이 아니라
+// 항상 켜져 있다). OpenAI는 gpt-5.4 계열이 Chat Completions에 web_search_options를 얹는
+// 방식 자체를 지원하지 않아(400 Unknown parameter), Responses API + tools:[{type:"web_search"}]로
+// 엔드포인트/요청·응답 모양을 통째로 바꿔 호출한다. Anthropic은 web_search 툴을 그대로 얹는다.
+async function completeText(
+  prompt: string,
+  maxTokens: number,
+  system?: string,
+  openaiModelOverride?: string,
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high',
+  search = false,
+): Promise<string> {
   if (provider === 'openai') {
+    if (search) {
+      // 검색 시 추론+검색 왕복으로 토큰 소모가 커서 너무 작으면 답을 못 내고 끊긴다.
+      const res = await getOpenAI().responses.create({
+        model: openaiModelOverride ?? OPENAI_MODEL,
+        max_output_tokens: Math.max(maxTokens, 8192),
+        tools: [{ type: 'web_search' }],
+        input: [
+          ...(system ? [{ role: 'system' as const, content: system }] : []),
+          { role: 'user' as const, content: prompt },
+        ],
+      } as any);
+      return String((res as any).output_text ?? '').trim();
+    }
     const res = await getOpenAI().chat.completions.create({
-      model: OPENAI_MODEL,
-      max_tokens: maxTokens,
+      model: openaiModelOverride ?? OPENAI_MODEL,
+      // gpt-5.4 계열부터 max_tokens가 아니라 max_completion_tokens를 요구한다(400 에러).
+      // reasoning 모델은 눈에 안 보이는 추론 토큰도 이 한도에서 함께 차감되므로, 짧은 답을
+      // 기대하고 max_completion_tokens를 너무 작게 주면 추론만 하다 끊겨 400 에러가 난다.
+      max_completion_tokens: maxTokens,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       messages: [
         ...(system ? [{ role: 'system' as const, content: system }] : []),
         { role: 'user' as const, content: prompt },
@@ -59,8 +86,9 @@ async function completeText(prompt: string, maxTokens: number, system?: string):
 
   const res = await getAnthropic().messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: maxTokens,
+    max_tokens: search ? Math.max(maxTokens, 1024) : maxTokens, // 검색 응답은 툴콜 왕복이 있어 여유 필요
     ...(system ? { system } : {}),
+    ...(search ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }] as any } : {}),
     messages: [{ role: 'user', content: prompt }],
   });
   return res.content
@@ -96,11 +124,36 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// 모델이 JSON만 반환하도록 프롬프트했지만, 유효한 JSON 뒤에 설명 문장이나 두 번째 블록을
+// 덧붙이는 경우가 있다. 첫 '{'부터 중괄호 균형을 맞춰 첫 완결 객체 하나만 잘라내(문자열 리터럴
+// 안의 중괄호는 무시), 뒤에 붙은 잡텍스트가 있어도 안전하게 파싱한다. 코드펜스도 먼저 제거.
+function extractFirstJsonObject(raw: string): string | null {
+  const cleaned = raw.replace(/```(?:json)?/gi, '');
+  const start = cleaned.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') inStr = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return cleaned.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJsonBlock<T>(raw: string, label: string): T {
-  // 모델이 JSON만 반환하도록 프롬프트했지만, 방어적으로 첫 JSON 블록만 파싱.
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`${label}: JSON 파싱 실패 — ${raw}`);
-  return JSON.parse(match[0]) as T;
+  const json = extractFirstJsonObject(raw);
+  if (!json) throw new Error(`${label}: JSON 파싱 실패 — ${raw}`);
+  return JSON.parse(json) as T;
 }
 
 const realLLM: LiarGameLLM = {
@@ -115,10 +168,22 @@ const realLLM: LiarGameLLM = {
       resolvedCategory = pickRandom(catParsed.categories);
     }
 
-    const raw = await completeText(wordPairPrompt(resolvedCategory, usedWords), 200);
-    const parsed = parseJsonBlock<{ citizenWord: string; liarWord: string }>(raw, 'wordPair');
-    if (!parsed.citizenWord || !parsed.liarWord) throw new Error('wordPair: 빈 응답');
-    return { category: resolvedCategory, realWord: parsed.citizenWord, liarWord: parsed.liarWord };
+    // 카테고리와 동일한 이유로 제시어 쌍도 후보 3개를 받아 서버가 무작위로 하나를 고른다.
+    // 실존·친숙도 검증을 실제 웹 검색으로 강제한다(prompts.ts의 검증 지침과 짝) — 검색 모드는
+    // 검증 과정을 텍스트로 길게 풀어쓰는 경향이 있어 여유 있게 토큰을 잡는다.
+    const raw = await completeText(
+      wordPairCandidatesPrompt(resolvedCategory, usedWords),
+      2500,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+    const parsed = parseJsonBlock<{ pairs: { citizenWord: string; liarWord: string }[] }>(raw, 'wordPair');
+    const pairs = (parsed.pairs ?? []).filter((p) => p?.citizenWord && p?.liarWord);
+    if (!pairs.length) throw new Error('wordPair: 빈 응답');
+    const pair = pickRandom(pairs);
+    return { category: resolvedCategory, realWord: pair.citizenWord, liarWord: pair.liarWord };
   },
 
   async generateBotTurn(ctx) {
@@ -133,18 +198,26 @@ const realLLM: LiarGameLLM = {
     return text;
   },
 
-  async explainWord(word) {
-    const raw = await completeText(explainWordPrompt(word), 200);
+  async explainWord(word, category) {
+    // 사실관계 확인을 실제 웹 검색으로 강제한다(prompts.ts의 검증 지침과 짝).
+    const raw = await completeText(
+      explainWordPrompt(word, category),
+      200,
+      undefined,
+      OPENAI_EXPLAIN_MODEL,
+      undefined,
+      true,
+    );
     return raw.trim().length > 0 ? raw.trim() : null;
   },
 
-  async judgeLiarGuess(guess, realWord) {
-    // "펜싱"을 "팬싱"으로 쓰는 등 사소한 오타는 LLM이 지침을 줘도 가끔 너무 엄격하게 오답
-    // 처리하는 경우가 있어, 편집 거리 기반 결정적 체크를 먼저 하고 통과하면 LLM 호출 없이
-    // 바로 정답 처리한다. 이 체크를 통과 못 하면(의미는 같지만 표기가 많이 다른 경우,
-    // 예: "burger"/"버거") 기존처럼 LLM에게 의미 판단을 맡긴다.
-    if (isFuzzyMatch(guess, realWord)) return true;
-    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord), 8);
+  async judgeLiarGuess(guess, realWord, category) {
+    // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·표기 차이 허용과 동음이의어의 카테고리 맥락
+    // 해석까지 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
+    // reasoning 모델(OpenAI)의 숨은 추론 토큰까지 감안해 max_completion_tokens는 넉넉히,
+    // 대신 reasoning_effort는 none으로 낮춰 단순 참/거짓 판정에 불필요한 추론을 줄인다
+    // (gpt-5.4-mini는 'minimal'을 지원하지 않고 none/low/medium/high/xhigh만 지원).
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 20, undefined, undefined, 'none');
     return raw.trim().toLowerCase().startsWith('true');
   },
 };
