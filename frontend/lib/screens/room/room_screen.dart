@@ -1618,12 +1618,22 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               onPointerDown: (_) {
                 if (kIsWeb && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
               },
-              child: AppTextField(
-                controller: _chatController,
-                focusNode: _chatFocusNode,
-                hintText: hint,
-                enabled: canChat,
-                onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+              // 남의 설명 턴 동안의 입력 차단은 enabled가 아니라 readOnly로 한다.
+              // enabled:false는 포커스된 입력창을 서버 이벤트(턴 시작)로 비활성화할 때
+              // 강제 unfocus를 유발하는데, 웹에서는 이 경로가 브라우저 input 연결을 영구히
+              // 끊어 재활성화 후 입력창을 탭해도(hasFocus는 true가 되지만 DOM 포커스가
+              // 복원되지 않아) 새로고침 전까지 타이핑이 안 먹는다 — 헤드리스 크롬 재현으로
+              // 확인. readOnly는 포커스를 건드리지 않아 이 문제가 없고, 차단이 풀리면
+              // 입력이 즉시 살아난다.
+              child: Opacity(
+                opacity: canChat ? 1 : 0.5,
+                child: AppTextField(
+                  controller: _chatController,
+                  focusNode: _chatFocusNode,
+                  hintText: hint,
+                  readOnly: !canChat,
+                  onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+                ),
               ),
             ),
           ),
