@@ -39,10 +39,6 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   late final TextEditingController _nicknameController;
-  late int _avatarIndex;
-  Uint8List? _profileImageBytes;
-  String? _avatarUrl;
-  UserStats? _stats;
 
   // 비밀번호 변경 — 이메일/비밀번호로 가입한 계정만 노출한다(AuthService.canChangePassword).
   final _currentPasswordController = TextEditingController();
@@ -54,16 +50,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   void initState() {
     super.initState();
     _nicknameController = TextEditingController(text: UserSession.nickname);
-    _avatarIndex = UserSession.avatarIndex;
-    _profileImageBytes = UserSession.profileImageBytes;
-    // 서버에 저장된 프로필 사진 URL 복원(로컬 미리보기가 없을 때 표시).
-    BackendApi.instance.getMyProfile().then((p) {
-      if (mounted) setState(() => _avatarUrl = p.avatarUrl);
-    }).catchError((_) {});
-    // 레벨 배지·진행바 표시용(PLAN "경험치(EXP)·레벨 프론트 표시").
-    BackendApi.instance.getMyStats().then((s) {
-      if (mounted) setState(() => _stats = s);
-    }).catchError((_) {});
   }
 
   @override
@@ -206,60 +192,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  Future<void> _handlePickPhoto() async {
-    final XFile? file = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 800,
-      maxHeight: 800,
-      imageQuality: 85,
-    );
-    if (file == null) return;
-    final bytes = await file.readAsBytes();
-    if (!mounted) return;
-    // 즉시 로컬 미리보기 반영 후, Firebase Storage(avatars/{uid})에 업로드하고 URL을 백엔드에 기록.
-    setState(() => _profileImageBytes = bytes);
-    UserSession.profileImageBytes = bytes;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final storageRef = FirebaseStorage.instance.ref('avatars/$uid');
-      await storageRef.putData(bytes, SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'));
-      final url = await storageRef.getDownloadURL();
-      await BackendApi.instance.updateAvatarUrl(url);
-      // 로비 등 다른 화면의 아바타(avatarUrlProvider를 보는 위젯)가 새로고침 없이도
-      // 바로 갱신되도록 여기서 즉시 반영한다 — UserSession.profileImageBytes만으로는
-      // 부족하다(이 세션에서만 유효한 값이라 새로고침 시 사라짐).
-      ref.read(avatarUrlProvider.notifier).set(url);
-      _snack('프로필 사진이 변경되었습니다.');
-    } catch (e) {
-      _snack('사진 업로드에 실패했습니다: $e');
-    }
-  }
-
-  Future<void> _handleRemovePhoto() async {
-    setState(() {
-      _profileImageBytes = null;
-      _avatarUrl = null;
-    });
-    UserSession.profileImageBytes = null;
-    ref.read(avatarUrlProvider.notifier).set(null);
-    try {
-      await BackendApi.instance.updateAvatarUrl(null);
-      _snack('프로필 사진이 삭제되었습니다.');
-    } catch (e) {
-      _snack('사진 삭제에 실패했습니다: $e');
-    }
-    // Storage 파일 정리는 best-effort — avatars/{uid}는 다음 업로드 시 덮어써지므로
-    // 여기서 실패해도 사용자에게 보이는 상태(DB의 avatarUrl)와는 무관하다.
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      FirebaseStorage.instance
-          .ref('avatars/$uid')
-          .delete()
-          .catchError((e) => debugPrint('[profile] Storage 사진 삭제 실패: $e'));
-    }
-  }
-
   Future<void> _handleDeleteAccount() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -312,42 +244,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(
-                  child: Container(
-                    width: 96,
-                    height: 96,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
-                    child: UserAvatar(
-                      avatarIndex: _avatarIndex,
-                      radius: 40,
-                      imageBytes: _profileImageBytes,
-                      imageUrl: _avatarUrl,
-                    ),
-                  ),
-                ),
-                if (_stats != null) ...[
-                  const SizedBox(height: 14),
-                  _LevelBadge(stats: _stats!),
-                ],
-                const SizedBox(height: 12),
-                Center(
-                  child: Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 4,
-                    children: [
-                      TextButton(
-                        onPressed: _handlePickPhoto,
-                        child: const Text('사진 변경'),
-                      ),
-                      TextButton(
-                        onPressed: _handleRemovePhoto,
-                        style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
-                        child: const Text('사진 삭제'),
-                      ),
-                    ],
-                  ),
-                ),
+                const _ProfileHeader(),
                 const SizedBox(height: 20),
                 _FieldSection(
                   label: 'NICKNAME',
@@ -421,6 +318,142 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 아바타 + 레벨 배지 + 사진 변경/삭제 영역. 서버에서 프로필 사진 URL과 스탯을 비동기로
+/// 받아와 표시하는데, 이 setState가 화면 전체를 리빌드하면 그 순간 닉네임 TextField의
+/// 한글 IME 조합이 끊겨 자모가 분리 입력되는 문제가 있었다(웹). 그래서 비동기 로딩과
+/// 그로 인한 리빌드를 이 위젯 안에 가둬 TextField의 조상이 리빌드되지 않게 한다.
+class _ProfileHeader extends ConsumerStatefulWidget {
+  const _ProfileHeader();
+
+  @override
+  ConsumerState<_ProfileHeader> createState() => _ProfileHeaderState();
+}
+
+class _ProfileHeaderState extends ConsumerState<_ProfileHeader> {
+  late int _avatarIndex;
+  Uint8List? _profileImageBytes;
+  String? _avatarUrl;
+  UserStats? _stats;
+
+  @override
+  void initState() {
+    super.initState();
+    _avatarIndex = UserSession.avatarIndex;
+    _profileImageBytes = UserSession.profileImageBytes;
+    // 서버에 저장된 프로필 사진 URL 복원(로컬 미리보기가 없을 때 표시).
+    BackendApi.instance.getMyProfile().then((p) {
+      if (mounted) setState(() => _avatarUrl = p.avatarUrl);
+    }).catchError((_) {});
+    // 레벨 배지·진행바 표시용(PLAN "경험치(EXP)·레벨 프론트 표시").
+    BackendApi.instance.getMyStats().then((s) {
+      if (mounted) setState(() => _stats = s);
+    }).catchError((_) {});
+  }
+
+  void _snack(String msg) {
+    if (mounted) showAppAlert(context, msg);
+  }
+
+  Future<void> _handlePickPhoto() async {
+    final XFile? file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 85,
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    // 즉시 로컬 미리보기 반영 후, Firebase Storage(avatars/{uid})에 업로드하고 URL을 백엔드에 기록.
+    setState(() => _profileImageBytes = bytes);
+    UserSession.profileImageBytes = bytes;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final storageRef = FirebaseStorage.instance.ref('avatars/$uid');
+      await storageRef.putData(bytes, SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'));
+      final url = await storageRef.getDownloadURL();
+      await BackendApi.instance.updateAvatarUrl(url);
+      // 로비 등 다른 화면의 아바타(avatarUrlProvider를 보는 위젯)가 새로고침 없이도
+      // 바로 갱신되도록 여기서 즉시 반영한다 — UserSession.profileImageBytes만으로는
+      // 부족하다(이 세션에서만 유효한 값이라 새로고침 시 사라짐).
+      ref.read(avatarUrlProvider.notifier).set(url);
+      _snack('프로필 사진이 변경되었습니다.');
+    } catch (e) {
+      _snack('사진 업로드에 실패했습니다: $e');
+    }
+  }
+
+  Future<void> _handleRemovePhoto() async {
+    setState(() {
+      _profileImageBytes = null;
+      _avatarUrl = null;
+    });
+    UserSession.profileImageBytes = null;
+    ref.read(avatarUrlProvider.notifier).set(null);
+    try {
+      await BackendApi.instance.updateAvatarUrl(null);
+      _snack('프로필 사진이 삭제되었습니다.');
+    } catch (e) {
+      _snack('사진 삭제에 실패했습니다: $e');
+    }
+    // Storage 파일 정리는 best-effort — avatars/{uid}는 다음 업로드 시 덮어써지므로
+    // 여기서 실패해도 사용자에게 보이는 상태(DB의 avatarUrl)와는 무관하다.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      FirebaseStorage.instance
+          .ref('avatars/$uid')
+          .delete()
+          .catchError((e) => debugPrint('[profile] Storage 사진 삭제 실패: $e'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Container(
+            width: 96,
+            height: 96,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: AppColors.accent, border: Border.all(color: AppColors.border, width: 2)),
+            child: UserAvatar(
+              avatarIndex: _avatarIndex,
+              radius: 40,
+              imageBytes: _profileImageBytes,
+              imageUrl: _avatarUrl,
+            ),
+          ),
+        ),
+        if (_stats != null) ...[
+          const SizedBox(height: 14),
+          _LevelBadge(stats: _stats!),
+        ],
+        const SizedBox(height: 12),
+        Center(
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 4,
+            children: [
+              TextButton(
+                onPressed: _handlePickPhoto,
+                child: const Text('사진 변경'),
+              ),
+              TextButton(
+                onPressed: _handleRemovePhoto,
+                style: TextButton.styleFrom(foregroundColor: AppColors.destructive),
+                child: const Text('사진 삭제'),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
