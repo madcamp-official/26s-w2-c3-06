@@ -1106,6 +1106,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           statusColor: p.id == s.hostId
               ? AppColors.primary
               : (p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText),
+          disconnected: !p.connected,
         ),
     ];
 
@@ -1625,6 +1626,11 @@ class _PlayerProfileCard extends StatelessWidget {
   final String? statusText;
   final Color? statusColor;
 
+  /// 소켓 연결이 끊겨 재접속 유예 시간(room:playerListUpdated의 connected:false) 중인지.
+  /// true면 아바타를 흐리게 하고 "재접속 대기"로 상태 텍스트를 덮어써, 다른 참가자들이
+  /// 실시간으로(즉, 유예 시간 만료로 실제 퇴장 처리되기 전부터) 알아챌 수 있게 한다.
+  final bool disconnected;
+
   const _PlayerProfileCard({
     required this.avatar,
     required this.nickname,
@@ -1632,35 +1638,41 @@ class _PlayerProfileCard extends StatelessWidget {
     required this.isCurrentTurn,
     required this.statusText,
     this.statusColor,
+    this.disconnected = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return PixelBox(
-      width: 50,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
-      color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-      border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
-      shadowOffset: null,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          avatar,
-          const SizedBox(height: 2),
-          Text(
-            isMe ? '나' : nickname,
-            style: PixelFont.body(fontSize: 9, color: AppColors.foreground, height: 1.0),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-          if (statusText != null)
+    final effectiveStatusText = disconnected ? '🔌재접속중' : statusText;
+    final effectiveStatusColor = disconnected ? AppColors.destructive : statusColor;
+    return Opacity(
+      opacity: disconnected ? 0.45 : 1,
+      child: PixelBox(
+        width: 50,
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
+        color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+        border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
+        shadowOffset: null,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            avatar,
+            const SizedBox(height: 2),
             Text(
-              statusText!,
-              style: PixelFont.body(fontSize: 8, height: 1.0, color: statusColor ?? AppColors.mutedForeground),
+              isMe ? '나' : nickname,
+              style: PixelFont.body(fontSize: 9, color: AppColors.foreground, height: 1.0),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
-        ],
+            if (effectiveStatusText != null)
+              Text(
+                effectiveStatusText,
+                style: PixelFont.body(fontSize: 8, height: 1.0, color: effectiveStatusColor ?? AppColors.mutedForeground),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+          ],
+        ),
       ),
     );
   }
