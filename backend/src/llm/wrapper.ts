@@ -5,7 +5,7 @@ import {
   categoryCandidatesPrompt,
   wordPairCandidatesPrompt,
   botTurnPrompt,
-  impersonationPrompt,
+  impersonationCandidatesPrompt,
   impersonationSystemPrompt,
   explainWordPrompt,
   judgeLiarGuessPrompt,
@@ -193,9 +193,19 @@ const realLLM: LiarGameLLM = {
   },
 
   async generateImpersonationMessage(ctx) {
-    const text = await completeText(impersonationPrompt(ctx), 128, impersonationSystemPrompt);
-    assertNotRefusal(text, 160);
-    return text;
+    // 카테고리·제시어 쌍과 동일한 이유로 후보 3개를 받아 서버가 무작위로 하나를 고른다 —
+    // 하나만 확정하게 하면 채팅에 뜬 미끼 키워드로 매 호출이 수렴해 사칭 메시지가 전부 같아진다.
+    // JSON(후보 3개)이므로 128토큰으로는 잘릴 수 있어 여유 있게 잡는다.
+    const raw = await completeText(impersonationCandidatesPrompt(ctx), 400, impersonationSystemPrompt);
+    const parsed = parseJsonBlock<{ messages: string[] }>(raw, 'impersonation');
+    const messages = (parsed.messages ?? [])
+      .map((m) => (typeof m === 'string' ? m.trim() : ''))
+      .filter((m) => m.length > 0);
+    if (!messages.length) throw new Error('impersonation: 빈 응답');
+    // 각 후보에 대해 개별적으로 거절/이상 응답을 걸러낸 뒤, 통과한 것 중에서 무작위 선택.
+    const valid = messages.filter((m) => m.length <= 160 && !REFUSAL_PATTERNS.some((re) => re.test(m)));
+    if (!valid.length) throw new Error(`impersonation: 사용 가능한 후보 없음 — ${raw.slice(0, 120)}`);
+    return pickRandom(valid);
   },
 
   async explainWord(word, category) {

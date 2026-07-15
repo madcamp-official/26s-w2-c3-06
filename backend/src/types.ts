@@ -102,7 +102,8 @@ export interface BotTurnContext {
 // 실제 라이어 정체·진짜/가짜 제시어는 이 타입 자체에 필드가 없어 구조적으로 유출 불가능하다.
 export interface ImpersonationContext {
   category: string;
-  otherParticipantNicknames: string[]; // 사칭 대상 본인을 제외한 나머지 참가자 닉네임(의심 발언 대상 후보)
+  targetNickname: string; // 지금 사칭하는 대상 본인의 닉네임 — 이 사람의 입장에서 말해야 하고, 이 사람 자신을 공격하면 안 됨
+  otherParticipantNicknames: string[]; // 사칭 대상 본인을 제외한 나머지 참가자 닉네임(공격·의심 대상 후보)
   recentDiscussion: { nickname: string; text: string }[]; // 최근 토론 채팅(최근 12개로 제한)
   explanations: { nickname: string; text: string }[]; // 설명 페이즈에서 각자 제출한 설명 전체(윈도우 제한 없이 항상 전체 포함)
 }

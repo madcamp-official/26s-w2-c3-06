@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -104,6 +106,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 화면 상단에 잠깐 떴다 스스로 사라지는 배너를 직접 오버레이로 띄운다.
   OverlayEntry? _turnToastEntry;
 
+  // 내 설명 차례의 시간이 다 되면(handleTurnTimeout) 서버는 미제출을 그냥 빈 채로 다음
+  // 턴으로 넘긴다 — 엔터를 안 쳤을 뿐 입력창에 다 쓴 내용이 그대로 날아가는 게 사용자
+  // 입장에서 이상하므로, 서버 타임아웃 직전에 프론트가 먼저 입력창 내용을 대신 제출한다.
+  Timer? _turnAutoSubmitTimer;
+
   void _showTurnToast(String text, {required bool isMine}) {
     _turnToastEntry?.remove();
     final overlay = Overlay.of(context);
@@ -179,7 +186,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       if (!mounted) return;
       setState(() => _avatarUrlCache[uid] = profile.avatarUrl);
     }).catchError((_) {
-      if (mounted) setState(() => _avatarUrlCache[uid] = null);
+      // 실패를 영구 캐싱하지 않는다: 게스트 로그인 직후 토큰이 아직 준비되지 않아
+      // 첫 요청이 실패하는 경우가 있어, 다음 rebuild에서 재시도할 수 있게 둔다.
+    }).whenComplete(() {
+      _avatarUrlFetching.remove(uid);
     });
     return null;
   }
@@ -189,6 +199,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   @override
   void dispose() {
     _turnToastEntry?.remove();
+    _turnAutoSubmitTimer?.cancel();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -612,6 +623,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (text.isEmpty) return;
     final notifier = ref.read(roomProvider.notifier);
     if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
+      _turnAutoSubmitTimer?.cancel();
+      _turnAutoSubmitTimer = null;
       notifier.submitDescription(text);
       _chatController.clear();
       // 설명을 제출하면 곧바로 다음 사람 turn:started가 와서 입력창이 차단(readOnly)된다.
@@ -629,6 +642,30 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     } else {
       _chatFocusNode.requestFocus();
     }
+  }
+
+  /// 내 설명 차례의 deadline 살짝 전에 입력창 내용을 대신 제출하도록 타이머를 건다.
+  /// deadline은 서버가 turn:started를 보낸 시각 + timeLimitSec와 사실상 같은 기준으로
+  /// 로컬 계산된 값(room_provider._deadlineFrom 참고)이라 서버 타임아웃과 거의 맞아떨어지지만,
+  /// 네트워크 왕복 지연으로 서버 타임아웃(handleTurnTimeout)이 먼저 발동해버리면 이미
+  /// 넘어간 턴이라 제출이 조용히 무시되므로, 여유를 두고 그보다 앞서 쏜다.
+  void _scheduleTurnAutoSubmit(DateTime? deadline) {
+    _turnAutoSubmitTimer?.cancel();
+    _turnAutoSubmitTimer = null;
+    if (deadline == null) return;
+    final fireIn = deadline.difference(DateTime.now()) - const Duration(milliseconds: 500);
+    _turnAutoSubmitTimer = Timer(fireIn.isNegative ? Duration.zero : fireIn, _autoSubmitOnTurnTimeout);
+  }
+
+  void _autoSubmitOnTurnTimeout() {
+    final text = _chatController.text.trim();
+    // 아무것도 안 썼으면 기존 그대로 서버 타임아웃이 빈 채로 다음 턴으로 넘긴다.
+    if (text.isEmpty) return;
+    final s = ref.read(roomProvider);
+    if (s.phase != GamePhase.describing || !s.isMyTurn(_myUid)) return;
+    ref.read(roomProvider.notifier).submitDescription(text);
+    _chatController.clear();
+    _chatFocusNode.unfocus();
   }
 
   /// 웹에서 hasFocus인 채로 브라우저 input 연결만 끊긴 유령 포커스 상태(flutter#98786)를
@@ -882,10 +919,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 설명 차례가 바뀐 걸 못 알아챈다는 피드백 — 확인 버튼이 필요한 팝업 대신, 잠깐 떴다
     // 사라지는 배너로 매 턴마다 알려준다(내 차례인지 아닌지 문구를 다르게 보여준다).
     ref.listen<String?>(roomProvider.select((v) => v.currentTurnPlayerId), (prev, next) {
+      // 내 차례가 아니게 되는 모든 경우(다음 사람 턴 시작·페이즈 종료로 클리어 등)에
+      // 이전에 걸어둔 자동 제출 타이머를 반드시 정리해, 이미 끝난 턴에 뒤늦게 쏘지 않는다.
+      if (next != _myUid) {
+        _turnAutoSubmitTimer?.cancel();
+        _turnAutoSubmitTimer = null;
+      }
       if (next == null || next == prev) return;
       final s = ref.read(roomProvider);
       if (next == _myUid) {
         _showTurnToast('내 차례예요! 제시어를 설명해주세요', isMine: true);
+        _scheduleTurnAutoSubmit(s.phaseDeadline);
       } else {
         _showTurnToast('${s.nicknameOf(next)}님 차례예요', isMine: false);
       }
@@ -1049,7 +1093,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 // 흐린 회색 subtext로는 눈에 잘 안 띈다는 피드백이 있어 강조색+굵게로 표시한다.
                 if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
                   Text(
-                    '카테고리: ${s.category}',
+                    '${s.category}',
                     style: PixelFont.title(fontSize: 14, color: AppColors.primary, height: 1.1),
                     overflow: TextOverflow.ellipsis,
                   )
