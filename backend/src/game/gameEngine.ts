@@ -341,7 +341,7 @@ async function generateAndBroadcastComment(
       .filter((m) => m.type === 'turnDescription' || m.type === 'aiComment')
       .map((m) => ({
         type: m.type as 'turnDescription' | 'aiComment',
-        nickname: m.type === 'aiComment' ? '잼민이봇' : getParticipantNickname(room, m.senderId),
+        nickname: m.type === 'aiComment' ? '분탕충봇' : getParticipantNickname(room, m.senderId),
         text: m.text,
       }));
     const participantNicknames = game.participantIds.map((id) => getParticipantNickname(room, id));

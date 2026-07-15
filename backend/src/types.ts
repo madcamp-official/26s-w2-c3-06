@@ -89,12 +89,12 @@ export interface BotTurnContext {
   priorTurns: { nickname: string; text: string }[];
 }
 
-// 설명(turnDescription)과 잼민이봇 자신의 이전 코멘트(aiComment)를 시간 순서대로 섞은 기록.
+// 설명(turnDescription)과 분탕충봇 자신의 이전 코멘트(aiComment)를 시간 순서대로 섞은 기록.
 // 코멘트가 이전 코멘트와 연속성 있게(같은 대상을 계속 몰아가는 등) 이어지려면, 자신이 이전에
 // 뭐라고 코멘트했는지도 컨텍스트로 봐야 한다 — 그래서 설명만이 아니라 코멘트도 함께 담는다.
 export interface ChatHistoryEntry {
   type: 'turnDescription' | 'aiComment';
-  nickname: string; // aiComment면 "잼민이봇" 고정 라벨, turnDescription이면 실제 참가자 닉네임
+  nickname: string; // aiComment면 "분탕충봇" 고정 라벨, turnDescription이면 실제 참가자 닉네임
   text: string;
 }
 
