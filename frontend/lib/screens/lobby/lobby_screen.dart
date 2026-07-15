@@ -170,7 +170,7 @@ class _LobbyScreenState extends ConsumerState<LobbyScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text('인원수 (사람+봇 합산)', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+                Text('최대 인원수 (사람+봇 합산)', style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
                 const SizedBox(height: 6),
                 Row(
                   children: [
