@@ -41,6 +41,7 @@ class SocketService {
   final _gameEndedCtrl = StreamController<void>.broadcast();
   final _connectErrorCtrl = StreamController<String>.broadcast();
   final _disconnectedCtrl = StreamController<void>.broadcast();
+  final _llmMockCtrl = StreamController<bool>.broadcast();
 
   Stream<RoomSnapshot> get onRoomCreated => _roomCreatedCtrl.stream;
   Stream<RoomSnapshot> get onRoomJoined => _roomJoinedCtrl.stream;
@@ -68,6 +69,8 @@ class SocketService {
   /// 예기치 않게 연결이 끊겼을 때만 발생(우리가 새로 연결하려고 직접 끊은 경우는 제외 —
   /// connect() 참고: 콜백이 잡고 있던 소켓이 더 이상 _socket이 아니면 무시한다).
   Stream<void> get onDisconnected => _disconnectedCtrl.stream;
+  /// 백엔드가 실제 LLM 대신 mock 응답으로 동작 중인지(연결마다 서버가 한 번 알려줌).
+  Stream<bool> get onLlmMode => _llmMockCtrl.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -94,6 +97,7 @@ class SocketService {
       _disconnectedCtrl.add(null);
     });
 
+    socket.on('llm:mode', (data) => _llmMockCtrl.add(_map(data)['mock'] as bool? ?? false));
     socket.on('room:created', (data) => _roomCreatedCtrl.add(RoomSnapshot.fromJson(_map(data))));
     socket.on('room:joined', (data) => _roomJoinedCtrl.add(RoomSnapshot.fromJson(_map(data))));
     socket.on(
@@ -224,6 +228,10 @@ class SocketService {
 
   void castVote(String votedPlayerId) {
     _socket?.emit('vote:cast', {'votedPlayerId': votedPlayerId});
+  }
+
+  void confirmVote() {
+    _socket?.emit('vote:confirm');
   }
 
   void guessWord(String guess) {

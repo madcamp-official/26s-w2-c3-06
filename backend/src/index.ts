@@ -11,6 +11,7 @@ import * as presence from './socket/presence';
 import { statsRouter } from './http/statsRoutes';
 import { friendsRouter } from './http/friendsRoutes';
 import { startGuestCleanupCron } from './cron/guestCleanup';
+import { isMockLLM } from './llm/wrapper';
 
 const app = express();
 
@@ -73,6 +74,10 @@ io.on('connection', (socket) => {
   console.log(`[socket] connected: ${socket.id} (uid=${uid ?? 'unknown'})`);
 
   if (uid) presence.setOnline(uid, socket.id);
+
+  // mock LLM은 프로세스 시작 시 한 번만 결정되는 전역 상태라, room/game 이벤트에 끼워넣지
+  // 않고 연결 시점에 한 번만 알려 프론트에서 배지로 상시 표시한다.
+  socket.emit('llm:mode', { mock: isMockLLM });
 
   registerSocketHandlers(io, socket);
 

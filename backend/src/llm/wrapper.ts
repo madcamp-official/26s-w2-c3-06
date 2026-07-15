@@ -153,6 +153,10 @@ const realLLM: LiarGameLLM = {
 // firebase-admin과 동일한 패턴으로 키가 없으면 결정적 mock 응답으로 폴백한다.
 export const llm: LiarGameLLM = provider ? realLLM : mockLLM;
 
+// mock 여부는 프로세스 시작 시 한 번만 결정되고 room/game 상태와 무관하므로, 개별 응답에
+// 표식을 심는 대신 이 플래그를 소켓 연결 시 한 번 클라이언트에 알려 UI에 표시한다(index.ts 참고).
+export const isMockLLM = !provider;
+
 if (!provider) {
   console.warn('[llm] ANTHROPIC_API_KEY/OPENAI_API_KEY 없음 — mock LLM으로 동작 (실제 LLM 호출 안 함)');
 } else {

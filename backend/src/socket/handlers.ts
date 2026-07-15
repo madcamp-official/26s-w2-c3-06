@@ -258,6 +258,12 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       socket.emit('room:error', { message: `참가자(사람+봇)가 최소 ${MIN_PARTICIPANTS}명 이상이어야 합니다.` });
       return;
     }
+    if (room.players.length + payload.aiBotCount > room.maxPlayers) {
+      socket.emit('room:error', {
+        message: `참가자(사람+봇)가 방 최대 인원(${room.maxPlayers}명)을 넘을 수 없습니다.`,
+      });
+      return;
+    }
     try {
       await gameEngine.startGame(io, room, payload);
       // 카테고리는 리셋하지 않고 이번에 실제로 플레이된 값(AI 랜덤이었다면 확정된 결과)을
@@ -299,6 +305,12 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     const room = currentRoom();
     if (!room) return;
     gameEngine.castVote(io, room, uid, payload.votedPlayerId);
+  });
+
+  socket.on('vote:confirm', () => {
+    const room = currentRoom();
+    if (!room) return;
+    gameEngine.confirmVote(io, room, uid);
   });
 
   socket.on('liar:guessWord', (payload: { guess: string }) => {

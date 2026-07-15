@@ -95,6 +95,7 @@ class ChatBubble extends StatelessWidget {
       radius: 13,
       imageBytes: isMine ? UserSession.profileImageBytes : null,
       imageUrl: senderAvatarUrl,
+      isBot: message.senderId.startsWith('bot-'),
     );
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

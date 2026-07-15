@@ -102,6 +102,10 @@ class RoomViewState {
   final List<RoomSummary> publicRooms;
   final bool socketConnected;
 
+  /// 백엔드가 실제 LLM 대신 결정적 mock 응답으로 동작 중인지(llm:mode 이벤트).
+  /// 프로세스 시작 시 한 번 정해지는 서버 전역 상태라 room/게임과 무관하게 상시 유지된다.
+  final bool llmMock;
+
   const RoomViewState({
     this.roomCode,
     this.hostId,
@@ -133,6 +137,7 @@ class RoomViewState {
     this.finalResult,
     this.publicRooms = const [],
     this.socketConnected = false,
+    this.llmMock = false,
   });
 
   bool isMyTurn(String? myUid) => myUid != null && currentTurnPlayerId == myUid;
@@ -205,6 +210,7 @@ class RoomViewState {
     bool clearFinalResult = false,
     List<RoomSummary>? publicRooms,
     bool? socketConnected,
+    bool? llmMock,
   }) {
     return RoomViewState(
       roomCode: roomCode ?? this.roomCode,
@@ -241,6 +247,7 @@ class RoomViewState {
       finalResult: clearFinalResult ? null : (finalResult ?? this.finalResult),
       publicRooms: publicRooms ?? this.publicRooms,
       socketConnected: socketConnected ?? this.socketConnected,
+      llmMock: llmMock ?? this.llmMock,
     );
   }
 }
@@ -264,6 +271,7 @@ class RoomNotifier extends Notifier<RoomViewState> {
       DateTime.now().add(Duration(seconds: timeLimitSec));
 
   void _wireSocketListeners() {
+    _socket.onLlmMode.listen((mock) => state = state.copyWith(llmMock: mock));
     _socket.onRoomCreated.listen((snapshot) => _applySnapshot(snapshot));
     _socket.onRoomJoined.listen((snapshot) => _applySnapshot(snapshot));
     _socket.onRoomRejoined.listen((snapshot) => _applyRejoin(snapshot));
@@ -548,11 +556,14 @@ class RoomNotifier extends Notifier<RoomViewState> {
 
   void castVote(String votedPlayerId) => _socket.castVote(votedPlayerId);
 
+  void confirmVote() => _socket.confirmVote();
+
   void guessWord(String guess) => _socket.guessWord(guess);
 
   /// 방 나가기/소켓 재연결 등으로 완전히 초기 상태로 되돌릴 때.
+  /// llmMock은 room과 무관한 서버 프로세스 전역 상태라 리셋해도 유지한다.
   void reset() {
-    state = const RoomViewState();
+    state = RoomViewState(llmMock: state.llmMock);
     RoomSessionStore.instance.clear();
   }
 }

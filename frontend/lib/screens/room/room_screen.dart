@@ -78,11 +78,21 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 후보를 로컬에 기억해 선택 표시하고 재탭을 막는다(서버도 어차피 idempotent).
   String? _myVote;
 
+  // 후보 선택(변경 가능)과 별개로, "투표 확정"을 눌러야 서버 집계에 확정으로 반영된다.
+  // 확정 후 후보를 바꾸면 서버 쪽 확정도 취소되므로 여기서도 함께 false로 되돌린다.
+  bool _myVoteConfirmed = false;
+
   // 이 화면의 팝업은 항상 한 번에 하나만 떠 있어야 한다 — 새 팝업을 열어야 하는데 이미
   // 하나가 떠 있으면(예: 역전 기회 입력 중에 시간 만료로 결과가 먼저 와버린 경우) 팝업 위에
   // 팝업을 쌓지 않고 이전 것을 먼저 닫는다. 모든 다이얼로그는 showPixelDialog를 직접 부르지
   // 말고 이 헬퍼(_showManagedDialog)를 거쳐야 한다.
   bool _dialogOpen = false;
+  // 팝업이 다른 팝업에 의해 강제로 닫히면(아래 pop()) 그 await가 그제서야 완료되면서
+  // _dialogOpen = false를 실행하는데, 이게 그 사이 새로 열린 팝업보다 늦게 실행되면
+  // 방금 연 팝업의 "열려있음" 표시를 잘못 지워버린다(라이어가 맞았어요 → 역전 기회 →
+  // 게임 결과처럼 팝업이 3개 연달아 이어질 때 세 번째가 두 번째를 못 닫는 원인이었다).
+  // 매 호출마다 토큰을 발급해 "내가 아직 최신 팝업일 때만" 플래그를 지우게 해서 막는다.
+  int _dialogToken = 0;
 
   Future<T?> _showManagedDialog<T>({
     required WidgetBuilder builder,
@@ -93,13 +103,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       Navigator.of(context).pop();
     }
     _dialogOpen = true;
+    final myToken = ++_dialogToken;
     final result = await showPixelDialog<T>(
       context: context,
       barrierDismissible: barrierDismissible,
       maxWidth: maxWidth,
       builder: builder,
     );
-    _dialogOpen = false;
+    if (myToken == _dialogToken) _dialogOpen = false;
     return result;
   }
 
@@ -305,7 +316,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     return HoverTap(
                       onTap: () => setDialogState(() => draft = p.id),
                       child: PixelBox(
-                        color: selected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+                        // 알파 블렌딩된 주황 틴트가 실기기에서 어둡게 보인다는 피드백이 있어,
+                        // 알파 없이 밝은 불투명 색(accent)을 채우고 테두리/글자로 주황을 유지한다.
+                        color: selected ? AppColors.accent : AppColors.card,
                         border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: 2),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -319,7 +332,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                             const SizedBox(height: 4),
                             Text(
                               p.nickname,
-                              style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                              style: PixelFont.body(
+                                fontSize: 11,
+                                color: selected ? AppColors.primary : AppColors.foreground,
+                                fontWeight: selected ? FontWeight.bold : null,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
@@ -356,6 +373,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     );
 
     if (confirmed == null || !mounted) return;
+    // 이 다이얼로그는 확정 전에만 열 수 있으므로(_myVoteConfirmed면 버튼 자체가 비활성)
+    // 여기 도달했다는 건 아직 확정 전이라는 뜻이다.
     setState(() => _myVote = confirmed);
     ref.read(roomProvider.notifier).castVote(confirmed);
   }
@@ -711,7 +730,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 게임이 실제로 시작/종료되면 "게임 시작"/"제출" 버튼의 로딩 표시도 함께 내린다.
     ref.listen<GamePhase>(roomProvider.select((v) => v.phase), (prev, next) {
       if (next == GamePhase.voting && prev != GamePhase.voting) {
-        setState(() => _myVote = null);
+        setState(() {
+          _myVote = null;
+          _myVoteConfirmed = false;
+        });
         // 투표 페이즈 진입 시 화면 가운데 팝업으로 바로 투표를 띄운다.
         _openVoteDialog(ref.read(roomProvider));
       }
@@ -890,6 +912,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
         children: [
+          if (s.llmMock) ...[
+            _mockBadge(),
+            const SizedBox(width: 8),
+          ],
           Text(emoji, style: const TextStyle(fontSize: 20)),
           const SizedBox(width: 10),
           Expanded(
@@ -939,6 +965,26 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 서버가 실제 LLM 대신 결정적 mock 응답으로 동작 중일 때(API 키 미설정 등)만 보이는
+  /// 배지. 제시어/AI 설명/코멘트가 전부 고정 mock 값이라는 걸 바로 알 수 있게 상시 노출한다.
+  Widget _mockBadge() {
+    return Tooltip(
+      message: '서버가 실제 LLM 대신 mock 응답으로 동작 중입니다 (API 키 미설정)',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: AppColors.destructive,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: AppColors.primaryBorder, width: 1.5),
+        ),
+        child: Text(
+          'MOCK',
+          style: PixelFont.title(fontSize: 10, color: Colors.white, height: 1),
+        ),
       ),
     );
   }
@@ -1160,6 +1206,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final myUid = _myUid;
     final me = s.players.where((p) => p.id == myUid).cast<Player?>().firstWhere((_) => true, orElse: () => null);
     final allReady = s.players.isNotEmpty && s.players.every((p) => p.isReady);
+    // 사람+봇 합이 방 최대 인원(maxPlayers)을 넘을 수 없다 — 서버(game:configure)도 같은
+    // 상한을 검증하지만, 여기서 미리 막아야 "시작" 눌렀을 때 room:error로 튕기지 않는다.
+    final maxBotCount = ((s.maxPlayers ?? 8) - s.players.length).clamp(0, 8);
+    if (isHost && _botCount > maxBotCount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _botCount = maxBotCount);
+      });
+    }
     final botCount = isHost ? _botCount : s.draftAiBotCount;
     final enough = s.players.length + botCount >= _minParticipants;
     final canStart = isHost && allReady && enough;
@@ -1178,12 +1232,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (s.phase == GamePhase.ended)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('게임 종료 — 새 게임을 시작할 수 있어요',
-                  style: PixelFont.body(fontSize: 12, color: AppColors.primary)),
-            ),
           // 참가자 프로필(아바타·준비 상태)은 화면 상단(_playerProfileRow)으로 옮겨졌다.
           // 방장은 서버가 참여 즉시 준비 완료로 고정해두므로(봇과 동일 규칙) 준비 토글을
           // 보여주지 않는다. 방장이 아닌 참가자만 직접 준비 상태를 토글하고, 이 버튼은
@@ -1219,7 +1267,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                   onPressed: () {
-                    setState(() => _botCount = (_botCount - 1).clamp(0, 8));
+                    setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
                     _pushDraft();
                   },
                   icon: const Icon(Icons.remove_circle_outline, size: 18),
@@ -1228,10 +1276,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount + 1).clamp(0, 8));
-                    _pushDraft();
-                  },
+                  onPressed: _botCount >= maxBotCount
+                      ? null
+                      : () {
+                          setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                          _pushDraft();
+                        },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
               ],
@@ -1243,6 +1293,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               loading: _startingGame,
               onPressed: canStart && !_startingGame ? _startGame : null,
             ),
+            // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
+            // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
+            if (_startingGame) ...[
+              const SizedBox(height: 6),
+              Text('AI가 제시어를 생성하는 중이에요...',
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+            ],
           ] else ...[
             const SizedBox(height: 10),
             // 방장이 아닌 참가자 화면도 위로 쌓지 않고 가로 한 줄로 나열한다.
@@ -1336,13 +1393,40 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           if (s.votesInCount != null && s.totalVoteCount != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text('투표 ${s.votesInCount}/${s.totalVoteCount}',
+              child: Text('확정 ${s.votesInCount}/${s.totalVoteCount}',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             ),
           const SizedBox(height: 8),
-          AppButton(
-            label: _myVote == null ? '투표하기' : '투표 변경하기 (${s.nicknameOf(_myVote!)})',
-            onPressed: () => _openVoteDialog(s),
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: AppButton(
+                  label: _myVote == null ? '투표하기' : '변경 (${s.nicknameOf(_myVote!)})',
+                  dense: true,
+                  // 확정 후에는 선택을 바꿀 수 없다(서버도 castVote를 무시함).
+                  onPressed: _myVoteConfirmed ? null : () => _openVoteDialog(s),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // 후보 선택과 별개로, 이 버튼을 눌러야 서버 집계에 "확정"으로 반영된다.
+              // 전원이 확정하면 제한시간을 다 기다리지 않고 곧바로(3초 뒤) 결과로 넘어간다.
+              Expanded(
+                flex: 2,
+                child: AppButton(
+                  label: _myVoteConfirmed ? '확정 ✓' : '확정',
+                  dense: true,
+                  variant: _myVoteConfirmed ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                  accentColor: _myVoteConfirmed ? AppColors.success : null,
+                  onPressed: _myVote == null || _myVoteConfirmed
+                      ? null
+                      : () {
+                          setState(() => _myVoteConfirmed = true);
+                          ref.read(roomProvider.notifier).confirmVote();
+                        },
+                ),
+              ),
+            ],
           ),
         ],
       ),
