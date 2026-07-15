@@ -5,8 +5,8 @@ import '../services/user_session.dart';
 import '../theme/app_colors.dart';
 import 'user_avatar.dart';
 
-/// 채팅 메시지 한 줄. AI 분탕질 메시지는 왼쪽 강조선이 있는 콜아웃으로, 시스템 메시지는
-/// 가운데 정렬된 알약 배지로, 일반 채팅/턴 설명은 아바타+말풍선으로 표시한다.
+/// 채팅 메시지 한 줄. 시스템 메시지는 가운데 정렬된 알약 배지로, 일반 채팅/턴 설명은
+/// 아바타+말풍선으로 표시한다.
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -23,8 +23,6 @@ class ChatBubble extends StatelessWidget {
     switch (message.type) {
       case ChatMessageType.system:
         return _buildSystemPill(context);
-      case ChatMessageType.aiComment:
-        return _buildAiCallout(context);
       case ChatMessageType.turnDescription:
       case ChatMessageType.chat:
         return _buildPlayerBubble(context);
@@ -53,33 +51,6 @@ class ChatBubble extends StatelessWidget {
           message.text,
           textAlign: TextAlign.center,
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAiCallout(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: const BoxDecoration(
-          color: AppColors.accent,
-          border: Border(left: BorderSide(color: AppColors.primary, width: 4)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // const Text('☕', style: TextStyle(fontSize: 12)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                message.text,
-                style: const TextStyle(color: AppColors.primary, fontStyle: FontStyle.italic, fontSize: 12),
-              ),
-            ),
-          ],
         ),
       ),
     );

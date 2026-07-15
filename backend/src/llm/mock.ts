@@ -1,5 +1,5 @@
 import type { LiarGameLLM } from './wrapper';
-import type { BotTurnContext, TurnCommentContext } from '../types';
+import type { BotTurnContext, ImpersonationContext } from '../types';
 
 // ANTHROPIC_API_KEY 없이 로컬에서 게임 흐름을 끝까지 돌려볼 수 있는 결정적 mock.
 // 실제 프롬프트 품질과는 무관 — 어디까지나 배선(wiring) 검증용.
@@ -29,8 +29,9 @@ export const mockLLM: LiarGameLLM = {
     return `(mock) ${ctx.assignedWord}에 대한 설명입니다.`;
   },
 
-  async generateTurnComment(ctx: TurnCommentContext) {
-    return `(mock) 야 "${ctx.latestDescription.slice(0, 10)}..." 이거 완전 수상한데?ㅋㅋㅋ 노잼이야 ㅇㅈ?`;
+  async generateImpersonationMessage(ctx: ImpersonationContext) {
+    const target = ctx.otherParticipantNicknames[0] ?? '누군가';
+    return `(mock) 근데 ${target} 아까부터 좀 수상하지 않았음?ㅋㅋ`;
   },
 
   async explainWord(word: string, category: string) {
