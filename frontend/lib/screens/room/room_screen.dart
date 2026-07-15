@@ -1548,7 +1548,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             else
               Row(
                 children: [
-                  Expanded(
+                  Flexible(
                     child: Text(
                       '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
                       style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
@@ -1557,8 +1557,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  // 카테고리·봇 수는 왼쪽에 붙여 두고, 남는 공간은 이 뒤(준비 버튼 앞)로 몰아
+                  // 봇 수가 버튼 쪽에 치우쳐 보이지 않고 카테고리 바로 옆에 붙어 보이게 한다.
+                  const Spacer(),
                   if (me != null) ...[
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 8),
                     AppButton(
                       label: me.isReady ? '준비완료 ✓' : '준비하기',
                       variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
