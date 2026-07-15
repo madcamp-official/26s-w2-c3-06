@@ -104,8 +104,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: nicknameController,
-                  hintText: '닉네임 (최대 8자)',
-                  maxLength: 8,
+                  hintText: '닉네임',
                   onChanged: (_) => setDialogState(() {}),
                   onSubmitted: (value) {
                     final trimmed = value.trim();
