@@ -33,7 +33,7 @@ class UserAvatar extends StatelessWidget {
     final borderRadius = BorderRadius.circular(size * 0.16);
     final Widget content;
     final placeholder = isBot
-        ? Text('🤖', style: TextStyle(fontSize: size * 0.55))
+        ? Image.asset('images/bot_avatar.png', width: size, height: size, fit: BoxFit.cover)
         : Icon(Icons.person, size: size * 0.6, color: AppColors.mutedForeground);
     if (imageBytes != null) {
       content = Image.memory(imageBytes!, width: size, height: size, fit: BoxFit.cover);
