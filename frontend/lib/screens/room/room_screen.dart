@@ -297,7 +297,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   physics: const NeverScrollableScrollPhysics(),
                   mainAxisSpacing: 8,
                   crossAxisSpacing: 8,
-                  childAspectRatio: 2.6,
+                  // 2.6이던 값은 화면 폭이 좁은 실기기에서 셀 높이가 아바타+닉네임보다 작아져
+                  // "bottom overflowed" 나던 원인이었다 — 셀을 더 세로로 넉넉하게 준다.
+                  childAspectRatio: 1.8,
                   children: candidates.map((p) {
                     final selected = draft == p.id;
                     return HoverTap(
@@ -310,12 +312,16 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                           children: [
                             UserAvatar(
                               avatarIndex: _avatarIndexFor(p.id, s),
-                              radius: 16,
+                              radius: 14,
                               imageUrl: p.isBot ? null : _avatarUrlFor(p.id),
                               isBot: p.isBot,
                             ),
                             const SizedBox(height: 4),
-                            Text(p.nickname, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+                            Text(
+                              p.nickname,
+                              style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ],
                         ),
                       ),
