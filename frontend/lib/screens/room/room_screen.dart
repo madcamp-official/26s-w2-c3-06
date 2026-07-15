@@ -1160,6 +1160,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final myUid = _myUid;
     final me = s.players.where((p) => p.id == myUid).cast<Player?>().firstWhere((_) => true, orElse: () => null);
     final allReady = s.players.isNotEmpty && s.players.every((p) => p.isReady);
+    // 사람+봇 합이 방 최대 인원(maxPlayers)을 넘을 수 없다 — 서버(game:configure)도 같은
+    // 상한을 검증하지만, 여기서 미리 막아야 "시작" 눌렀을 때 room:error로 튕기지 않는다.
+    final maxBotCount = ((s.maxPlayers ?? 8) - s.players.length).clamp(0, 8);
+    if (isHost && _botCount > maxBotCount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _botCount = maxBotCount);
+      });
+    }
     final botCount = isHost ? _botCount : s.draftAiBotCount;
     final enough = s.players.length + botCount >= _minParticipants;
     final canStart = isHost && allReady && enough;
@@ -1219,7 +1227,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                   onPressed: () {
-                    setState(() => _botCount = (_botCount - 1).clamp(0, 8));
+                    setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
                     _pushDraft();
                   },
                   icon: const Icon(Icons.remove_circle_outline, size: 18),
@@ -1228,10 +1236,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount + 1).clamp(0, 8));
-                    _pushDraft();
-                  },
+                  onPressed: _botCount >= maxBotCount
+                      ? null
+                      : () {
+                          setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                          _pushDraft();
+                        },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
               ],
