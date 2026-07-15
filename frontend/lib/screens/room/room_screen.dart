@@ -1413,6 +1413,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                     onPressed: _openCategoryPicker,
                   ),
                 ),
+                const SizedBox(width: 10),
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1422,7 +1423,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   },
                   icon: const Icon(Icons.remove_circle_outline, size: 18),
                 ),
+                const SizedBox(width: 4),
                 Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                const SizedBox(width: 4),
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1434,15 +1437,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                         },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: AppButton(
-                    label: '시작 ▶',
-                    dense: true,
-                    loading: _startingGame,
-                    onPressed: canStart && !_startingGame ? _startGame : null,
-                  ),
+                const SizedBox(width: 12),
+                AppButton(
+                  label: '시작 ▶',
+                  dense: true,
+                  fullWidth: false,
+                  loading: _startingGame,
+                  onPressed: canStart && !_startingGame ? _startGame : null,
                 ),
               ],
             ),
