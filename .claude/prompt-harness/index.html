@@ -540,7 +540,14 @@ function renderPicker(d, elId) {
   const el = $(elId);
   if (!d || !d.ok) { el.innerHTML = `<div class="err">⚠ ${esc(d?.error || '실패')}</div>` + (d ? renderRaws(d) : ''); return; }
   const refused = d.refused ? '<span class="refused-tag">게임에서 거절로 걸러짐</span>' : '';
-  el.innerHTML = `<div class="pick-body"><div class="gen-text">${esc(d.text)}${refused}</div>`
+  // 사칭 메시지는 후보 3개를 받아 서버가 무작위로 하나를 골라 d.text로 돌려준다 —
+  // 후보 전체를 함께 보여줘 다양성(중복 여부)을 눈으로 확인할 수 있게 한다.
+  const cands = Array.isArray(d.candidates) && d.candidates.length
+    ? `<div class="cand-list" style="margin-top:8px;font-size:13px;opacity:.85">후보 ${d.candidates.length}개:`
+      + d.candidates.map(c => `<div${c === d.text ? ' style="font-weight:700"' : ''}>• ${esc(c)}${c === d.text ? ' ← 선택됨' : ''}</div>`).join('')
+      + `</div>`
+    : '';
+  el.innerHTML = `<div class="pick-body"><div class="gen-text">${esc(d.text)}${refused}</div>${cands}`
     + `<button class="chip-btn" id="ch-adopt" style="padding:6px 14px">이걸로 채택 ↩</button></div>`;
 }
 function clearPicker() {
@@ -587,7 +594,7 @@ async function genImpersonation() {
   pickerKind = 'imp';
   $('ch-col-title').textContent = `사칭 메시지 (대상: ${target})`;
   const explanations = priorTurns();
-  await runSolo('/api/impersonation', { category, otherParticipantNicknames, recentDiscussion, explanations }, {
+  await runSolo('/api/impersonation', { category, targetNickname: target, otherParticipantNicknames, recentDiscussion, explanations }, {
     colId: 'ch-col', bodyElId: 'ch-body', modelElId: 'ch-model',
     render: (d, elId) => { lastAdoptedText = d?.ok ? d.text : ''; renderPicker(d, elId); },
     promptsElId: 'ch-prompts',

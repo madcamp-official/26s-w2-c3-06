@@ -26,7 +26,7 @@ import {
   wordPairCandidatesPrompt,
   explainWordPrompt,
   botTurnPrompt,
-  impersonationPrompt,
+  impersonationCandidatesPrompt,
   impersonationSystemPrompt,
   judgeLiarGuessPrompt,
 } from '../../backend/src/llm/prompts';
@@ -228,21 +228,39 @@ async function runBotTurn(ctx: BotTurnContext) {
 // 토론 페이즈 중 서버가 5초 간격으로 실제 참가자 한 명을 무작위로 골라 그 사람인 척 자유
 // 채팅 메시지를 흘려보내는 기능 — 더 이상 턴마다 붙는 "코멘트"가 아니다.
 async function runImpersonation(ctx: ImpersonationContext) {
+  // 카테고리·제시어 쌍과 동일하게 후보 3개를 받아 서버가 무작위로 하나를 고른다 —
+  // 하나만 확정하게 하면 채팅에 뜬 미끼 키워드로 매 호출이 수렴해 사칭 메시지가 전부 같아진다.
+  const prompt = impersonationCandidatesPrompt(ctx);
+  const prompts: Labeled[] = [
+    { label: '사칭 메시지 프롬프트', text: prompt },
+    { label: '시스템 프롬프트', text: impersonationSystemPrompt },
+  ];
+  const raws: Labeled[] = [];
   try {
-    const prompt = impersonationPrompt(ctx);
-    const text = await completeText(prompt, 128, impersonationSystemPrompt);
+    // JSON(후보 3개)이므로 128토큰으로는 잘릴 수 있어 여유 있게 잡는다(wrapper.ts와 동일).
+    const raw = await completeText(prompt, 400, impersonationSystemPrompt);
+    raws.push({ label: '사칭 메시지 응답', text: raw });
+    const parsed = parseJsonBlock<{ messages: string[] }>(raw);
+    const messages = (parsed.messages ?? [])
+      .map((m) => (typeof m === 'string' ? m.trim() : ''))
+      .filter((m) => m.length > 0);
+    if (!messages.length) throw new Error('impersonation: 빈 응답');
+    // 각 후보에 개별적으로 거절/길이 검증을 적용한 뒤 통과분 중 무작위 선택(wrapper.ts와 동일).
+    const valid = messages.filter((m) => !isRefusalOrOverLength(m, 160));
+    if (!valid.length) throw new Error(`impersonation: 사용 가능한 후보 없음 — ${raw.slice(0, 120)}`);
+    const picked = pickRandom(valid);
     return {
       ok: true as const,
-      text,
-      refused: isRefusalOrOverLength(text, 160), // 게임에서 걸러지는지(assertNotRefusal 한도 160)
-      prompts: [
-        { label: '사칭 메시지 프롬프트', text: prompt },
-        { label: '시스템 프롬프트', text: impersonationSystemPrompt },
-      ] as Labeled[],
-      raws: [{ label: '사칭 메시지 응답', text }] as Labeled[],
+      text: picked.value,
+      candidates: messages, // 후보 3개 전부 (프론트에서 나머지도 확인 가능)
+      validCandidates: valid,
+      pickedIndex: picked.index, // valid 배열 기준 인덱스
+      refused: false as const,
+      prompts,
+      raws,
     };
   } catch (e) {
-    return { ok: false as const, error: String((e as Error)?.message ?? e), prompts: [] as Labeled[], raws: [] as Labeled[] };
+    return { ok: false as const, error: String((e as Error)?.message ?? e), prompts, raws };
   }
 }
 
@@ -356,6 +374,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const ctx: ImpersonationContext = {
         category: String(body.category ?? '').trim(),
+        targetNickname: String(body.targetNickname ?? '').trim(),
         otherParticipantNicknames: Array.isArray(body.otherParticipantNicknames) ? body.otherParticipantNicknames : [],
         recentDiscussion: Array.isArray(body.recentDiscussion) ? body.recentDiscussion : [],
         explanations: Array.isArray(body.explanations) ? body.explanations : [],
