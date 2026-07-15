@@ -751,6 +751,71 @@ export async function submitLiarGuess(
   finalizeGame(io, room, { liarGuessCorrect: correct, winner: game.winner });
 }
 
+// ── 진행 중 플레이어 이탈 처리 ──
+
+// 게임 진행 중(describing/discussion/voting/resolution/liarGuess)에 플레이어가 실제로
+// 방을 나갔을 때(명시적 나가기, 또는 재접속 유예 만료) 호출한다. 일시적 연결 끊김만으로는
+// 호출되지 않는다 — roomManager의 재접속 유예 기간이 끝나 확정적으로 제거된 시점에만 온다.
+export function handlePlayerLeft(io: Server, room: RoomState, uid: string): void {
+  const game = room.currentGame;
+  if (!game || game.phase === 'ended') return;
+  if (!game.participantIds.includes(uid)) return; // 이번 게임 참가자가 아니면 무관
+
+  const nickname = getParticipantNickname(room, uid);
+
+  if (game.liarIds.includes(uid)) {
+    // 라이어가 나갔다 — 더 이상 라이어를 잡아낼 의미가 없으므로 즉시 시민 승리로 종료한다.
+    broadcastChat(io, room, 'system', 'system', `${nickname}님(라이어)이 게임 도중 나가 게임을 종료합니다.`);
+    finalizeGame(io, room, { liarGuessCorrect: null, winner: 'citizens' });
+    return;
+  }
+
+  // 시민이 나갔다 — 이번 게임의 참가자 목록에서 완전히 제거해, 지금이든 나중이든
+  // 그 사람 차례가 다시 오지 않게 한다(설명 순서/투표 후보 모두에서 제외).
+  const order = currentTurnOrder(game);
+  const oldIdx = turnIndexByRoom.get(room.roomCode) ?? 0;
+  const leftIdx = order.indexOf(uid);
+  const wasCurrentTurn = game.phase === 'describing' && leftIdx === oldIdx;
+
+  game.participantIds = game.participantIds.filter((id) => id !== uid);
+  game.playerOrder = game.playerOrder.filter((id) => id !== uid);
+  if (game.tieCandidates) {
+    game.tieCandidates = game.tieCandidates.filter((id) => id !== uid);
+  }
+  delete game.votes[uid];
+
+  broadcastChat(io, room, 'system', 'system', `${nickname}님이 게임 도중 나갔습니다.`);
+
+  if (game.phase === 'describing' && leftIdx !== -1 && leftIdx < oldIdx) {
+    // 이미 차례가 지나간 사람이 나갔다 — 배열이 한 칸 당겨지므로 인덱스도 하나 줄여
+    // "지금 차례"가 그대로 유지되게 한다(안 그러면 엉뚱한 다음 사람 차례로 밀려버림).
+    turnIndexByRoom.set(room.roomCode, oldIdx - 1);
+  }
+
+  if (wasCurrentTurn) {
+    // 나간 사람이 지금 차례였다 — 그 턴 타이머를 지우고 곧바로 다음 사람 차례로 넘긴다
+    // (playerOrder에서 이미 빠졌으므로 같은 인덱스가 자연히 다음 사람을 가리킨다).
+    const timer = turnTimers.get(room.roomCode);
+    if (timer) clearTimeout(timer);
+    turnTimers.delete(room.roomCode);
+    startTurn(io, room);
+  } else if (game.phase === 'voting') {
+    // 총원이 줄었으니 진행률을 다시 보내고, 남은 사람이 이미 전원 확정했다면 유예 없이
+    // 곧바로 집계로 넘어간다(나간 사람 하나 때문에 끝까지 기다릴 이유가 없다).
+    emitVoteProgress(io, room, game);
+    const confirmed = voteConfirmedByRoom.get(room.roomCode);
+    if (confirmed && game.participantIds.length > 0 && confirmed.size >= game.participantIds.length) {
+      const graceTimer = voteGraceTimers.get(room.roomCode);
+      if (graceTimer) clearTimeout(graceTimer);
+      voteGraceTimers.delete(room.roomCode);
+      const timer = phaseTimers.get(room.roomCode);
+      if (timer) clearTimeout(timer);
+      phaseTimers.delete(room.roomCode);
+      resolveVoting(io, room);
+    }
+  }
+}
+
 // ── 게임 종료 ──
 
 function finalizeGame(

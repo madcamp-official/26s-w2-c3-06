@@ -177,6 +177,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     if (player) {
       broadcastChat(io, result.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
     }
+    gameEngine.handlePlayerLeft(io, result.room, uid);
   }
 
   // 원인 불명의 연결 끊김(새로고침 포함) — 곧바로 퇴장시키지 않고 유예 시간을 준다.
@@ -203,6 +204,7 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
       if (player) {
         broadcastChat(io, removal.room, 'system', 'system', `${player.nickname}님이 퇴장했습니다.`);
       }
+      gameEngine.handlePlayerLeft(io, removal.room, uid);
     });
   }
 
