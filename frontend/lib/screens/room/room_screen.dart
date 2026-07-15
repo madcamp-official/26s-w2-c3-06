@@ -1060,14 +1060,18 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// highlight(게임 시작/종료 강조)도 서버 계약엔 없어, 시스템 메시지 문구로 여기서 판별한다.
   ChatMessage _displayMessage(ChatMessage m, RoomViewState s) {
     final nickname = m.isAi ? 'AI' : (m.isSystem ? '시스템' : s.nicknameOf(m.senderId));
-    final isGameStartOrEnd = m.isSystem &&
-        (m.text.startsWith('새 게임이 시작되었습니다') || m.text.startsWith('---- 게임이 종료되었습니다'));
+    final isGameStart = m.isSystem && m.text.startsWith('새 게임이 시작되었습니다');
+    final isGameStartOrEnd = isGameStart || (m.isSystem && m.text.startsWith('---- 게임이 종료되었습니다'));
+    // 서버 브로드캐스트 문구엔 카테고리가 붙어있지만("... 카테고리: 음식"), 실제로는 사람마다
+    // 배정된 제시어가 다르므로(진짜/가짜) 여기서 카테고리 언급은 지우고 내가 받은 제시어로
+    // 클라이언트에서 개인화해 보여준다.
+    final text = isGameStart ? '새 게임이 시작되었습니다! 제시어: ${s.myWord ?? "..."}' : m.text;
     return ChatMessage(
       id: m.id,
       senderId: m.senderId,
       senderNickname: nickname,
       avatarIndex: _avatarIndexFor(m.senderId, s),
-      text: m.text,
+      text: text,
       type: m.type,
       highlight: isGameStartOrEnd,
       timestamp: m.timestamp,
