@@ -87,6 +87,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 팝업을 쌓지 않고 이전 것을 먼저 닫는다. 모든 다이얼로그는 showPixelDialog를 직접 부르지
   // 말고 이 헬퍼(_showManagedDialog)를 거쳐야 한다.
   bool _dialogOpen = false;
+  // 팝업이 다른 팝업에 의해 강제로 닫히면(아래 pop()) 그 await가 그제서야 완료되면서
+  // _dialogOpen = false를 실행하는데, 이게 그 사이 새로 열린 팝업보다 늦게 실행되면
+  // 방금 연 팝업의 "열려있음" 표시를 잘못 지워버린다(라이어가 맞았어요 → 역전 기회 →
+  // 게임 결과처럼 팝업이 3개 연달아 이어질 때 세 번째가 두 번째를 못 닫는 원인이었다).
+  // 매 호출마다 토큰을 발급해 "내가 아직 최신 팝업일 때만" 플래그를 지우게 해서 막는다.
+  int _dialogToken = 0;
 
   Future<T?> _showManagedDialog<T>({
     required WidgetBuilder builder,
@@ -97,13 +103,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       Navigator.of(context).pop();
     }
     _dialogOpen = true;
+    final myToken = ++_dialogToken;
     final result = await showPixelDialog<T>(
       context: context,
       barrierDismissible: barrierDismissible,
       maxWidth: maxWidth,
       builder: builder,
     );
-    _dialogOpen = false;
+    if (myToken == _dialogToken) _dialogOpen = false;
     return result;
   }
 
@@ -1395,18 +1402,20 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               Expanded(
                 flex: 3,
                 child: AppButton(
-                  label: _myVote == null ? '투표하기' : '투표 변경하기 (${s.nicknameOf(_myVote!)})',
+                  label: _myVote == null ? '투표하기' : '변경 (${s.nicknameOf(_myVote!)})',
+                  dense: true,
                   // 확정 후에는 선택을 바꿀 수 없다(서버도 castVote를 무시함).
                   onPressed: _myVoteConfirmed ? null : () => _openVoteDialog(s),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               // 후보 선택과 별개로, 이 버튼을 눌러야 서버 집계에 "확정"으로 반영된다.
               // 전원이 확정하면 제한시간을 다 기다리지 않고 곧바로(3초 뒤) 결과로 넘어간다.
               Expanded(
                 flex: 2,
                 child: AppButton(
-                  label: _myVoteConfirmed ? '확정완료 ✓' : '투표 확정',
+                  label: _myVoteConfirmed ? '확정 ✓' : '확정',
+                  dense: true,
                   variant: _myVoteConfirmed ? AppButtonVariant.outlined : AppButtonVariant.primary,
                   accentColor: _myVoteConfirmed ? AppColors.success : null,
                   onPressed: _myVote == null || _myVoteConfirmed
