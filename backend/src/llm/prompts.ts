@@ -160,10 +160,14 @@ export function turnCommentPrompt(ctx: TurnCommentContext): string {
 }
 
 // 난이도와 무관하게 모든 제시어에 대해 짧은 텍스트 설명을 생성하도록 요청한다.
-export function explainWordPrompt(word: string): string {
+// 같은 단어라도 카테고리에 따라 가리키는 대상이 달라지므로(예: "너구리"가 "동물"이면 동물,
+// "라면"이면 너구리 라면), 반드시 해당 카테고리 맥락으로 해석하도록 category를 함께 준다.
+export function explainWordPrompt(word: string, category: string): string {
   return [
+    `카테고리: "${category}"`,
     `단어: "${word}"`,
-    '이 단어의 뜻을 한두 문장으로 짧게 설명하라(이미지 생성 없이 텍스트로만).',
+    `이 단어를 "${category}" 카테고리의 맥락에서 해석해, 그 뜻을 한두 문장으로 짧게 설명하라(이미지 생성 없이 텍스트로만).`,
+    '같은 단어라도 카테고리에 따라 다른 대상을 가리킬 수 있으니(예: "너구리"가 "동물"이면 동물, "라면"이면 너구리 라면), 반드시 위 카테고리에 맞는 의미로 설명하라.',
     '흔히 아는 쉬운 단어여도 반드시 짧은 설명을 제공하라.',
     '다른 말 없이 설명 문장만 출력하라.',
   ].join('\n');
