@@ -1112,10 +1112,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// 채팅 목록을 더 넓게 보고 싶을 때 카테고리/타이머/투표 등 컨텍스트 박스를 직접
   /// 접었다 펼 수 있는 얇은 토글 바. [expanded]는 박스가 지금 펼쳐져 보이는 상태인지.
   Widget _contextPanelToggle(bool expanded) {
-    // 패널 상하 여백(_panelBox의 margin)과 리듬이 맞도록 좌우 10으로 통일하되, 상하는
-    // 최소한으로 줄여 토글 바와 그 아래 패널 사이 빈 공간이 크게 남지 않게 한다.
+    // 좌우만 패널과 리듬을 맞추고, 상하는 텍스트 자체 줄 높이에 맡겨 토글 바와 그 아래
+    // 패널 사이 빈 공간을 최대한 좁힌다.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
       child: HoverTap(
         onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
         child: SizedBox(
@@ -1151,8 +1151,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _panelBox({required Widget child}) => PixelBox(
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-        // 위쪽만 살짝 줄여 바로 위 토글 바와의 간격이 너무 크게 남지 않게 한다.
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        // 위쪽만 더 줄여 바로 위 토글 바와의 간격이 최소한만 남게 한다.
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
         child: child,
       );
 
