@@ -155,7 +155,13 @@ class AuthService {
 
   Future<OAuthCredential> _googleCredential() async {
     final googleSignIn = GoogleSignIn.instance;
-    await googleSignIn.initialize();
+    // google_sign_in 7.x부터는 Credential Manager 기반이라, serverClientId(웹 OAuth
+    // 클라이언트 — google-services.json의 client_type: 3)를 명시해야 ID 토큰이 발급된다.
+    // 이게 없으면 SHA-1이 정상 등록돼 있어도 authenticate()가 idToken 없이 돌아와
+    // missing-google-id-token으로 실패한다.
+    await googleSignIn.initialize(
+      serverClientId: '372020945949-2q1jvvrc7u3leicba6vd0htfa3f2k0et.apps.googleusercontent.com',
+    );
     final account = await googleSignIn.authenticate();
     final idToken = account.authentication.idToken;
     if (idToken == null) {

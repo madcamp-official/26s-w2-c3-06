@@ -1112,10 +1112,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// 채팅 목록을 더 넓게 보고 싶을 때 카테고리/타이머/투표 등 컨텍스트 박스를 직접
   /// 접었다 펼 수 있는 얇은 토글 바. [expanded]는 박스가 지금 펼쳐져 보이는 상태인지.
   Widget _contextPanelToggle(bool expanded) {
-    // 패널 상하 여백(_panelBox의 margin)과 리듬이 맞도록 좌우 10 + 상하 4로 통일 —
-    // 접힌 상태에서도(패널이 안 보여도) 입력창과의 간격이 펼친 상태와 일정하게 유지된다.
+    // 좌우만 패널과 리듬을 맞추고, 상하는 텍스트 자체 줄 높이에 맡겨 토글 바와 그 아래
+    // 패널 사이 빈 공간을 최대한 좁힌다.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
       child: HoverTap(
         onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
         child: SizedBox(
@@ -1151,7 +1151,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _panelBox({required Widget child}) => PixelBox(
         margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-        padding: const EdgeInsets.all(12),
+        // 위쪽만 더 줄여 바로 위 토글 바와의 간격이 최소한만 남게 한다.
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
         child: child,
       );
 
@@ -1189,13 +1190,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           // 방장 화면의 "시작 ▶" 버튼과 같은 자리(가로 한 줄의 맨 끝)에 놓인다.
           if (isHost) ...[
             const SizedBox(height: 10),
-            if (!allReady)
+            // 안내 문구가 없어지는 조건(전원 준비 완료 + 인원 충분)일 때 빈 여백만 남지 않도록,
+            // 문구와 그 아래 간격을 하나의 묶음으로 묶어 문구가 없으면 간격도 같이 사라지게 한다.
+            if (!allReady) ...[
               Text('모든 참가자가 준비 완료해야 시작할 수 있어요.',
-                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground))
-            else if (!enough)
+                  style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
+              const SizedBox(height: 6),
+            ] else if (!enough) ...[
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
-            const SizedBox(height: 6),
+              const SizedBox(height: 6),
+            ],
             // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
             // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
             // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
