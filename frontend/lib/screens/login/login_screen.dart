@@ -104,8 +104,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: nicknameController,
-                  hintText: '닉네임 (최대 8자)',
-                  maxLength: 8,
+                  hintText: '닉네임',
                   onChanged: (_) => setDialogState(() {}),
                   onSubmitted: (value) {
                     final trimmed = value.trim();
@@ -153,11 +152,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
         return;
       }
-      await AuthService.instance.signInAsGuest(nickname);
-      // AuthGate가 Firebase의 후속 emit(updateDisplayName 반영)을 기다리는 동안 '플레이어'
-      // 같은 임시값이 잠깐 보이지 않도록, 입력받은 닉네임을 여기서 바로 반영해둔다.
+      // signInAsGuest() 내부의 signInAnonymously()가 끝나는 즉시(updateDisplayName이 끝나기도
+      // 전에) AuthGate가 displayName이 비어있는 첫 emit을 받는다 — 그 시점에 UserSession.nickname이
+      // 아직 옛 값(클래스 기본값 '게스트' 또는 이전 세션의 닉네임)이면 그게 잠깐 표시된다.
+      // signInAsGuest() 호출 전에 미리 반영해둬야 그 첫 emit에서도 바로 새 닉네임이 fallback된다.
       UserSession.nickname = nickname;
       ref.read(nicknameProvider.notifier).set(nickname);
+      await AuthService.instance.signInAsGuest(nickname);
       // 익명 계정 생성 후 로컬 DB에 닉네임을 즉시 예약 — 서버 @unique 제약으로 권위 검증(409면 중복).
       try {
         await BackendApi.instance.syncNickname(nickname);
