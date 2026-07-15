@@ -65,6 +65,11 @@ if (fs.existsSync(path.join(webDir, 'index.html'))) {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: (origin, callback) => callback(null, isAllowedOrigin(origin)) },
+  // 기본 하트비트(pingInterval 25s + pingTimeout 20s)로는 무선 순단처럼 TCP가 조용히
+  // 죽는 끊김을 클라이언트가 최대 45초 지나서야 알아챈다(그동안 끊긴 쪽 화면만 방에
+  // 갇혀 있음). 양쪽 모두 최대 ~15초 안에 끊김을 감지하도록 짧게 잡는다.
+  pingInterval: 10_000,
+  pingTimeout: 5_000,
 });
 
 io.use(socketAuthMiddleware);
