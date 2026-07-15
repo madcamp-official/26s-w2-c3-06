@@ -252,33 +252,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  /// 예기치 않게 소켓 연결이 끊겼을 때 — 확인을 눌러야 닫히는 알림창을 띄운 뒤 로비로 나간다.
-  Future<void> _showDisconnectedDialog() async {
-    await _showManagedDialog<void>(
-      maxWidth: 320,
-      builder: (dialogContext) {
-        return dialogEnterToConfirm(
-          onConfirm: () => Navigator.of(dialogContext).pop(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
-              const SizedBox(height: 12),
-              Text(
-                '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
-                style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
-              ),
-              const SizedBox(height: 18),
-              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-            ],
-          ),
-        );
-      },
-    );
-    if (!mounted) return;
+  /// 예기치 않게 소켓 연결이 끊겼을 때 — 사용자의 확인을 기다리지 않고 즉시 로비로
+  /// 이동한 뒤(끊긴 쪽 화면도 실시간으로 방에서 나가지도록), 로비 위에 알림창을 띄운다.
+  void _handleUnexpectedDisconnect() {
+    // 로비로 popUntil하면 RoomScreen의 context는 죽으므로, 알림은 살아남는
+    // Navigator 자신의 context로 띄운다.
+    final navigator = Navigator.of(context);
     ref.read(roomProvider.notifier).reset();
-    _returnToLobby();
+    navigator.popUntil((route) => route.isFirst);
+    showAppAlert(navigator.context, '서버와의 연결이 끊어져 로비로 돌아왔어요.', title: '⚠️ 연결 끊김');
   }
 
   /// 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)를 채팅 로그에
@@ -872,11 +854,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         showAppAlert(context, message);
       });
     });
-    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 확인 알림창을 띄우고 바로 로비로 나간다.
-    ref.listen<AsyncValue<void>>(socketDisconnectedProvider, (prev, next) {
+    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 즉시 로비로 나가고 알림창을 띄운다.
+    ref.listen<AsyncValue<int>>(socketDisconnectedProvider, (prev, next) {
       if (next.hasValue && !_leaving) {
         _leaving = true;
-        _showDisconnectedDialog();
+        _handleUnexpectedDisconnect();
       }
     });
     // 설명 차례가 바뀐 걸 못 알아챈다는 피드백 — 확인 버튼이 필요한 팝업 대신, 잠깐 떴다

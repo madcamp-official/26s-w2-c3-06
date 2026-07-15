@@ -40,8 +40,13 @@ class SocketService {
   final _roundFinalResultCtrl = StreamController<RoundFinalResult>.broadcast();
   final _gameEndedCtrl = StreamController<void>.broadcast();
   final _connectErrorCtrl = StreamController<String>.broadcast();
-  final _disconnectedCtrl = StreamController<void>.broadcast();
+  final _disconnectedCtrl = StreamController<int>.broadcast();
   final _llmMockCtrl = StreamController<bool>.broadcast();
+
+  // onDisconnected가 매번 다른 값을 내보내게 하는 일련번호. StreamProvider로 감싸면
+  // Riverpod이 같은 값(AsyncData(null) 등)은 리스너에 통지하지 않아, void 스트림으로는
+  // 앱 세션 두 번째 끊김부터 화면이 전혀 반응하지 못하는 버그가 있었다.
+  int _disconnectSeq = 0;
 
   Stream<RoomSnapshot> get onRoomCreated => _roomCreatedCtrl.stream;
   Stream<RoomSnapshot> get onRoomJoined => _roomJoinedCtrl.stream;
@@ -68,7 +73,9 @@ class SocketService {
   Stream<String> get onConnectError => _connectErrorCtrl.stream;
   /// 예기치 않게 연결이 끊겼을 때만 발생(우리가 새로 연결하려고 직접 끊은 경우는 제외 —
   /// connect() 참고: 콜백이 잡고 있던 소켓이 더 이상 _socket이 아니면 무시한다).
-  Stream<void> get onDisconnected => _disconnectedCtrl.stream;
+  /// 값은 끊김마다 증가하는 일련번호 — 내용엔 의미가 없고, Riverpod StreamProvider가
+  /// 같은 값 반복을 스킵하지 않도록 매번 달라지게 하기 위한 것이다.
+  Stream<int> get onDisconnected => _disconnectedCtrl.stream;
   /// 백엔드가 실제 LLM 대신 mock 응답으로 동작 중인지(연결마다 서버가 한 번 알려줌).
   Stream<bool> get onLlmMode => _llmMockCtrl.stream;
 
@@ -94,7 +101,7 @@ class SocketService {
     // 소켓으로 이미 바뀌어 있으므로, 이 클로저가 잡고 있는 socket과 다르면 무시한다.
     socket.onDisconnect((_) {
       if (_socket != socket) return;
-      _disconnectedCtrl.add(null);
+      _disconnectedCtrl.add(++_disconnectSeq);
     });
 
     socket.on('llm:mode', (data) => _llmMockCtrl.add(_map(data)['mock'] as bool? ?? false));
@@ -152,8 +159,11 @@ class SocketService {
   }
 
   void disconnect() {
-    _socket?.dispose();
+    // dispose()가 동기적으로 'disconnect' 이벤트를 발화할 수 있으므로, onDisconnect
+    // 콜백의 `_socket != socket` 필터가 확실히 걸리도록 참조를 먼저 비운다.
+    final socket = _socket;
     _socket = null;
+    socket?.dispose();
   }
 
   Map<String, dynamic> _map(dynamic data) => Map<String, dynamic>.from(data as Map);
