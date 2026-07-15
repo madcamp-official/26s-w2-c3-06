@@ -119,8 +119,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   String? get _myUid => AuthService.instance.currentUser?.uid;
 
+  // 채팅 입력창에 포커스가 가서 키보드가 올라오면(특히 화면이 작은 실기기), 헤더·컨텍스트
+  // 패널·입력창 등 고정 높이 요소들의 합이 남은 화면 높이보다 커져 "bottom overflowed"가
+  // 나는 문제가 있었다. 타이핑 중엔 덜 중요한 참가자 아바타 줄을 접어 공간을 확보한다.
+  bool _chatHasFocus = false;
+
+  void _handleChatFocusChange() {
+    if (mounted) setState(() => _chatHasFocus = _chatFocusNode.hasFocus);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _chatFocusNode.addListener(_handleChatFocusChange);
+  }
+
   @override
   void dispose() {
+    _chatFocusNode.removeListener(_handleChatFocusChange);
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -803,12 +819,17 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final isDesktop = context.isDesktop;
     // 데스크탑에서는 나가기/초대 버튼이 헤더가 아니라 좌측 내비게이션 바로 이동한다
     // (frontend 브랜치의 데스크탑 레이아웃 참고, lobby_screen과 동일한 패턴).
+    // 모바일에서 채팅 입력에 포커스가 가 키보드가 뜨면(_chatHasFocus), 화면에서 세로 공간을
+    // 크게 잡아먹는 참가자 아바타 줄·페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 접어
+    // 채팅 목록이 키보드에 가려지지 않고 그대로 보이게 한다. 고정 요소 합이 화면 높이를
+    // 넘겨 "bottom overflowed" 나던 문제도 이걸로 해결된다.
+    final hideForKeyboard = !isDesktop && _chatHasFocus;
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
-        _playerProfileRow(s, isHost),
+        if (!hideForKeyboard) _playerProfileRow(s, isHost),
         Expanded(child: _chatFeed(s)),
-        _contextPanel(s, isHost),
+        if (!hideForKeyboard) _contextPanel(s, isHost),
         _inputBar(s),
       ],
     );
@@ -1137,11 +1158,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             const SizedBox(height: 6),
-            // 카테고리 선택 - AI 봇 수 조절 - 게임 시작을 한 줄에 가로로 나열한다.
+            // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
+            // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
+            // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
             Row(
               children: [
                 Expanded(
-                  flex: 2,
                   child: AppButton(
                     label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
                     variant: AppButtonVariant.outlined,
@@ -1169,17 +1191,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  flex: 2,
-                  child: AppButton(
-                    label: '시작 ▶',
-                    dense: true,
-                    loading: _startingGame,
-                    onPressed: canStart && !_startingGame ? _startGame : null,
-                  ),
-                ),
               ],
+            ),
+            const SizedBox(height: 6),
+            AppButton(
+              label: '시작 ▶',
+              dense: true,
+              loading: _startingGame,
+              onPressed: canStart && !_startingGame ? _startGame : null,
             ),
           ] else ...[
             const SizedBox(height: 10),
