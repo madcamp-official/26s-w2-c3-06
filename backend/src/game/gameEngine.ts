@@ -505,7 +505,7 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
   if (deltaSec < 0 && remainingSec < 10) {
     const timer = phaseTimers.get(room.roomCode);
     if (timer) clearTimeout(timer);
-    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 단축해 투표로 넘어갑니다.`);
+    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 10초 단축했습니다.`);
     startVoting(io, room);
     return;
   }
