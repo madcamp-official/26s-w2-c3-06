@@ -19,6 +19,10 @@ const BOT_THINK_DELAY_MS = 1500;
 export const DISCUSSION_TIME_ADJUST_SEC = 10;
 // 단축을 남용해 0초/음수로 만들지 못하도록 최소 남은 시간.
 const DISCUSSION_MIN_REMAINING_SEC = 5;
+// 토론 중 AI가 실제 참가자인 척 끼어드는 간격 — 참가자에겐 절대 밝히지 않는다(끝까지 비공개).
+// 매번 고정 간격이면 패턴이 읽혀 부자연스러우니, 매 턴 이 범위 안에서 균등 분포로 무작위 간격을 고른다.
+const DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS = 3000;
+const DISCUSSION_IMPERSONATION_MAX_INTERVAL_MS = 7000;
 
 // 문서화된 GameState/Round는 그대로 두고, 타이머 핸들·봇 목록 같은 휘발성 런타임 부가정보는
 // roomCode로 키잉한 모듈 내부 맵으로 별도 관리한다(직렬화 대상 타입을 오염시키지 않기 위함).
@@ -30,8 +34,20 @@ const botsByRoom = new Map<string, BotInfo[]>();
 const turnIndexByRoom = new Map<string, number>();
 const turnTimers = new Map<string, NodeJS.Timeout>();
 const phaseTimers = new Map<string, NodeJS.Timeout>();
-// 토론 종료 예정 시각(ms epoch). +10/-10초 조절 시 남은 시간을 다시 계산하는 데 쓴다.
+// 각 페이즈의 종료 예정 시각(ms epoch). room:rejoin 시 실제 남은 시간을 다시 계산해
+// 보내주는 데 쓴다(타이머 자체는 setTimeout이 원래 스케줄대로 소유). 토론 페이즈는
+// +10/-10초 조절도 있어 별도로 계속 갱신된다.
 const discussionDeadlineByRoom = new Map<string, number>();
+const turnDeadlineByRoom = new Map<string, number>();
+const voteDeadlineByRoom = new Map<string, number>();
+const liarGuessDeadlineByRoom = new Map<string, number>();
+
+// deadline(ms epoch)까지 남은 시간을 초 단위로 계산한다. 기록이 없으면(이론상 발생 안 함)
+// 원래 제한시간을 그대로 돌려준다.
+function remainingSecFrom(deadline: number | undefined, fallbackSec: number): number {
+  if (deadline === undefined) return fallbackSec;
+  return Math.max(0, Math.round((deadline - Date.now()) / 1000));
+}
 // 이번 토론 페이즈에서 단축/연장 버튼을 이미 쓴 uid들 — 참가자별로 각각 한 번씩만 허용한다.
 interface DiscussionAdjustUsage {
   extended: Set<string>;
@@ -45,6 +61,9 @@ const voteConfirmedByRoom = new Map<string, Set<string>>();
 // 짧은 틈을 준다) — 투표 페이즈 전체 제한시간 타이머(phaseTimers)와는 별개로 관리한다.
 const voteGraceTimers = new Map<string, NodeJS.Timeout>();
 const VOTE_ALL_CONFIRMED_GRACE_MS = 3000;
+// 토론 중 3~7초 무작위 간격으로 실제 참가자인 척 채팅에 끼어드는 사칭 타이머(roomCode 당 하나).
+// setInterval이 아니라 매 턴 끝나고 다음 무작위 간격을 다시 잡는 재귀 setTimeout으로 구현한다.
+const discussionImpersonationTimers = new Map<string, NodeJS.Timeout>();
 
 function isBotId(id: string): boolean {
   return id.startsWith('bot-');
@@ -61,8 +80,81 @@ function clearRoomTimers(roomCode: string): void {
   if (t3) clearTimeout(t3);
   voteGraceTimers.delete(roomCode);
   discussionDeadlineByRoom.delete(roomCode);
+  turnDeadlineByRoom.delete(roomCode);
+  voteDeadlineByRoom.delete(roomCode);
+  liarGuessDeadlineByRoom.delete(roomCode);
   discussionAdjustUsageByRoom.delete(roomCode);
   voteConfirmedByRoom.delete(roomCode);
+  stopDiscussionImpersonation(roomCode);
+}
+
+function stopDiscussionImpersonation(roomCode: string): void {
+  const t = discussionImpersonationTimers.get(roomCode);
+  if (t) clearTimeout(t);
+  discussionImpersonationTimers.delete(roomCode);
+}
+
+function randomImpersonationIntervalMs(): number {
+  return (
+    DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS +
+    Math.random() * (DISCUSSION_IMPERSONATION_MAX_INTERVAL_MS - DISCUSSION_IMPERSONATION_MIN_INTERVAL_MS)
+  );
+}
+
+// 실제 참가자인 척 채팅에 끼어드는 사칭 타이머를 시작한다. 토론 페이즈 시작 시(endDescribingPhase)
+// 한 번만 호출되고, 투표로 넘어가는 순간(startVoting) 또는 게임 종료(clearRoomTimers)에 멈춘다.
+// 매 턴이 끝난 뒤 다음 턴까지의 간격을 새로 무작위로 뽑아 재귀적으로 예약한다(고정 간격이면
+// 패턴이 읽히므로 3~7초 사이 균등 분포로 매번 달라지게 함).
+function startDiscussionImpersonation(io: Server, room: RoomState): void {
+  stopDiscussionImpersonation(room.roomCode);
+  const scheduleNext = () => {
+    const timer = setTimeout(() => {
+      void runDiscussionImpersonationTick(io, room).finally(() => {
+        if (discussionImpersonationTimers.has(room.roomCode)) scheduleNext();
+      });
+    }, randomImpersonationIntervalMs());
+    discussionImpersonationTimers.set(room.roomCode, timer);
+  };
+  scheduleNext();
+}
+
+// 참가자(사람+봇 모두) 중 한 명을 매 턴 완전히 무작위로 골라, 그 사람인 척 자유 채팅 메시지를
+// 하나 만들어 그 사람의 실제 senderId로 그대로 흘려보낸다 — 클라이언트 입장에서는 그
+// 참가자가 직접 보낸 일반 채팅과 완전히 동일하게 보이며, 어떤 표식도 남기지 않는다.
+// 직전에 사칭한 대상을 다시 고르지 못하게 막는 로직은 의도적으로 두지 않는다(매 턴 완전 무작위).
+async function runDiscussionImpersonationTick(io: Server, room: RoomState): Promise<void> {
+  const game = room.currentGame;
+  if (!game || game.phase !== 'discussion') return;
+  if (game.participantIds.length === 0) return;
+
+  const targetId = pickRandom(game.participantIds);
+
+  try {
+    const recentDiscussion = room.chatLog
+      .filter((m) => m.type === 'chat')
+      .slice(-12)
+      .map((m) => ({ nickname: getParticipantNickname(room, m.senderId), text: m.text }));
+    // 설명 페이즈에서 각자 제출한 설명은 최근 12개 대화 윈도우와 무관하게 항상 전체를 참고한다.
+    const explanations = room.chatLog
+      .filter((m) => m.type === 'turnDescription')
+      .map((m) => ({ nickname: getParticipantNickname(room, m.senderId), text: m.text }));
+    const otherParticipantNicknames = game.participantIds
+      .filter((id) => id !== targetId)
+      .map((id) => getParticipantNickname(room, id));
+
+    const text = await llm.generateImpersonationMessage({
+      category: game.category,
+      otherParticipantNicknames,
+      recentDiscussion,
+      explanations,
+    });
+
+    // 응답을 기다리는 동안 토론이 이미 끝났을 수 있으니(비동기 호출 중 페이즈 전환) 다시 확인.
+    if (room.currentGame !== game || game.phase !== 'discussion') return;
+    broadcastChat(io, room, targetId, 'chat', text);
+  } catch (err) {
+    console.error('[gameEngine] generateImpersonationMessage 실패, 이번 차례는 생략', err);
+  }
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -82,7 +174,11 @@ function getParticipantNickname(room: RoomState, id: string): string {
   const human = room.players.find((p) => p.id === id);
   if (human) return human.nickname;
   const bot = (botsByRoom.get(room.roomCode) ?? []).find((b) => b.id === id);
-  return bot?.nickname ?? id;
+  if (bot) return bot.nickname;
+  // 게임 도중 나간 사람은 room.players에서 이미 빠진 뒤 조회될 수 있다(퇴장 안내 채팅 등).
+  // uid가 그대로 노출되지 않도록 게임 시작 시점 스냅샷에서 닉네임을 찾는다.
+  const snapshot = room.currentGame?.participants.find((p) => p.id === id);
+  return snapshot?.nickname ?? id;
 }
 
 // 동점 재투표 시 새 Round가 rounds에 계속 push되므로(startTieBreakDescribing 참고),
@@ -140,6 +236,15 @@ export async function startGame(
   const liarIds = [pickRandom(participantIds)]; // MVP: 1명 고정 (PLAN TODO: 추후 방장이 수 선택)
   const playerOrder = shuffle(participantIds);
 
+  // 클라이언트가 투표 후보·턴 배너에 봇 닉네임까지 표시할 수 있도록 참가자 전체(봇 포함) 목록을
+  // 함께 보낸다. room:playerListUpdated는 사람만 추적하므로 이 정보를 별도로 실어야 함
+  // (하위호환 추가 — 기존 { gameNumber } 클라이언트도 그대로 동작).
+  // 게임 상태에도 스냅샷으로 저장해, 도중에 나간 참가자의 닉네임을 계속 해석할 수 있게 한다.
+  const participants = [
+    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
+    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
+  ];
+
   const round: Round = { roundNumber: 1, turns: [] };
   const game: GameState = {
     gameNumber: room.gameHistory.length + 1,
@@ -148,6 +253,7 @@ export async function startGame(
     liarWord,
     liarIds,
     participantIds,
+    participants,
     aiBotCount: opts.aiBotCount,
     phase: 'setup',
     playerOrder,
@@ -160,13 +266,6 @@ export async function startGame(
   roomManager.resetChatLog(room);
   turnIndexByRoom.set(room.roomCode, 0);
 
-  // 클라이언트가 투표 후보·턴 배너에 봇 닉네임까지 표시할 수 있도록 참가자 전체(봇 포함) 목록을
-  // 함께 보낸다. room:playerListUpdated는 사람만 추적하므로 이 정보를 별도로 실어야 함
-  // (하위호환 추가 — 기존 { gameNumber } 클라이언트도 그대로 동작).
-  const participants = [
-    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
-    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
-  ];
   io.to(room.roomCode).emit('game:started', {
     gameNumber: game.gameNumber,
     category: game.category,
@@ -198,11 +297,9 @@ export async function startGame(
 const REVEALED_PHASES: GamePhase[] = ['resolution', 'liarGuess', 'ended'];
 
 export function toPublicGameState(room: RoomState, game: GameState) {
-  const bots = botsByRoom.get(room.roomCode) ?? [];
-  const participants = [
-    ...room.players.map((p) => ({ id: p.id, nickname: p.nickname, isBot: false })),
-    ...bots.map((b) => ({ id: b.id, nickname: b.nickname, isBot: true })),
-  ];
+  // 게임 시작 시점 스냅샷을 그대로 내려준다 — 도중에 나간 참가자도 포함되어 있어,
+  // 재접속한 클라이언트가 그 사람의 설명/채팅을 uid가 아닌 닉네임으로 계속 그릴 수 있다.
+  const participants = game.participants;
   const revealed = REVEALED_PHASES.includes(game.phase);
   return {
     gameNumber: game.gameNumber,
@@ -241,9 +338,10 @@ export function resendYourWord(io: Server, room: RoomState, uid: string): void {
 
 // room:rejoin 시, 마침 설명(턴) 페이즈 중이었다면(최초 설명이든 동점자 재설명이든) 지금
 // 차례인 사람 기준으로 turn:started를 다시 보내준다 — 재접속한 사람 본인 차례가 아니어도
-// "지금 누구 차례인지"는 알아야 화면이 맞게 그려진다. 실제 턴 타이머는 리셋되지 않고
-// 원래 스케줄대로 진행되므로, 남은 시간이 다시 보낸 timeLimitSec보다 짧을 수 있다
-// (resendLiarGuessPromptIfPending과 동일한 이유로 단순화함).
+// "지금 누구 차례인지"는 알아야 화면이 맞게 그려진다. 실제 턴 타이머(setTimeout)는 리셋되지
+// 않고 원래 스케줄대로 진행되므로, turnDeadlineByRoom에 기록해둔 실제 종료 시각 기준으로
+// 남은 시간을 다시 계산해 보낸다(그래야 재접속한 클라이언트도 다른 클라이언트와 같은
+// 카운트다운을 보게 된다).
 export function resendTurnStateIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'describing') return;
@@ -252,19 +350,21 @@ export function resendTurnStateIfPending(io: Server, room: RoomState, uid: strin
   if (idx >= order.length) return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (socketId) {
-    io.to(socketId).emit('turn:started', { playerId: order[idx], timeLimitSec: TURN_TIME_LIMIT_SEC });
+    const timeLimitSec = remainingSecFrom(turnDeadlineByRoom.get(room.roomCode), TURN_TIME_LIMIT_SEC);
+    io.to(socketId).emit('turn:started', { playerId: order[idx], timeLimitSec });
   }
 }
 
 // room:rejoin 시, 마침 투표 페이즈 중이었다면 후보 목록과 현재 확정 진행률을 다시 보내준다.
-// 개인별 선택(votes)은 절대 포함하지 않는다(익명 투표 원칙).
+// 개인별 선택(votes)은 절대 포함하지 않는다(익명 투표 원칙). 타이머도 turn과 동일하게
+// voteDeadlineByRoom 기준 실제 남은 시간으로 다시 계산한다.
 export function resendVoteStateIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'voting') return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (!socketId) return;
   io.to(socketId).emit('vote:started', {
-    timeLimitSec: VOTE_TIME_LIMIT_SEC,
+    timeLimitSec: remainingSecFrom(voteDeadlineByRoom.get(room.roomCode), VOTE_TIME_LIMIT_SEC),
     candidateIds: currentVoteCandidates(game),
   });
   const confirmed = voteConfirmedByRoom.get(room.roomCode);
@@ -275,15 +375,16 @@ export function resendVoteStateIfPending(io: Server, room: RoomState, uid: strin
 }
 
 // room:rejoin 시, 마침 라이어 역전승 판정 대상으로 지목된 상태였다면 프롬프트를 다시 보내준다.
-// 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, 남은 시간이 표시값보다
-// 짧을 수 있다(재접속이 잦지 않은 30초 남짓의 좁은 구간이라 우선순위를 낮춰 단순화함).
+// 실제 타이머(phaseTimers)는 리셋되지 않고 원래 스케줄대로 판정되므로, liarGuessDeadlineByRoom에
+// 기록해둔 종료 시각 기준으로 실제 남은 시간을 계산해 보낸다.
 export function resendLiarGuessPromptIfPending(io: Server, room: RoomState, uid: string): void {
   const game = room.currentGame;
   if (!game || game.phase !== 'liarGuess') return;
   if (game.votedOutId !== uid) return;
   const socketId = roomManager.getSocketIdByUid(uid);
   if (socketId) {
-    io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+    const timeLimitSec = remainingSecFrom(liarGuessDeadlineByRoom.get(room.roomCode), LIAR_GUESS_TIME_LIMIT_SEC);
+    io.to(socketId).emit('liar:guessPrompt', { timeLimitSec });
   }
 }
 
@@ -302,6 +403,7 @@ function startTurn(io: Server, room: RoomState): void {
 
   const playerId = order[idx];
   io.to(room.roomCode).emit('turn:started', { playerId, timeLimitSec: TURN_TIME_LIMIT_SEC });
+  turnDeadlineByRoom.set(room.roomCode, Date.now() + TURN_TIME_LIMIT_SEC * 1000);
 
   if (isBotId(playerId)) {
     setTimeout(() => void runBotTurn(io, room, playerId), BOT_THINK_DELAY_MS);
@@ -373,50 +475,7 @@ async function submitDescriptionInternal(
   const round = currentRound(game);
   round.turns.push({ playerId, text });
   broadcastChat(io, room, playerId, 'turnDescription', text);
-
-  // 매 턴 AI 교란 코멘트 (PLAN: 라이어 정체는 절대 프롬프트에 넣지 않음).
-  // 다음 턴 시작(또는 마지막 턴이면 "모든 설명이 끝났습니다" 페이즈 전환 안내)보다
-  // 먼저 끝나도록 기다려, 채팅 순서가 "설명 → AI 코멘트 → 다음 안내"로 항상 고정되게 한다.
-  await generateAndBroadcastComment(io, room, playerId, text);
-
-  // 코멘트를 기다리는 동안 방이 정리되는 등 상태가 바뀌었을 수 있으니 다시 확인.
-  if (room.currentGame?.phase !== 'describing') return;
   advanceTurn(io, room);
-}
-
-async function generateAndBroadcastComment(
-  io: Server,
-  room: RoomState,
-  speakerId: string,
-  latestDescription: string,
-): Promise<void> {
-  const game = room.currentGame;
-  if (!game) return;
-  try {
-    // room.chatLog는 새 게임 시작 시에만 초기화되므로 지금 게임 범위로 이미 한정돼 있다.
-    // 방금 push된 latestDescription 메시지가 마지막 항목이므로 그것만 제외하고, 설명·AI
-    // 코멘트를 시간 순서 그대로 넘긴다 — 코멘트가 자기 이전 코멘트를 참고해 같은 대상을
-    // 계속 몰아가는 연속성을 가지려면 과거 aiComment도 기록에 포함돼야 한다.
-    const history = room.chatLog
-      .slice(0, -1)
-      .filter((m) => m.type === 'turnDescription' || m.type === 'aiComment')
-      .map((m) => ({
-        type: m.type as 'turnDescription' | 'aiComment',
-        nickname: m.type === 'aiComment' ? '분탕충봇' : getParticipantNickname(room, m.senderId),
-        text: m.text,
-      }));
-    const participantNicknames = game.participantIds.map((id) => getParticipantNickname(room, id));
-    const comment = await llm.generateTurnComment({
-      category: game.category,
-      latestDescription,
-      latestSpeakerNickname: getParticipantNickname(room, speakerId),
-      participantNicknames,
-      history,
-    });
-    broadcastChat(io, room, 'ai', 'aiComment', comment);
-  } catch (err) {
-    console.error('[gameEngine] generateTurnComment 실패, 코멘트 생략', err);
-  }
 }
 
 function advanceTurn(io: Server, room: RoomState): void {
@@ -454,6 +513,9 @@ function endDescribingPhase(io: Server, room: RoomState): void {
   for (const player of room.players) {
     emitDiscussionAdjustState(io, room, player.id);
   }
+
+  // 토론 시간 동안 AI가 실제 참가자인 척 채팅에 끼어들며 교란한다(참가자에겐 절대 비공개).
+  startDiscussionImpersonation(io, room);
 }
 
 function emitDiscussionAdjustState(io: Server, room: RoomState, uid: string): void {
@@ -468,10 +530,20 @@ function emitDiscussionAdjustState(io: Server, room: RoomState, uid: string): vo
 
 // 재접속(room:rejoin) 시 본인이 이미 단축/연장을 썼는지 다시 알려준다 — 새로고침해도
 // 한도가 초기화된 것처럼 보이지 않게(실제 한도는 서버가 어차피 강제하지만, 버튼이 계속
-// 눌리는 것처럼 보이는 UI 혼란을 막기 위함).
+// 눌리는 것처럼 보이는 UI 혼란을 막기 위함). 아울러 discussion:started를 discussionDeadlineByRoom
+// 기준 실제 남은 시간으로 다시 보내, 재접속한 클라이언트의 카운트다운이 다른 클라이언트와
+// 어긋나지 않게 한다(예: 남들 화면엔 20초 남았는데 본인만 40초로 리셋되는 문제 방지).
 export function resendDiscussionAdjustStateIfPending(io: Server, room: RoomState, uid: string): void {
   if (room.currentGame?.phase !== 'discussion') return;
   emitDiscussionAdjustState(io, room, uid);
+  const socketId = roomManager.getSocketIdByUid(uid);
+  if (socketId) {
+    const timeLimitSec = remainingSecFrom(
+      discussionDeadlineByRoom.get(room.roomCode),
+      DISCUSSION_TIME_LIMIT_SEC,
+    );
+    io.to(socketId).emit('discussion:started', { timeLimitSec });
+  }
 }
 
 // 토론 시간을 ±10초 조절한다. 방장 전용이 아니라 누구나 누를 수 있지만(방장의 "투표로
@@ -505,7 +577,7 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
   if (deltaSec < 0 && remainingSec < 10) {
     const timer = phaseTimers.get(room.roomCode);
     if (timer) clearTimeout(timer);
-    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 단축해 투표로 넘어갑니다.`);
+    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 10초 단축했습니다.`);
     startVoting(io, room);
     return;
   }
@@ -537,6 +609,9 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 function startVoting(io: Server, room: RoomState): void {
   const game = room.currentGame;
   if (!game) return;
+  // 토론에서 넘어오는 경로든(자연 종료·단축) 동점 재설명에서 곧장 넘어오는 경로든, 투표가
+  // 시작되면 토론용 사칭 인터벌은 더 이상 필요 없다.
+  stopDiscussionImpersonation(room.roomCode);
   game.phase = 'voting';
   game.votes = {};
   voteConfirmedByRoom.set(room.roomCode, new Set());
@@ -554,6 +629,7 @@ function startVoting(io: Server, room: RoomState): void {
       : '투표를 시작합니다. 라이어로 의심되는 사람을 선택하세요.',
   );
   io.to(room.roomCode).emit('vote:started', { timeLimitSec: VOTE_TIME_LIMIT_SEC, candidateIds });
+  voteDeadlineByRoom.set(room.roomCode, Date.now() + VOTE_TIME_LIMIT_SEC * 1000);
 
   const timer = setTimeout(() => resolveVoting(io, room), VOTE_TIME_LIMIT_SEC * 1000);
   phaseTimers.set(room.roomCode, timer);
@@ -729,6 +805,7 @@ function startLiarGuess(io: Server, room: RoomState, liarId: string): void {
 
   const socketId = roomManager.getSocketIdByUid(liarId);
   if (socketId) io.to(socketId).emit('liar:guessPrompt', { timeLimitSec: LIAR_GUESS_TIME_LIMIT_SEC });
+  liarGuessDeadlineByRoom.set(room.roomCode, Date.now() + LIAR_GUESS_TIME_LIMIT_SEC * 1000);
 
   const timer = setTimeout(() => {
     const g = room.currentGame;

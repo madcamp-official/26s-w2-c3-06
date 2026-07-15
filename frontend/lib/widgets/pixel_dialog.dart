@@ -1,6 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'pixel_box.dart';
+
+/// 텍스트 입력 없이 "확인" 버튼 하나로 닫는 알림성 팝업에서, 마우스로 버튼을 누르지
+/// 않고 Enter(또는 넘패드 Enter)로도 바로 확인 처리를 할 수 있게 감싸는 헬퍼.
+Widget dialogEnterToConfirm({required Widget child, required VoidCallback onConfirm}) {
+  return Focus(
+    autofocus: true,
+    onKeyEvent: (node, event) {
+      if (event is KeyDownEvent &&
+          (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+        onConfirm();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: child,
+  );
+}
 
 /// 디자인의 팝업(투표/결과/승패/게스트입장) 공통 스타일 — 크림 배경 + 굵은 앰버 테두리 + 하드 섀도.
 /// [barrierDismissible]이 false면 바깥을 눌러도 닫히지 않는다(투표/결과처럼 강제 진행 흐름용).

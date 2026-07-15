@@ -16,16 +16,19 @@ Future<void> showAppAlert(
     context: context,
     maxWidth: 320,
     builder: (dialogContext) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title, style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
-          const SizedBox(height: 12),
-          Text(message, style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
-          const SizedBox(height: 18),
-          AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-        ],
+      return dialogEnterToConfirm(
+        onConfirm: () => Navigator.of(dialogContext).pop(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(title, style: PixelFont.title(fontSize: 13, color: AppColors.primary)),
+            const SizedBox(height: 12),
+            Text(message, style: PixelFont.body(fontSize: 13, color: AppColors.foreground)),
+            const SizedBox(height: 18),
+            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+          ],
+        ),
       );
     },
   );

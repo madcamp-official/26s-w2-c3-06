@@ -590,7 +590,9 @@ final roomInviteProvider = StreamProvider<RoomInvite>((ref) {
 
 /// 예기치 않은 소켓 연결 끊김(네트워크 문제 등) — 방 화면이 구독해 즉시 로비로 나가면서
 /// 알림창을 띄우는 데 쓴다. 우리가 직접 재연결하려고 끊은 경우는 SocketService에서 걸러진다.
-final socketDisconnectedProvider = StreamProvider<void>((ref) {
+/// 값은 끊김마다 증가하는 일련번호다 — Riverpod은 이전과 같은 값이면 리스너에 통지하지
+/// 않으므로(updateShouldNotify), void 스트림이면 두 번째 끊김부터 무시되는 버그가 있었다.
+final socketDisconnectedProvider = StreamProvider<int>((ref) {
   return SocketService.instance.onDisconnected;
 });
 

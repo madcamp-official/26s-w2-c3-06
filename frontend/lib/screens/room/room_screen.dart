@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -56,9 +57,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 방장 대기방 드래프트(로컬 입력 → game:draftConfig로 서버에 실시간 공유).
   int _botCount = 0;
   String? _selectedChip;
-  bool _aiRandom = false;
+  bool _aiRandom = true;
   bool _leaving = false;
   int _lastChatLen = 0;
+  // 키보드가 열리면서 화면(=스크롤 뷰포트)이 줄어들 때, 스크롤은 "맨 아래"라는 위치가
+  // 아니라 그 전 스크롤 오프셋(px)을 그대로 유지한다 — 뷰포트가 줄어든 만큼 이전엔 맨
+  // 아래였던 위치가 더 이상 맨 아래가 아니게 되어, 최신 메시지가 키보드에 가려 안 보이는
+  // 문제가 있었다. 키보드 열림 상태가 바뀔 때마다 다시 맨 아래로 스크롤해 해결한다.
+  bool _lastKeyboardOpen = false;
   bool _hostDraftSeeded = false;
 
   // 메시지 입력창 위 페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 채팅을 더 넓게 보고
@@ -94,11 +100,57 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   // 매 호출마다 토큰을 발급해 "내가 아직 최신 팝업일 때만" 플래그를 지우게 해서 막는다.
   int _dialogToken = 0;
 
+  // 턴이 바뀔 때 확인 버튼을 눌러야 닫히는 팝업을 띄우면 설명 페이즈 내내 계속 끊기므로,
+  // 화면 상단에 잠깐 떴다 스스로 사라지는 배너를 직접 오버레이로 띄운다.
+  OverlayEntry? _turnToastEntry;
+
+  void _showTurnToast(String text, {required bool isMine}) {
+    _turnToastEntry?.remove();
+    final overlay = Overlay.of(context);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 300,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: PixelBox(
+              color: isMine ? AppColors.primary : AppColors.card,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Text(
+                  text,
+                  style: PixelFont.title(fontSize: 13, color: isMine ? Colors.white : AppColors.foreground),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    _turnToastEntry = entry;
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 4), () {
+      if (_turnToastEntry == entry) {
+        entry.remove();
+        _turnToastEntry = null;
+      }
+    });
+  }
+
   Future<T?> _showManagedDialog<T>({
     required WidgetBuilder builder,
     bool barrierDismissible = false,
     double maxWidth = 460,
   }) async {
+    // 채팅 입력 중에 팝업이 뜨면(투표 시작·결과 등) 다이얼로그가 닫힐 때 네비게이터가
+    // 채팅 입력창으로 포커스를 "프로그램적으로" 복원하는데, 웹에서는 이 경로가 브라우저
+    // input 요소와 연결이 끊긴 유령 포커스를 만들 수 있다(flutter#98786 — 새로고침 전까지
+    // 타이핑이 안 먹던 버그의 원인). 팝업을 열기 전에 미리 포커스를 풀어 복원 대상 자체를
+    // 없앤다. 닫힌 뒤에는 사용자가 입력창을 탭하면 새 포커스로 정상 연결된다.
+    _chatFocusNode.unfocus();
     if (_dialogOpen && mounted) {
       Navigator.of(context).pop();
     }
@@ -136,6 +188,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   @override
   void dispose() {
+    _turnToastEntry?.remove();
     _chatController.dispose();
     _chatFocusNode.dispose();
     _scrollController.dispose();
@@ -204,30 +257,15 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
-  /// 예기치 않게 소켓 연결이 끊겼을 때 — 확인을 눌러야 닫히는 알림창을 띄운 뒤 로비로 나간다.
-  Future<void> _showDisconnectedDialog() async {
-    await _showManagedDialog<void>(
-      maxWidth: 320,
-      builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('⚠️ 연결 끊김', style: PixelFont.title(fontSize: 13, color: AppColors.destructive)),
-            const SizedBox(height: 12),
-            Text(
-              '서버와의 연결이 끊어졌어요. 로비로 돌아갑니다.',
-              style: PixelFont.body(fontSize: 12, color: AppColors.foreground),
-            ),
-            const SizedBox(height: 18),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
-        );
-      },
-    );
-    if (!mounted) return;
+  /// 예기치 않게 소켓 연결이 끊겼을 때 — 사용자의 확인을 기다리지 않고 즉시 로비로
+  /// 이동한 뒤(끊긴 쪽 화면도 실시간으로 방에서 나가지도록), 로비 위에 알림창을 띄운다.
+  void _handleUnexpectedDisconnect() {
+    // 로비로 popUntil하면 RoomScreen의 context는 죽으므로, 알림은 살아남는
+    // Navigator 자신의 context로 띄운다.
+    final navigator = Navigator.of(context);
     ref.read(roomProvider.notifier).reset();
-    _returnToLobby();
+    navigator.popUntil((route) => route.isFirst);
+    showAppAlert(navigator.context, '서버와의 연결이 끊어져 로비로 돌아왔어요.', title: '⚠️ 연결 끊김');
   }
 
   /// 최종 결과(지목된 사람·라이어 여부·실제/라이어 제시어·역전승 여부)를 채팅 로그에
@@ -246,32 +284,35 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     } else if (r.liarGuessCorrect == true) {
       liarGuessText = r.liarGuess == null ? '✅ 성공 — 라이어 역전승!' : '✅ 성공 — "${r.liarGuess}" 정답!';
     } else {
-      liarGuessText = r.liarGuess == null ? '❌ 실패' : '❌ 실패 — "${r.liarGuess}"라고 썼어요';
+      liarGuessText = r.liarGuess == null ? '❌' : '❌ — "${r.liarGuess}"라고 썼어요';
     }
 
     await _showManagedDialog<void>(
       maxWidth: 380,
       builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
-              textAlign: TextAlign.center,
-              style: PixelFont.title(fontSize: 18, color: AppColors.primary),
-            ),
-            const SizedBox(height: 20),
-            _ResultRow(label: '지목된 사람', value: accusedText),
-            // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
-            // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
-            if (!r.wasLiar) _ResultRow(label: '진짜 라이어', value: r.liarNickname),
-            _ResultRow(label: '실제 제시어', value: r.realWord),
-            _ResultRow(label: '라이어 제시어', value: r.liarWord),
-            _ResultRow(label: '라이어 역전승', value: liarGuessText),
-            const SizedBox(height: 22),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
+        return dialogEnterToConfirm(
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                citizensWin ? '시민팀의 승리!' : '라이어팀의 승리!',
+                textAlign: TextAlign.center,
+                style: PixelFont.title(fontSize: 18, color: AppColors.primary),
+              ),
+              const SizedBox(height: 20),
+              _ResultRow(label: '지목된 사람   ', value: accusedText),
+              // 지목된 사람이 라이어가 아니었다면(오지목·무지목) 진짜 라이어가 누구였는지
+              // 이 결과 창 말고는 알 방법이 없으므로 항상 함께 공개한다.
+              if (!r.wasLiar) _ResultRow(label: '진짜 라이어   ', value: r.liarNickname),
+              _ResultRow(label: '실제 제시어   ', value: r.realWord),
+              _ResultRow(label: '라이어 제시어   ', value: r.liarWord),
+              _ResultRow(label: '라이어 역전승   ', value: liarGuessText),
+              const SizedBox(height: 22),
+              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
+            ],
+          ),
         );
       },
     );
@@ -364,6 +405,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                       child: AppButton(
                         label: '투표 확인',
                         accentColor: AppColors.destructive,
+                        textColorOverride: AppColors.foreground,
                         onPressed: draft == null ? null : () => Navigator.of(dialogContext).pop(draft),
                       ),
                     ),
@@ -395,36 +437,39 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     await _showManagedDialog<void>(
       maxWidth: 360,
       builder: (dialogContext) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('🗳️ 투표 결과', style: PixelFont.title(fontSize: 16, color: AppColors.primary)),
-            const SizedBox(height: 16),
-            if (accusedNickname != null) ...[
-              Center(
-                child: UserAvatar(
-                  avatarIndex: _avatarIndexFor(r.votedOutId!, s),
-                  radius: 24,
-                  imageUrl: _avatarUrlFor(r.votedOutId!),
+        return dialogEnterToConfirm(
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('🗳️ 투표 결과', style: PixelFont.title(fontSize: 16, color: AppColors.primary)),
+              const SizedBox(height: 16),
+              if (accusedNickname != null) ...[
+                Center(
+                  child: UserAvatar(
+                    avatarIndex: _avatarIndexFor(r.votedOutId!, s),
+                    radius: 24,
+                    imageUrl: _avatarUrlFor(r.votedOutId!),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+                Text(
+                  '$accusedNickname님이 라이어로 지목됐습니다',
+                  textAlign: TextAlign.center,
+                  style: PixelFont.title(fontSize: 14, color: AppColors.foreground),
+                ),
+                const SizedBox(height: 8),
+              ],
               Text(
-                '$accusedNickname님이 라이어로 지목됐습니다',
+                subtitle,
                 textAlign: TextAlign.center,
-                style: PixelFont.title(fontSize: 14, color: AppColors.foreground),
+                style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 20),
+              AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
             ],
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
-            ),
-            const SizedBox(height: 20),
-            AppButton(label: '확인', onPressed: () => Navigator.of(dialogContext).pop()),
-          ],
+          ),
         );
       },
     );
@@ -568,13 +613,39 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final notifier = ref.read(roomProvider.notifier);
     if (s.phase == GamePhase.describing && s.isMyTurn(_myUid)) {
       notifier.submitDescription(text);
-    } else {
-      notifier.sendChat(text);
+      _chatController.clear();
+      // 설명을 제출하면 곧바로 다음 사람 turn:started가 와서 입력창이 차단(readOnly)된다.
+      // 이때 포커스를 다시 잡아두면 "포커스된 채 readOnly 토글"(위 ref.listen 참고)로
+      // 이어지므로, 차단될 것이 확실한 이 경로에서는 포커스를 미리 풀어둔다.
+      _chatFocusNode.unfocus();
+      return;
     }
+    notifier.sendChat(text);
     _chatController.clear();
     // 엔터로 전송한 뒤에도 계속 이어서 칠 수 있도록 입력창 포커스를 다시 잡아준다
     // (웹에서는 onSubmitted 처리 중 포커스가 풀리는 경우가 있어 명시적으로 복원).
-    _chatFocusNode.requestFocus();
+    if (kIsWeb) {
+      _refocusChat();
+    } else {
+      _chatFocusNode.requestFocus();
+    }
+  }
+
+  /// 웹에서 hasFocus인 채로 브라우저 input 연결만 끊긴 유령 포커스 상태(flutter#98786)를
+  /// 복구/예방한다 — 이미 포커스가 있으면 requestFocus()가 no-op이 돼 연결이 재수립되지
+  /// 않으므로, 완전히 풀었다가 다음 프레임에 다시 잡아 실제 포커스 변화를 강제한다.
+  void _refocusChat() {
+    _chatFocusNode.unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 전송 처리 사이에 남의 턴이 시작돼 입력창이 차단됐다면 다시 포커스를 잡지 않는다
+      // — 차단(readOnly) 상태의 입력창에 포커스를 남겨두는 것 자체가 위험 경로다.
+      final s = ref.read(roomProvider);
+      final blocked = s.phase == GamePhase.describing &&
+          s.currentTurnPlayerId != null &&
+          !s.isMyTurn(_myUid);
+      if (!blocked) _chatFocusNode.requestFocus();
+    });
   }
 
   // ── 방장 드래프트 반영 ──
@@ -751,7 +822,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           _startingGame = false;
           _hostDraftSeeded = false;
           _selectedChip = null;
-          _aiRandom = false;
+          _aiRandom = true;
           _botCount = 0;
           _customCategoryController.clear();
         });
@@ -801,13 +872,42 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         showAppAlert(context, message);
       });
     });
-    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 확인 알림창을 띄우고 바로 로비로 나간다.
-    ref.listen<AsyncValue<void>>(socketDisconnectedProvider, (prev, next) {
+    // 예기치 않게 소켓 연결이 끊기면(네트워크 문제 등) 즉시 로비로 나가고 알림창을 띄운다.
+    ref.listen<AsyncValue<int>>(socketDisconnectedProvider, (prev, next) {
       if (next.hasValue && !_leaving) {
         _leaving = true;
-        _showDisconnectedDialog();
+        _handleUnexpectedDisconnect();
       }
     });
+    // 설명 차례가 바뀐 걸 못 알아챈다는 피드백 — 확인 버튼이 필요한 팝업 대신, 잠깐 떴다
+    // 사라지는 배너로 매 턴마다 알려준다(내 차례인지 아닌지 문구를 다르게 보여준다).
+    ref.listen<String?>(roomProvider.select((v) => v.currentTurnPlayerId), (prev, next) {
+      if (next == null || next == prev) return;
+      final s = ref.read(roomProvider);
+      if (next == _myUid) {
+        _showTurnToast('내 차례예요! 제시어를 설명해주세요', isMine: true);
+      } else {
+        _showTurnToast('${s.nicknameOf(next)}님 차례예요', isMine: false);
+      }
+    });
+    // 채팅 입력창이 차단 상태(readOnly — _inputBar의 canChat 참고)로 바뀌기 "직전"에
+    // 포커스를 먼저 풀어준다. 웹에서 포커스가 살아있는 입력창의 readOnly가 서버 이벤트
+    // (남의 턴 시작)로 토글되면 브라우저 input 연결이 영구히 끊겨, 이후 차단이 풀린 뒤
+    // 입력창을 탭해도(포커스 사이클은 정상으로 보이지만 DOM input이 재생성되지 않아)
+    // 새로고침 전까지 타이핑이 안 먹는다 — 헤드리스 크롬 2게임 연속 자동 플레이로 재현.
+    // e66c31d에서 enabled→readOnly로 바꿔 "강제 unfocus" 경로는 없앴지만, 포커스 유지
+    // 상태에서의 readOnly 토글 자체가 같은 파괴를 일으키는 게 남은 진짜 원인이었다.
+    // 리빌드 전에 미리 unfocus해 두면(팝업 열기 전의 _showManagedDialog와 같은 패턴)
+    // 연결이 깨끗하게 닫히고, 차단 해제 후 탭하면 새 연결로 정상 복구된다.
+    ref.listen<bool>(
+      roomProvider.select((v) =>
+          v.phase == GamePhase.describing &&
+          v.currentTurnPlayerId != null &&
+          !v.isMyTurn(_myUid)),
+      (prev, next) {
+        if (next && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
+      },
+    );
 
     if (s.chatLog.length != _lastChatLen) {
       _lastChatLen = s.chatLog.length;
@@ -823,11 +923,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       _botCount = s.draftAiBotCount;
       final cat = s.draftCategory;
       if (cat == null) {
-        _aiRandom = false;
-        // 방장이 아직 아무 카테고리도 고르지 않은 새 방은 프리셋 첫 번째 칩(음식)을
-        // 기본 선택으로 보여주고, 서버 draftConfig에도 같은 값을 반영해 다른 참가자
-        // 화면과 실제 게임 시작 카테고리가 어긋나지 않게 한다.
-        _selectedChip = _presetCategories.first;
+        // 방장이 아직 아무 카테고리도 고르지 않은 새 방은 "AI 랜덤"을 기본 선택으로
+        // 보여주고, 서버 draftConfig에도 같은 값을 반영해 다른 참가자 화면과 실제
+        // 게임 시작 카테고리가 어긋나지 않게 한다.
+        _aiRandom = true;
+        _selectedChip = null;
         WidgetsBinding.instance.addPostFrameCallback((_) => _pushDraft());
       } else if (_presetCategories.contains(cat) || s.customCategories.contains(cat)) {
         _selectedChip = cat;
@@ -847,15 +947,26 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 안드로이드에서 뒤로가기/제스처로 키보드만 내리면 포커스는 그대로 남아있어(hasFocus는
     // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    if (keyboardOpen != _lastKeyboardOpen) {
+      _lastKeyboardOpen = keyboardOpen;
+      _autoScroll();
+      // 키보드가 열리고 닫히는 애니메이션(약 300ms) 동안 뷰포트 높이가 매 프레임 계속
+      // 바뀌므로, 애니메이션이 막 시작된 시점에 한 번만 스크롤하면 최종 위치보다 덜
+      // 내려간 채로 끝난다 — 애니메이션이 끝날 즈음 한 번 더 맞춰준다.
+      Future.delayed(const Duration(milliseconds: 300), _autoScroll);
+    }
     final hideForKeyboard = !isDesktop && keyboardOpen;
+    // 투표 중엔 확정 상태/버튼을 반드시 볼 수 있어야 하므로, 접힘·키보드에 의한 숨김을
+    // 무시하고 항상 펼쳐 보여준다(접혀 있으면 확정했는지조차 확인할 방법이 없었다).
+    final forceShowPanel = s.phase == GamePhase.voting;
     // 키보드와 무관하게, 채팅을 더 넓게 보고 싶을 때 직접 접었다 펼 수 있는 토글도 둔다.
-    final showContextPanel = !hideForKeyboard && !_contextPanelCollapsed;
+    final showContextPanel = forceShowPanel || (!hideForKeyboard && !_contextPanelCollapsed);
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
         if (!hideForKeyboard) _playerProfileRow(s, isHost),
         Expanded(child: _chatFeed(s)),
-        if (!hideForKeyboard) _contextPanelToggle(showContextPanel),
+        if (!hideForKeyboard && !forceShowPanel) _contextPanelToggle(showContextPanel),
         if (showContextPanel) _contextPanel(s, isHost),
         _inputBar(s),
       ],
@@ -934,13 +1045,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.title(fontSize: 16, color: AppColors.foreground, height: 1.1),
                   overflow: TextOverflow.ellipsis,
                 ),
-                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를
-                // 보여준다 — 타이머는 이제 상단바가 아니라 각 페이즈 패널(채팅 입력창 위)
-                // 에 표시된다.
+                // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를 보여준다.
+                // 흐린 회색 subtext로는 눈에 잘 안 띈다는 피드백이 있어 강조색+굵게로 표시한다.
                 if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
                   Text(
                     '카테고리: ${s.category}',
-                    style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground, height: 1.1),
+                    style: PixelFont.title(fontSize: 14, color: AppColors.primary, height: 1.1),
                     overflow: TextOverflow.ellipsis,
                   )
                 else
@@ -952,6 +1062,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
+          // 모바일에선 패널이 접히거나 키보드에 가려도 타이머가 항상 보여야 해서 상단바
+          // 오른쪽에 크게 고정 표시한다. 데스크탑(웹)은 화면이 넓어 패널이 항상 붙어있으므로
+          // 기존처럼 채팅 입력창 위 패널에 표시한다(_describingPanel/_discussionPanel 참고).
+          if (!context.isDesktop && s.phaseDeadline != null) ...[
+            const SizedBox(width: 8),
+            _headerTimer(s),
+            if (showActions) const SizedBox(width: 14),
+          ],
           if (showActions) ...[
             if (isHost && _canInviteFriends) ...[
               HoverTap(
@@ -967,6 +1085,35 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  /// 상단바 오른쪽에 크게 보이는 타이머. 토론 중엔 -10초/+10초 조절 버튼도 양옆에 붙인다.
+  Widget _headerTimer(RoomViewState s) {
+    final isDiscussion = s.phase == GamePhase.discussion;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (isDiscussion) ...[
+          _timerAdjustButton(
+            icon: Icons.remove_circle_outline,
+            enabled: s.canShortenDiscussion,
+            onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(-10),
+          ),
+          const SizedBox(width: 4),
+        ],
+        const Icon(Icons.timer_outlined, size: 18, color: AppColors.primary),
+        const SizedBox(width: 4),
+        CountdownText(deadline: s.phaseDeadline!, style: PixelFont.title(fontSize: 18, color: AppColors.primary)),
+        if (isDiscussion) ...[
+          const SizedBox(width: 4),
+          _timerAdjustButton(
+            icon: Icons.add_circle_outline,
+            enabled: s.canExtendDiscussion,
+            onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(10),
+          ),
+        ],
+      ],
     );
   }
 
@@ -987,30 +1134,6 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           style: PixelFont.title(fontSize: 10, color: Colors.white, height: 1),
         ),
       ),
-    );
-  }
-
-  /// 토론 중 채팅창 위 패널에 타이머를 두고, 그 양옆에 -10초/+10초 버튼을 붙인다.
-  /// 방장 전용이 아니라 누구나 누를 수 있지만, 참가자 한 명당 단축·연장 각각 한 번씩만
-  /// 허용되며(서버가 uid별로 추적) 이미 쓴 버튼은 흐리게 비활성화된다.
-  Widget _discussionTimerRow(RoomViewState s) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _timerAdjustButton(
-          icon: Icons.remove_circle_outline,
-          enabled: s.canShortenDiscussion,
-          onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(-10),
-        ),
-        const SizedBox(width: 6),
-        CountdownText(deadline: s.phaseDeadline!, style: PixelFont.title(fontSize: 13, color: AppColors.foreground)),
-        const SizedBox(width: 6),
-        _timerAdjustButton(
-          icon: Icons.add_circle_outline,
-          enabled: s.canExtendDiscussion,
-          onTap: () => ref.read(roomProvider.notifier).adjustDiscussionTime(10),
-        ),
-      ],
     );
   }
 
@@ -1042,6 +1165,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           statusColor: p.id == s.hostId
               ? AppColors.primary
               : (p.isReady ? AppColors.readyBadgeText : AppColors.waitingBadgeText),
+          disconnected: !p.connected,
         ),
     ];
 
@@ -1188,7 +1312,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         child: SizedBox(
           width: double.infinity,
           child: Text(
-            expanded ? '▼ 설정 닫기' : '▲ 설정 열기',
+            expanded ? '▼ 창 닫기' : '▲ 창 열기',
             textAlign: TextAlign.center,
             style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
           ),
@@ -1270,49 +1394,107 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
               const SizedBox(height: 6),
             ],
-            // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
-            // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
-            // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
-            Row(
-              children: [
-                Expanded(
-                  child: AppButton(
-                    label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
-                    variant: AppButtonVariant.outlined,
-                    dense: true,
-                    onPressed: _openCategoryPicker,
+            // 방장 화면도 비방장 화면과 같이 카테고리·봇 수·시작 버튼을 한 줄에 순서대로 둔다.
+            // 데스크탑(웹)은 폭이 넓어 카테고리 칩이 Expanded 하나만 있으면 혼자 다 차지해
+            // 유독 길어 보이므로, 세 구간을 균등한 너비(flex 1)로 나눈다. 모바일은 폭이
+            // 좁아 균등 분할하면 카테고리 글자가 너무 눌리므로 내용 크기 그대로 둔다.
+            if (context.isDesktop) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
+                      variant: AppButtonVariant.outlined,
+                      dense: true,
+                      onPressed: _openCategoryPicker,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: () {
-                    setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
-                    _pushDraft();
-                  },
-                  icon: const Icon(Icons.remove_circle_outline, size: 18),
-                ),
-                Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  onPressed: _botCount >= maxBotCount
-                      ? null
-                      : () {
-                          setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
-                          _pushDraft();
-                        },
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            AppButton(
-              label: '시작 ▶',
-              dense: true,
-              loading: _startingGame,
-              onPressed: canStart && !_startingGame ? _startGame : null,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: () {
+                            setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
+                            _pushDraft();
+                          },
+                          icon: const Icon(Icons.remove_circle_outline, size: 18),
+                        ),
+                        const SizedBox(width: 4),
+                        Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          onPressed: _botCount >= maxBotCount
+                              ? null
+                              : () {
+                                  setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                                  _pushDraft();
+                                },
+                          icon: const Icon(Icons.add_circle_outline, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: AppButton(
+                      label: '시작 ▶',
+                      dense: true,
+                      loading: _startingGame,
+                      onPressed: canStart && !_startingGame ? _startGame : null,
+                    ),
+                  ),
+                ],
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
+                      variant: AppButtonVariant.outlined,
+                      dense: true,
+                      onPressed: _openCategoryPicker,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: () {
+                      setState(() => _botCount = (_botCount - 1).clamp(0, maxBotCount));
+                      _pushDraft();
+                    },
+                    icon: const Icon(Icons.remove_circle_outline, size: 18),
+                  ),
+                  const SizedBox(width: 4),
+                  Text('🤖$_botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: _botCount >= maxBotCount
+                        ? null
+                        : () {
+                            setState(() => _botCount = (_botCount + 1).clamp(0, maxBotCount));
+                            _pushDraft();
+                          },
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  AppButton(
+                    label: '시작 ▶',
+                    dense: true,
+                    fullWidth: false,
+                    loading: _startingGame,
+                    onPressed: canStart && !_startingGame ? _startGame : null,
+                  ),
+                ],
             ),
             // AI가 제시어 쌍(+카테고리 랜덤이면 카테고리까지)을 생성하는 데 몇 초 걸릴 수
             // 있어서, 버튼 스피너만으론 뭘 기다리는 건지 알기 어려웠다 — 문구로 명시한다.
@@ -1324,31 +1506,62 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
           ] else ...[
             const SizedBox(height: 10),
             // 방장이 아닌 참가자 화면도 위로 쌓지 않고 가로 한 줄로 나열한다.
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
-                    style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
-                if (me != null) ...[
-                  const SizedBox(width: 4),
+            // 데스크탑(웹)은 방장 화면과 같이 세 구간을 균등한 너비(flex 1)로 나누고,
+            // 모바일은 폭이 좁아 준비 버튼을 내용 크기로 줄여 카테고리 문구가 안 가려지게 한다.
+            if (context.isDesktop)
+              Row(
+                children: [
                   Expanded(
-                    flex: 2,
-                    child: AppButton(
+                    child: Text(
+                      '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+                      style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Center(
+                      child: Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                    ),
+                  ),
+                  if (me != null) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: AppButton(
+                        label: me.isReady ? '준비완료 ✓' : '준비하기',
+                        variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
+                        dense: true,
+                        onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
+                      ),
+                    ),
+                  ],
+                ],
+              )
+            else
+              Row(
+                // 카테고리는 왼쪽 끝, 준비 버튼은 오른쪽 끝에 붙이고 봇 수는 그 사이 남는
+                // 공간에 고르게 배분한다 — 예전엔 버튼이 오른쪽 끝까지 안 닿고 빈 여백이
+                // 남아있었다.
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 중...")}',
+                      style: PixelFont.body(fontSize: 13, color: AppColors.foreground, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text('🤖$botCount', style: PixelFont.title(fontSize: 16, color: AppColors.foreground)),
+                  if (me != null)
+                    AppButton(
                       label: me.isReady ? '준비완료 ✓' : '준비하기',
                       variant: me.isReady ? AppButtonVariant.outlined : AppButtonVariant.primary,
                       dense: true,
+                      fullWidth: false,
                       onPressed: () => ref.read(roomProvider.notifier).setReady(!me.isReady),
                     ),
-                  ),
                 ],
-              ],
-            ),
+              ),
           ],
         ],
       ),
@@ -1370,6 +1583,8 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
+          // 모바일은 상단바에 타이머가 항상 보이지만(_headerTimer), 데스크탑(웹)은 화면이
+          // 넓어 패널이 늘 붙어있으므로 여기 패널 안에 타이머를 함께 보여준다.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1377,14 +1592,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 child: Text(statusText,
                     style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
               ),
-              if (s.phaseDeadline != null) ...[
+              if (context.isDesktop && s.phaseDeadline != null) ...[
                 const SizedBox(width: 6),
-                const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
-                const SizedBox(width: 4),
-                CountdownText(
-                  deadline: s.phaseDeadline!,
-                  style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
-                ),
+                _headerTimer(s),
               ],
             ],
           ),
@@ -1404,7 +1614,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
-              if (s.phaseDeadline != null) _discussionTimerRow(s),
+              if (context.isDesktop && s.phaseDeadline != null) _headerTimer(s),
             ],
           ),
         ],
@@ -1516,12 +1726,31 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
       child: Row(
         children: [
           Expanded(
-            child: AppTextField(
-              controller: _chatController,
-              focusNode: _chatFocusNode,
-              hintText: hint,
-              enabled: canChat,
-              onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+            // 유령 포커스 상태(_refocusChat 참고)에서는 입력창을 탭해도 이미 hasFocus라
+            // 포커스 변화가 없어 스스로 복구되지 않는다 — 탭(pointer down)이 TextField의
+            // 포커스 처리보다 먼저 오는 이 지점에서 포커스를 미리 풀어, 어떤 경로로 입력이
+            // 죽었든 입력창을 한 번 탭하면 새 포커스 연결로 반드시 살아나게 한다.
+            child: Listener(
+              onPointerDown: (_) {
+                if (kIsWeb && _chatFocusNode.hasFocus) _chatFocusNode.unfocus();
+              },
+              // 남의 설명 턴 동안의 입력 차단은 enabled가 아니라 readOnly로 한다.
+              // enabled:false는 포커스된 입력창을 서버 이벤트(턴 시작)로 비활성화할 때
+              // 강제 unfocus를 유발하는데, 웹에서는 이 경로가 브라우저 input 연결을 영구히
+              // 끊어 재활성화 후 입력창을 탭해도(hasFocus는 true가 되지만 DOM 포커스가
+              // 복원되지 않아) 새로고침 전까지 타이핑이 안 먹는다 — 헤드리스 크롬 재현으로
+              // 확인. readOnly는 포커스를 건드리지 않아 이 문제가 없고, 차단이 풀리면
+              // 입력이 즉시 살아난다.
+              child: Opacity(
+                opacity: canChat ? 1 : 0.5,
+                child: AppTextField(
+                  controller: _chatController,
+                  focusNode: _chatFocusNode,
+                  hintText: hint,
+                  readOnly: !canChat,
+                  onSubmitted: canChat ? (_) => _sendChatOrDescription(s) : null,
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -1581,6 +1810,11 @@ class _PlayerProfileCard extends StatelessWidget {
   final String? statusText;
   final Color? statusColor;
 
+  /// 소켓 연결이 끊겨 재접속 유예 시간(room:playerListUpdated의 connected:false) 중인지.
+  /// true면 아바타를 흐리게 하고 "재접속 대기"로 상태 텍스트를 덮어써, 다른 참가자들이
+  /// 실시간으로(즉, 유예 시간 만료로 실제 퇴장 처리되기 전부터) 알아챌 수 있게 한다.
+  final bool disconnected;
+
   const _PlayerProfileCard({
     required this.avatar,
     required this.nickname,
@@ -1588,35 +1822,41 @@ class _PlayerProfileCard extends StatelessWidget {
     required this.isCurrentTurn,
     required this.statusText,
     this.statusColor,
+    this.disconnected = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return PixelBox(
-      width: 50,
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
-      color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
-      border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
-      shadowOffset: null,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          avatar,
-          const SizedBox(height: 2),
-          Text(
-            isMe ? '나' : nickname,
-            style: PixelFont.body(fontSize: 9, color: AppColors.foreground, height: 1.0),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
-          if (statusText != null)
+    final effectiveStatusText = disconnected ? '재접속중' : statusText;
+    final effectiveStatusColor = disconnected ? AppColors.destructive : statusColor;
+    return Opacity(
+      opacity: disconnected ? 0.45 : 1,
+      child: PixelBox(
+        width: 50,
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 3),
+        color: isCurrentTurn ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card,
+        border: Border.all(color: isCurrentTurn ? AppColors.primary : AppColors.border, width: isCurrentTurn ? 2 : 1.5),
+        shadowOffset: null,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            avatar,
+            const SizedBox(height: 2),
             Text(
-              statusText!,
-              style: PixelFont.body(fontSize: 8, height: 1.0, color: statusColor ?? AppColors.mutedForeground),
+              isMe ? '나' : nickname,
+              style: PixelFont.body(fontSize: 9, color: AppColors.foreground, height: 1.0),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
-        ],
+            if (effectiveStatusText != null)
+              Text(
+                effectiveStatusText,
+                style: PixelFont.body(fontSize: 8, height: 1.0, color: effectiveStatusColor ?? AppColors.mutedForeground),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+          ],
+        ),
       ),
     );
   }

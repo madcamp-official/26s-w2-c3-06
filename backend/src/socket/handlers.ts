@@ -22,6 +22,13 @@ export function registerSocketHandlers(io: Server, socket: Socket): void {
     io.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
   }
 
+  // 프론트는 로그인 복원(Firebase 토큰 확보 등)이 끝난 뒤에야 connect()를 호출하는 경우가 있어,
+  // 로비 화면의 room:listPublic 요청이 소켓이 아직 연결되기 전에 나가 버려 유실될 수 있다
+  // (emit 자체는 버퍼링되지만, 그 emit을 보내는 프론트 코드가 소켓 인스턴스 생성 전에 먼저
+  // 실행되는 경우가 문제). 클라이언트 요청과 무관하게 연결 시점에 서버가 먼저 한 번 현재
+  // 공개방 목록을 밀어줘서, 로비 진입 타이밍에 상관없이 항상 최신 목록을 받도록 한다.
+  socket.emit('room:publicList', { rooms: roomManager.listPublicRooms() });
+
   // ── 방(Room) ──
 
   socket.on(

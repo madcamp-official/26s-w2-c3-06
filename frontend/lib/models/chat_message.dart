@@ -1,12 +1,10 @@
-/// 채팅 메시지의 종류. PLAN.md 계약(type: 'chat'|'turnDescription'|'aiComment'|'system')과 맞춘다.
-enum ChatMessageType { chat, turnDescription, aiComment, system }
+/// 채팅 메시지의 종류. PLAN.md 계약(type: 'chat'|'turnDescription'|'system')과 맞춘다.
+enum ChatMessageType { chat, turnDescription, system }
 
 ChatMessageType _chatTypeFromString(String raw) {
   switch (raw) {
     case 'turnDescription':
       return ChatMessageType.turnDescription;
-    case 'aiComment':
-      return ChatMessageType.aiComment;
     case 'system':
       return ChatMessageType.system;
     case 'chat':
