@@ -43,14 +43,32 @@ const provider = resolveProvider();
 
 // 프롬프트 문구·JSON 파싱·거절 감지 등 나머지 로직은 provider와 무관하게 전부 동일하게
 // 재사용한다 — 여기서 실제 API 호출 부분만 provider별로 분기한다.
+// search=true면 실제 웹 검색을 강제한다(제시어 생성·단어 설명의 정식 기능 — 선택이 아니라
+// 항상 켜져 있다). OpenAI는 gpt-5.4 계열이 Chat Completions에 web_search_options를 얹는
+// 방식 자체를 지원하지 않아(400 Unknown parameter), Responses API + tools:[{type:"web_search"}]로
+// 엔드포인트/요청·응답 모양을 통째로 바꿔 호출한다. Anthropic은 web_search 툴을 그대로 얹는다.
 async function completeText(
   prompt: string,
   maxTokens: number,
   system?: string,
   openaiModelOverride?: string,
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high',
+  search = false,
 ): Promise<string> {
   if (provider === 'openai') {
+    if (search) {
+      // 검색 시 추론+검색 왕복으로 토큰 소모가 커서 너무 작으면 답을 못 내고 끊긴다.
+      const res = await getOpenAI().responses.create({
+        model: openaiModelOverride ?? OPENAI_MODEL,
+        max_output_tokens: Math.max(maxTokens, 8192),
+        tools: [{ type: 'web_search' }],
+        input: [
+          ...(system ? [{ role: 'system' as const, content: system }] : []),
+          { role: 'user' as const, content: prompt },
+        ],
+      } as any);
+      return String((res as any).output_text ?? '').trim();
+    }
     const res = await getOpenAI().chat.completions.create({
       model: openaiModelOverride ?? OPENAI_MODEL,
       // gpt-5.4 계열부터 max_tokens가 아니라 max_completion_tokens를 요구한다(400 에러).
@@ -68,8 +86,9 @@ async function completeText(
 
   const res = await getAnthropic().messages.create({
     model: ANTHROPIC_MODEL,
-    max_tokens: maxTokens,
+    max_tokens: search ? Math.max(maxTokens, 1024) : maxTokens, // 검색 응답은 툴콜 왕복이 있어 여유 필요
     ...(system ? { system } : {}),
+    ...(search ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }] as any } : {}),
     messages: [{ role: 'user', content: prompt }],
   });
   return res.content
@@ -150,7 +169,16 @@ const realLLM: LiarGameLLM = {
     }
 
     // 카테고리와 동일한 이유로 제시어 쌍도 후보 3개를 받아 서버가 무작위로 하나를 고른다.
-    const raw = await completeText(wordPairCandidatesPrompt(resolvedCategory, usedWords), 400);
+    // 실존·친숙도 검증을 실제 웹 검색으로 강제한다(prompts.ts의 검증 지침과 짝) — 검색 모드는
+    // 검증 과정을 텍스트로 길게 풀어쓰는 경향이 있어 여유 있게 토큰을 잡는다.
+    const raw = await completeText(
+      wordPairCandidatesPrompt(resolvedCategory, usedWords),
+      2500,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
     const parsed = parseJsonBlock<{ pairs: { citizenWord: string; liarWord: string }[] }>(raw, 'wordPair');
     const pairs = (parsed.pairs ?? []).filter((p) => p?.citizenWord && p?.liarWord);
     if (!pairs.length) throw new Error('wordPair: 빈 응답');
@@ -171,7 +199,15 @@ const realLLM: LiarGameLLM = {
   },
 
   async explainWord(word, category) {
-    const raw = await completeText(explainWordPrompt(word, category), 200, undefined, OPENAI_EXPLAIN_MODEL);
+    // 사실관계 확인을 실제 웹 검색으로 강제한다(prompts.ts의 검증 지침과 짝).
+    const raw = await completeText(
+      explainWordPrompt(word, category),
+      200,
+      undefined,
+      OPENAI_EXPLAIN_MODEL,
+      undefined,
+      true,
+    );
     return raw.trim().length > 0 ? raw.trim() : null;
   },
 
