@@ -38,7 +38,7 @@ export const mockLLM: LiarGameLLM = {
     return `(mock) "${category}" 카테고리의 "${word}"에 대한 짧은 설명입니다.`;
   },
 
-  async judgeLiarGuess(guess: string, realWord: string) {
+  async judgeLiarGuess(guess: string, realWord: string, _category: string) {
     return guess.trim().toLowerCase() === realWord.trim().toLowerCase();
   },
 };

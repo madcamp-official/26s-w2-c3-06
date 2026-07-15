@@ -184,11 +184,14 @@ export function explainWordPrompt(word: string, category: string): string {
 }
 
 // 라이어의 역전승 답안과 진짜 제시어가 의미상 같은지 판정. 오타·맞춤법·한글/영어 표기 차이는 정답으로 인정.
-export function judgeLiarGuessPrompt(guess: string, realWord: string): string {
+// 같은 단어라도 카테고리에 따라 다른 대상을 가리키므로(동음이의어) category 맥락으로 해석한다.
+export function judgeLiarGuessPrompt(guess: string, realWord: string, category: string): string {
   return [
+    `카테고리: "${category}"`,
     `진짜 제시어: "${realWord}"`,
     `라이어가 제출한 답: "${guess}"`,
-    '두 표현이 의미상 같은 대상을 가리키는지 판단하라.',
+    `위 "${category}" 카테고리의 맥락에서, 두 표현이 같은 대상을 가리키는지 판단하라.`,
+    '같은 단어라도 카테고리에 따라 다른 대상을 뜻할 수 있으니(예: "밤"이 "음식"이면 먹는 밤, "시간대"면 야간), 반드시 이 카테고리 맥락으로 해석하라.',
     '오타, 맞춤법 오류, 한글/영어 표기 차이(예: "burger"와 "버거")는 정답으로 인정한다.',
     '정답이면 "true", 아니면 "false"만 출력하라. 다른 말은 절대 출력하지 마라.',
   ].join('\n');

@@ -578,7 +578,7 @@ export async function submitLiarGuess(
 
   let correct: boolean;
   try {
-    correct = await llm.judgeLiarGuess(guess, game.realWord);
+    correct = await llm.judgeLiarGuess(guess, game.realWord, game.category);
   } catch (err) {
     // LLM 판정이 API 오류 등으로 실패한 경우에만 도는 폴백. 퍼지 매칭은 제거했으므로,
     // 오타 관용 없는 보수적 기준(정규화 후 완전 일치)으로만 정답을 인정한다.

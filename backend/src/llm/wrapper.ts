@@ -23,7 +23,7 @@ export interface LiarGameLLM {
   generateBotTurn(ctx: BotTurnContext): Promise<string>;
   generateTurnComment(ctx: TurnCommentContext): Promise<string>;
   explainWord(word: string, category: string): Promise<string | null>; // 카테고리 맥락으로 해석해 설명 텍스트 생성(생성 실패 시에만 null)
-  judgeLiarGuess(guess: string, realWord: string): Promise<boolean>; // 역전승 정답 유사판정
+  judgeLiarGuess(guess: string, realWord: string, category: string): Promise<boolean>; // 역전승 정답 판정(카테고리 맥락)
 }
 
 // 실제 호출할 provider. .env의 LLM_PROVIDER로 명시 지정(anthropic|openai) — 나중에 다시
@@ -165,10 +165,10 @@ const realLLM: LiarGameLLM = {
     return raw.trim().length > 0 ? raw.trim() : null;
   },
 
-  async judgeLiarGuess(guess, realWord) {
-    // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·맞춤법·한글/영어 표기 차이 허용 여부까지
-    // 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
-    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord), 8);
+  async judgeLiarGuess(guess, realWord, category) {
+    // 정답 판정은 전적으로 LLM에게 맡긴다 — 오타·표기 차이 허용과 동음이의어의 카테고리 맥락
+    // 해석까지 프롬프트(judgeLiarGuessPrompt)의 지침대로 모델이 판단한다.
+    const raw = await completeText(judgeLiarGuessPrompt(guess, realWord, category), 8);
     return raw.trim().toLowerCase().startsWith('true');
   },
 };
