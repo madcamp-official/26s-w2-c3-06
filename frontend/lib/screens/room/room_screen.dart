@@ -1459,7 +1459,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final describingMyTurn = s.phase == GamePhase.describing && s.isMyTurn(_myUid);
     // 설명 페이즈에서는 지금 차례인 사람만 입력할 수 있다 — 다른 참가자가 자유 채팅으로
     // 끼어들면 설명이 채팅에 묻히거나 눈치를 주는 용도로 악용될 수 있어서 막는다.
-    final describingNotMyTurn = s.phase == GamePhase.describing && !s.isMyTurn(_myUid);
+    // 단, currentTurnPlayerId가 비어있는 동안(설명 제출 직후~다음 턴 시작 전, AI 코멘트
+    // 생성 대기 중 — room_provider.submitDescription 참고)은 "차례인 사람"이 아무도 없으므로
+    // 막을 이유가 없다. 이 조건이 없으면 그 잠깐 사이 전원의 채팅이 막히고, 힌트 문구도
+    // "님이 설명 중..."처럼 이름이 빠진 채로 떠서 "가끔 입력이 안 된다"는 문제로 보였다.
+    final describingNotMyTurn =
+        s.phase == GamePhase.describing && s.currentTurnPlayerId != null && !s.isMyTurn(_myUid);
     final canChat = !describingNotMyTurn;
     final hint = describingMyTurn
         ? '제시어 설명 입력...'
