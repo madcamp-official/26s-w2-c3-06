@@ -104,7 +104,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     late final OverlayEntry entry;
     entry = OverlayEntry(
       builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + 12,
+        top: MediaQuery.of(context).padding.top + 90,
         left: 0,
         right: 0,
         child: Center(
