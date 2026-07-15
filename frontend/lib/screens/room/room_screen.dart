@@ -61,6 +61,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   int _lastChatLen = 0;
   bool _hostDraftSeeded = false;
 
+  // 메시지 입력창 위 페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를 채팅을 더 넓게 보고
+  // 싶을 때 직접 접었다 펼 수 있게 하는 토글 상태(_contextPanelToggle 참고).
+  bool _contextPanelCollapsed = false;
+
   // AI 응답을 기다리는 동안(게임 시작·라이어 역전승 판정) 버튼이 눌렸고 처리 중임을
   // 명확히 보여주기 위한 로딩 플래그. 서버가 다음 페이즈로 넘기거나 room:error를
   // 보내면 리셋한다(phase/roomError 리스너 참고).
@@ -293,7 +297,9 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   physics: const NeverScrollableScrollPhysics(),
                   mainAxisSpacing: 8,
                   crossAxisSpacing: 8,
-                  childAspectRatio: 2.6,
+                  // 2.6이던 값은 화면 폭이 좁은 실기기에서 셀 높이가 아바타+닉네임보다 작아져
+                  // "bottom overflowed" 나던 원인이었다 — 셀을 더 세로로 넉넉하게 준다.
+                  childAspectRatio: 1.8,
                   children: candidates.map((p) {
                     final selected = draft == p.id;
                     return HoverTap(
@@ -306,12 +312,16 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                           children: [
                             UserAvatar(
                               avatarIndex: _avatarIndexFor(p.id, s),
-                              radius: 16,
+                              radius: 14,
                               imageUrl: p.isBot ? null : _avatarUrlFor(p.id),
                               isBot: p.isBot,
                             ),
                             const SizedBox(height: 4),
-                            Text(p.nickname, style: PixelFont.body(fontSize: 11, color: AppColors.foreground)),
+                            Text(
+                              p.nickname,
+                              style: PixelFont.body(fontSize: 11, color: AppColors.foreground),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ],
                         ),
                       ),
@@ -803,12 +813,24 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final isDesktop = context.isDesktop;
     // 데스크탑에서는 나가기/초대 버튼이 헤더가 아니라 좌측 내비게이션 바로 이동한다
     // (frontend 브랜치의 데스크탑 레이아웃 참고, lobby_screen과 동일한 패턴).
+    // 모바일에서 키보드가 실제로 열려있는 동안(MediaQuery.viewInsets.bottom > 0), 화면에서
+    // 세로 공간을 크게 잡아먹는 참가자 아바타 줄·페이즈 컨텍스트 박스(카테고리/타이머/투표 등)를
+    // 접어 채팅 목록이 키보드에 가려지지 않고 그대로 보이게 한다. 고정 요소 합이 화면 높이를
+    // 넘겨 "bottom overflowed" 나던 문제도 이걸로 해결된다.
+    // TextField 포커스 여부(_chatFocusNode.hasFocus) 대신 실제 키보드 인셋을 기준으로 삼는데,
+    // 안드로이드에서 뒤로가기/제스처로 키보드만 내리면 포커스는 그대로 남아있어(hasFocus는
+    // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final hideForKeyboard = !isDesktop && keyboardOpen;
+    // 키보드와 무관하게, 채팅을 더 넓게 보고 싶을 때 직접 접었다 펼 수 있는 토글도 둔다.
+    final showContextPanel = !hideForKeyboard && !_contextPanelCollapsed;
     final body = Column(
       children: [
         _header(s, isHost, showActions: !isDesktop),
-        _playerProfileRow(s, isHost),
+        if (!hideForKeyboard) _playerProfileRow(s, isHost),
         Expanded(child: _chatFeed(s)),
-        _contextPanel(s, isHost),
+        if (!hideForKeyboard) _contextPanelToggle(showContextPanel),
+        if (showContextPanel) _contextPanel(s, isHost),
         _inputBar(s),
       ],
     );
@@ -882,6 +904,18 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 ),
                 if (s.phase == GamePhase.discussion && s.phaseDeadline != null)
                   _discussionTimerRow(s)
+                else if (s.phase == GamePhase.describing && s.phaseDeadline != null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined, size: 15, color: AppColors.mutedForeground),
+                      const SizedBox(width: 4),
+                      CountdownText(
+                        deadline: s.phaseDeadline!,
+                        style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                      ),
+                    ],
+                  )
                 else
                   Text(
                     '코드 ${s.roomCode ?? '----'} · ${_currentHeadcount(s)}/${s.maxPlayers ?? '-'}명',
@@ -1051,14 +1085,18 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   /// highlight(게임 시작/종료 강조)도 서버 계약엔 없어, 시스템 메시지 문구로 여기서 판별한다.
   ChatMessage _displayMessage(ChatMessage m, RoomViewState s) {
     final nickname = m.isAi ? 'AI' : (m.isSystem ? '시스템' : s.nicknameOf(m.senderId));
-    final isGameStartOrEnd = m.isSystem &&
-        (m.text.startsWith('새 게임이 시작되었습니다') || m.text.startsWith('---- 게임이 종료되었습니다'));
+    final isGameStart = m.isSystem && m.text.startsWith('새 게임이 시작되었습니다');
+    final isGameStartOrEnd = isGameStart || (m.isSystem && m.text.startsWith('---- 게임이 종료되었습니다'));
+    // 서버 브로드캐스트 문구엔 카테고리가 붙어있지만("... 카테고리: 음식"), 실제로는 사람마다
+    // 배정된 제시어가 다르므로(진짜/가짜) 여기서 카테고리 언급은 지우고 내가 받은 제시어로
+    // 클라이언트에서 개인화해 보여준다.
+    final text = isGameStart ? '새 게임이 시작되었습니다! 제시어: ${s.myWord ?? "..."}' : m.text;
     return ChatMessage(
       id: m.id,
       senderId: m.senderId,
       senderNickname: nickname,
       avatarIndex: _avatarIndexFor(m.senderId, s),
-      text: m.text,
+      text: text,
       type: m.type,
       highlight: isGameStartOrEnd,
       timestamp: m.timestamp,
@@ -1069,6 +1107,27 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     final pool = s.participants.isNotEmpty ? s.participants : s.players;
     final idx = pool.indexWhere((p) => p.id == id);
     return idx == -1 ? 0 : idx;
+  }
+
+  /// 채팅 목록을 더 넓게 보고 싶을 때 카테고리/타이머/투표 등 컨텍스트 박스를 직접
+  /// 접었다 펼 수 있는 얇은 토글 바. [expanded]는 박스가 지금 펼쳐져 보이는 상태인지.
+  Widget _contextPanelToggle(bool expanded) {
+    // 패널 상하 여백(_panelBox의 margin)과 리듬이 맞도록 좌우 10 + 상하 4로 통일 —
+    // 접힌 상태에서도(패널이 안 보여도) 입력창과의 간격이 펼친 상태와 일정하게 유지된다.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+      child: HoverTap(
+        onTap: () => setState(() => _contextPanelCollapsed = !_contextPanelCollapsed),
+        child: SizedBox(
+          width: double.infinity,
+          child: Text(
+            expanded ? '▼ 설정 닫기' : '▲ 설정 열기',
+            textAlign: TextAlign.center,
+            style: PixelFont.body(fontSize: 12, color: AppColors.mutedForeground),
+          ),
+        ),
+      ),
+    );
   }
 
   // ── 페이즈별 하단 컨텍스트 패널 ──
@@ -1137,11 +1196,12 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               Text('참가자(사람+봇)가 최소 $_minParticipants명 이상이어야 해요.',
                   style: PixelFont.body(fontSize: 11, color: AppColors.mutedForeground)),
             const SizedBox(height: 6),
-            // 카테고리 선택 - AI 봇 수 조절 - 게임 시작을 한 줄에 가로로 나열한다.
+            // 카테고리 선택 + AI 봇 수 조절을 한 줄에, 게임 시작은 아래 별도 줄에 둔다 —
+            // 예전엔 이 다섯 요소를 한 줄에 다 욱여넣었는데, 화면 폭이 좁은 실기기에서
+            // Row가 가로로 넘쳐(overflow) 봇 수 +/- 버튼이 아예 안 보이는 문제가 있었다.
             Row(
               children: [
                 Expanded(
-                  flex: 2,
                   child: AppButton(
                     label: '카테고리: ${aiRandom ? "AI 랜덤" : (selectedChip ?? "선택 안 함")}',
                     variant: AppButtonVariant.outlined,
@@ -1169,17 +1229,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   },
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  flex: 2,
-                  child: AppButton(
-                    label: '시작 ▶',
-                    dense: true,
-                    loading: _startingGame,
-                    onPressed: canStart && !_startingGame ? _startGame : null,
-                  ),
-                ),
               ],
+            ),
+            const SizedBox(height: 6),
+            AppButton(
+              label: '시작 ▶',
+              dense: true,
+              loading: _startingGame,
+              onPressed: canStart && !_startingGame ? _startGame : null,
             ),
           ] else ...[
             const SizedBox(height: 10),
@@ -1217,27 +1274,23 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
 
   Widget _describingPanel(RoomViewState s, bool isHost) {
     final myTurn = s.isMyTurn(_myUid);
-    final turnNick = s.currentTurnPlayerId == null ? '' : s.nicknameOf(s.currentTurnPlayerId!);
+    // 설명 제출 직후~다음 턴 시작 전(AI 코멘트 생성 대기 중)에는 currentTurnPlayerId가
+    // 잠깐 비어있다(room_provider.submitDescription 참고) — 다음 턴 안내 문구를 보여준다.
+    final waitingNextTurn = s.currentTurnPlayerId == null;
+    final turnNick = waitingNextTurn ? '' : s.nicknameOf(s.currentTurnPlayerId!);
+    final statusText = waitingNextTurn
+        ? 'AI 코멘트 생성 중... 곧 다음 턴이 시작돼요'
+        : (myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...');
     return _panelBox(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
-                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
-              ),
-              if (s.phaseDeadline != null)
-                CountdownText(
-                  deadline: s.phaseDeadline!,
-                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
-                ),
-            ],
-          ),
+          // 타이머는 상단바로 옮겼다(_header 참고) — 설명 턴 타이머는 조절 버튼이 없으니
+          // 토론 타이머와 달리 카운트다운 숫자만 상단바에 그대로 보여준다.
+          Text(statusText,
+              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
         ],
       ),
     );

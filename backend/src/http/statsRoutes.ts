@@ -5,6 +5,7 @@ import {
   getUserProfile,
   getUserStats,
   isNicknameAvailable,
+  sanitizeNickname,
   updateAvatarUrl,
   upsertUser,
 } from '../db/userRepo';
@@ -18,7 +19,8 @@ export const statsRouter = Router();
 // 하기 전) 유일하게 인증 없이 여는 엔드포인트다 — 닉네임 사용 여부(boolean)만 노출해
 // 민감정보 유출은 없다.
 statsRouter.get('/nickname-availability/:nickname', async (req, res) => {
-  const nickname = (req.params.nickname as string).trim();
+  // 불가시 문자를 제거·정규화한 값으로 판정 — 그것만으로 이뤄진 닉네임은 빈 값으로 취급해 거부.
+  const nickname = sanitizeNickname(req.params.nickname as string);
   if (!nickname) {
     res.status(400).json({ error: 'nickname이 필요합니다.' });
     return;
@@ -40,18 +42,18 @@ statsRouter.get('/me', requireAuth, async (req: AuthedRequest, res) => {
 // 동작하도록 로컬 User 행을 즉시 생성/갱신한다.
 statsRouter.put('/me', requireAuth, async (req: AuthedRequest, res) => {
   const { nickname } = req.body as { nickname?: string };
-  const trimmed = nickname?.trim();
-  if (!trimmed) {
+  const clean = sanitizeNickname(nickname ?? '');
+  if (!clean) {
     res.status(400).json({ error: 'nickname이 필요합니다.' });
     return;
   }
-  const available = await isNicknameAvailable(trimmed, req.uid!);
+  const available = await isNicknameAvailable(clean, req.uid!);
   if (!available) {
     res.status(409).json({ error: '이미 사용 중인 닉네임입니다.' });
     return;
   }
   try {
-    await upsertUser({ uid: req.uid!, nickname: trimmed, isAnonymous: req.isAnonymous ?? true });
+    await upsertUser({ uid: req.uid!, nickname: clean, isAnonymous: req.isAnonymous ?? true });
   } catch (err) {
     // 동시 요청 등으로 사전 체크 이후 유일성 제약에 걸린 경우(P2002)의 방어적 처리.
     if ((err as { code?: string }).code === 'P2002') {
