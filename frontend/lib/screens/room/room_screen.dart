@@ -418,6 +418,7 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                       child: AppButton(
                         label: '투표 확인',
                         accentColor: AppColors.destructive,
+                        textColorOverride: AppColors.foreground,
                         onPressed: draft == null ? null : () => Navigator.of(dialogContext).pop(draft),
                       ),
                     ),

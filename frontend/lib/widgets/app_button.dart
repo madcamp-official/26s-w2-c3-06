@@ -26,6 +26,10 @@ class AppButton extends StatelessWidget {
   /// 테두리·글자색에 함께 적용되고 배경은 그대로 outlined 스타일(secondary)을 유지한다.
   final Color? accentColor;
 
+  /// 글자색만 따로 강제 지정하고 싶을 때(예: 배경/테두리는 accentColor를 쓰되 글자는
+  /// 다른 버튼과 맞추고 싶은 경우). 지정하면 accentColor보다 우선한다.
+  final Color? textColorOverride;
+
   const AppButton({
     super.key,
     required this.label,
@@ -36,6 +40,7 @@ class AppButton extends StatelessWidget {
     this.dense = false,
     this.loading = false,
     this.accentColor,
+    this.textColorOverride,
   });
 
   @override
@@ -43,7 +48,7 @@ class AppButton extends StatelessWidget {
     final isPrimary = variant == AppButtonVariant.primary;
     final backgroundColor = isPrimary ? AppColors.primary : AppColors.secondary;
     final borderColor = accentColor ?? (isPrimary ? AppColors.primaryBorder : AppColors.border);
-    final textColor = accentColor ?? (isPrimary ? AppColors.primaryForeground : AppColors.foreground);
+    final textColor = textColorOverride ?? accentColor ?? (isPrimary ? AppColors.primaryForeground : AppColors.foreground);
     final enabled = onPressed != null && !loading;
 
     final textStyle = PixelFont.body(
