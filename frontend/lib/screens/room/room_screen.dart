@@ -999,10 +999,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 // 대기/종료 중엔 방 코드·인원을, 게임 진행 중(설명~역전승)엔 카테고리를 보여준다.
+                // 흐린 회색 subtext로는 눈에 잘 안 띈다는 피드백이 있어 강조색+굵게로 표시한다.
                 if (s.category != null && s.phase != GamePhase.waiting && s.phase != GamePhase.ended)
                   Text(
                     '카테고리: ${s.category}',
-                    style: PixelFont.body(fontSize: 13, color: AppColors.mutedForeground, height: 1.1),
+                    style: PixelFont.title(fontSize: 14, color: AppColors.primary, height: 1.1),
                     overflow: TextOverflow.ellipsis,
                   )
                 else
@@ -1014,9 +1015,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
               ],
             ),
           ),
-          // 타이머는 패널이 접히거나 키보드에 가려도 항상 보여야 해서 상단바 오른쪽에 크게
-          // 고정 표시한다(설정 패널 안에 있으면 접혔을 때 아예 안 보이던 문제가 있었다).
-          if (s.phaseDeadline != null) ...[
+          // 모바일에선 패널이 접히거나 키보드에 가려도 타이머가 항상 보여야 해서 상단바
+          // 오른쪽에 크게 고정 표시한다. 데스크탑(웹)은 화면이 넓어 패널이 항상 붙어있으므로
+          // 기존처럼 채팅 입력창 위 패널에 표시한다(_describingPanel/_discussionPanel 참고).
+          if (!context.isDesktop && s.phaseDeadline != null) ...[
             const SizedBox(width: 8),
             _headerTimer(s),
           ],
@@ -1443,9 +1445,21 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머는 접히거나 키보드에 가려도 항상 보여야 해서 상단바로 옮겼다(_headerTimer 참고).
-          Text(statusText,
-              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+          // 모바일은 상단바에 타이머가 항상 보이지만(_headerTimer), 데스크탑(웹)은 화면이
+          // 넓어 패널이 늘 붙어있으므로 여기 패널 안에 타이머를 함께 보여준다.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(statusText,
+                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
+              ),
+              if (context.isDesktop && s.phaseDeadline != null) ...[
+                const SizedBox(width: 6),
+                _headerTimer(s),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -1458,8 +1472,13 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          // 타이머·조절 버튼은 상단바로 옮겼다(_headerTimer 참고).
-          Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('자유 토론 중', style: PixelFont.body(fontSize: 12, color: AppColors.foreground)),
+              if (context.isDesktop && s.phaseDeadline != null) _headerTimer(s),
+            ],
+          ),
         ],
       ),
     );
