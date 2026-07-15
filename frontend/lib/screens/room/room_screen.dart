@@ -904,6 +904,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
                 ),
                 if (s.phase == GamePhase.discussion && s.phaseDeadline != null)
                   _discussionTimerRow(s)
+                else if (s.phase == GamePhase.describing && s.phaseDeadline != null)
+                  CountdownText(
+                    deadline: s.phaseDeadline!,
+                    style: PixelFont.title(fontSize: 13, color: AppColors.foreground),
+                  )
                 else
                   Text(
                     '코드 ${s.roomCode ?? '----'} · ${_currentHeadcount(s)}/${s.maxPlayers ?? '-'}명',
@@ -1269,20 +1274,10 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _myWordCard(s),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
-                    style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
-              ),
-              if (s.phaseDeadline != null)
-                CountdownText(
-                  deadline: s.phaseDeadline!,
-                  style: PixelFont.title(fontSize: 12, color: AppColors.foreground),
-                ),
-            ],
-          ),
+          // 타이머는 상단바로 옮겼다(_header 참고) — 설명 턴 타이머는 조절 버튼이 없으니
+          // 토론 타이머와 달리 카운트다운 숫자만 상단바에 그대로 보여준다.
+          Text(myTurn ? '내 차례! 제시어를 설명하세요' : '$turnNick님이 설명 중...',
+              style: PixelFont.body(fontSize: 12, color: myTurn ? AppColors.primary : AppColors.foreground)),
         ],
       ),
     );
