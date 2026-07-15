@@ -2,21 +2,36 @@ import { prisma } from './client';
 
 // PLAN "DB 스키마" 참고. Firebase uid를 PK로 사용.
 
+// 닉네임 정규화 — 저장·조회 모든 경로에서 통일해서 쓴다.
+// 유니코드 정규화(NFC)로 한글 조합/분해형 차이를 없애고, 소프트하이픈(U+00AD)·제로폭 문자 등
+// 눈에 보이지 않는 서식 문자를 제거한 뒤 앞뒤 공백을 잘라낸다. 구글 계정 이름 등 외부에서 가져온
+// displayName에 이런 불가시 문자가 섞이면 화면엔 같아 보이는 닉네임이 nickname @unique를 우회해
+// 중복 저장되던 문제(예: "김혜리" vs U+00AD가 붙은 "김혜리")를 막는다.
+// 닉네임에서 제거할 보이지 않는 서식 문자들(리터럴로 두면 유지보수 불가라 코드포인트로 명시):
+// U+00AD 소프트하이픈, U+200B~200D 제로폭(공백/비접합/접합), U+2060 워드조이너, U+FEFF BOM/ZWNBSP.
+const INVISIBLE_CODEPOINTS = [0x00ad, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff];
+export function sanitizeNickname(name: string): string {
+  let s = (name ?? "").normalize("NFC");
+  for (const cp of INVISIBLE_CODEPOINTS) s = s.split(String.fromCharCode(cp)).join("");
+  return s.trim();
+}
+
 export async function upsertUser(opts: {
   uid: string;
   nickname: string;
   isAnonymous: boolean;
 }) {
+  const nickname = sanitizeNickname(opts.nickname);
   return prisma.user.upsert({
     where: { uid: opts.uid },
     update: {
-      nickname: opts.nickname,
+      nickname,
       isAnonymous: opts.isAnonymous,
       lastActive: new Date(),
     },
     create: {
       uid: opts.uid,
-      nickname: opts.nickname,
+      nickname,
       isAnonymous: opts.isAnonymous,
     },
   });
@@ -37,7 +52,7 @@ export async function ensureUserExists(opts: {
     update: { lastActive: new Date() },
     create: {
       uid: opts.uid,
-      nickname: opts.nickname,
+      nickname: sanitizeNickname(opts.nickname),
       isAnonymous: opts.isAnonymous,
     },
   });
@@ -72,21 +87,32 @@ export async function updateAvatarUrl(
   await prisma.user.upsert({
     where: { uid },
     update: { avatarUrl },
-    create: { uid, avatarUrl, isAnonymous, nickname: fallbackNickname ?? `guest-${uid.slice(0, 8)}` },
+    create: {
+      uid,
+      avatarUrl,
+      isAnonymous,
+      nickname: fallbackNickname ? sanitizeNickname(fallbackNickname) : `guest-${uid.slice(0, 8)}`,
+    },
   });
 }
 
 // 닉네임 중복 확인. 회원가입 폼의 "중복 확인" 버튼과, DB @unique 제약의 사전 체크용.
 // excludeUid를 주면 "본인 소유 닉네임"은 사용 가능으로 취급(프로필 수정 시 재사용 대비).
 export async function isNicknameAvailable(nickname: string, excludeUid?: string): Promise<boolean> {
-  const existing = await prisma.user.findUnique({ where: { nickname }, select: { uid: true } });
+  const existing = await prisma.user.findUnique({
+    where: { nickname: sanitizeNickname(nickname) },
+    select: { uid: true },
+  });
   if (!existing) return true;
   return existing.uid === excludeUid;
 }
 
 // 닉네임으로 uid 조회 — 친구 요청을 닉네임으로 보낼 때 대상 uid 해석에 쓴다. 없으면 null.
 export async function findUidByNickname(nickname: string): Promise<string | null> {
-  const user = await prisma.user.findUnique({ where: { nickname }, select: { uid: true } });
+  const user = await prisma.user.findUnique({
+    where: { nickname: sanitizeNickname(nickname) },
+    select: { uid: true },
+  });
   return user?.uid ?? null;
 }
 
