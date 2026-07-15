@@ -26,6 +26,7 @@ class SocketService {
   final _roomClosedCtrl = StreamController<void>.broadcast();
   final _roomInvitedCtrl = StreamController<RoomInvite>.broadcast();
   final _chatMessageCtrl = StreamController<ChatMessage>.broadcast();
+  final _chatTypingCtrl = StreamController<TypingUpdate>.broadcast();
   final _draftConfigUpdatedCtrl = StreamController<DraftConfig>.broadcast();
   final _customCategoriesUpdatedCtrl = StreamController<List<String>>.broadcast();
   final _gameStartedCtrl = StreamController<GameStarted>.broadcast();
@@ -52,6 +53,7 @@ class SocketService {
   Stream<void> get onRoomClosed => _roomClosedCtrl.stream;
   Stream<RoomInvite> get onRoomInvited => _roomInvitedCtrl.stream;
   Stream<ChatMessage> get onChatMessage => _chatMessageCtrl.stream;
+  Stream<TypingUpdate> get onChatTyping => _chatTypingCtrl.stream;
   Stream<DraftConfig> get onDraftConfigUpdated => _draftConfigUpdatedCtrl.stream;
   Stream<List<String>> get onCustomCategoriesUpdated => _customCategoriesUpdatedCtrl.stream;
   Stream<GameStarted> get onGameStarted => _gameStartedCtrl.stream;
@@ -119,6 +121,7 @@ class SocketService {
     socket.on('room:invited', (data) => _roomInvitedCtrl.add(RoomInvite.fromJson(_map(data))));
 
     socket.on('chat:message', (data) => _chatMessageCtrl.add(ChatMessage.fromJson(_map(data))));
+    socket.on('chat:typingUpdated', (data) => _chatTypingCtrl.add(TypingUpdate.fromJson(_map(data))));
     socket.on(
       'game:draftConfigUpdated',
       (data) => _draftConfigUpdatedCtrl.add(DraftConfig.fromJson(_map(data))),
@@ -206,6 +209,12 @@ class SocketService {
     _socket?.emit('chat:send', {'text': text});
   }
 
+  /// 채팅 입력 중 여부를 서버에 알린다(같은 방 다른 참가자에게 chat:typingUpdated로 중계됨).
+  /// 입력이 이어지는 동안 클라이언트가 주기적으로 true를 재전송한다(room_screen 참고).
+  void sendTyping(bool isTyping) {
+    _socket?.emit('chat:typing', {'isTyping': isTyping});
+  }
+
   /// 방장이 대기방에서 봇 수/카테고리를 바꿀 때마다 호출 — 다른 참가자 화면에 실시간
   /// 반영하기 위한 것으로, game:configure(실제 시작)와는 별개다.
   void updateDraftConfig({required String? category, required int aiBotCount}) {
@@ -249,6 +258,7 @@ class SocketService {
     _roomClosedCtrl.close();
     _roomInvitedCtrl.close();
     _chatMessageCtrl.close();
+    _chatTypingCtrl.close();
     _draftConfigUpdatedCtrl.close();
     _customCategoriesUpdatedCtrl.close();
     _gameStartedCtrl.close();
@@ -263,6 +273,22 @@ class SocketService {
     _gameEndedCtrl.close();
     _connectErrorCtrl.close();
     _disconnectedCtrl.close();
+  }
+}
+
+/// chat:typingUpdated 페이로드: `{ playerId, isTyping }`. 같은 방의 다른 참가자가 채팅
+/// 입력을 시작/중단했음을 알린다(본인에게는 오지 않음 — 서버가 socket.to로 제외).
+class TypingUpdate {
+  final String playerId;
+  final bool isTyping;
+
+  const TypingUpdate({required this.playerId, required this.isTyping});
+
+  factory TypingUpdate.fromJson(Map<String, dynamic> json) {
+    return TypingUpdate(
+      playerId: json['playerId'] as String,
+      isTyping: json['isTyping'] as bool? ?? false,
+    );
   }
 }
 
