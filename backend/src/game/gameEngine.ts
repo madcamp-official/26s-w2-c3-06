@@ -489,11 +489,13 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
 
   const deadline = discussionDeadlineByRoom.get(room.roomCode) ?? Date.now();
   const remainingSec = (deadline - Date.now()) / 1000;
+  const nickname = getParticipantNickname(room, uid);
 
   // 남은 시간이 10초 미만인데 단축을 누르면 어중간하게 몇 초 줄이는 대신 바로 투표로 넘긴다.
   if (deltaSec < 0 && remainingSec < 10) {
     const timer = phaseTimers.get(room.roomCode);
     if (timer) clearTimeout(timer);
+    broadcastChat(io, room, 'system', 'system', `${nickname}님이 토론 시간을 단축해 투표로 넘어갑니다.`);
     startVoting(io, room);
     return;
   }
@@ -508,6 +510,15 @@ export function adjustDiscussionTime(io: Server, room: RoomState, uid: string, d
     setTimeout(() => startVoting(io, room), nextRemainingSec * 1000),
   );
   io.to(room.roomCode).emit('discussion:started', { timeLimitSec: Math.round(nextRemainingSec) });
+  broadcastChat(
+    io,
+    room,
+    'system',
+    'system',
+    deltaSec > 0
+      ? `${nickname}님이 토론 시간을 ${deltaSec}초 연장했습니다.`
+      : `${nickname}님이 토론 시간을 ${-deltaSec}초 단축했습니다.`,
+  );
   emitDiscussionAdjustState(io, room, uid);
 }
 
