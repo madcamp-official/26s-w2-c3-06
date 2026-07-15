@@ -62,6 +62,11 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
   bool _aiRandom = false;
   bool _leaving = false;
   int _lastChatLen = 0;
+  // 키보드가 열리면서 화면(=스크롤 뷰포트)이 줄어들 때, 스크롤은 "맨 아래"라는 위치가
+  // 아니라 그 전 스크롤 오프셋(px)을 그대로 유지한다 — 뷰포트가 줄어든 만큼 이전엔 맨
+  // 아래였던 위치가 더 이상 맨 아래가 아니게 되어, 최신 메시지가 키보드에 가려 안 보이는
+  // 문제가 있었다. 키보드 열림 상태가 바뀔 때마다 다시 맨 아래로 스크롤해 해결한다.
+  bool _lastKeyboardOpen = false;
 
   // 내 "입력 중" 상태 전송 관리. 입력이 이어지는 동안 2초마다 chat:typing(true)을
   // 재전송하고(수신 측 5초 만료 타이머를 계속 연장시키는 하트비트 — room_provider 참고),
@@ -949,6 +954,14 @@ class _RoomScreenState extends ConsumerState<RoomScreen> {
     // 안드로이드에서 뒤로가기/제스처로 키보드만 내리면 포커스는 그대로 남아있어(hasFocus는
     // true 유지) 포커스 기반으로는 키보드를 내려도 박스가 다시 안 나타나는 문제가 있었다.
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    if (keyboardOpen != _lastKeyboardOpen) {
+      _lastKeyboardOpen = keyboardOpen;
+      _autoScroll();
+      // 키보드가 열리고 닫히는 애니메이션(약 300ms) 동안 뷰포트 높이가 매 프레임 계속
+      // 바뀌므로, 애니메이션이 막 시작된 시점에 한 번만 스크롤하면 최종 위치보다 덜
+      // 내려간 채로 끝난다 — 애니메이션이 끝날 즈음 한 번 더 맞춰준다.
+      Future.delayed(const Duration(milliseconds: 300), _autoScroll);
+    }
     final hideForKeyboard = !isDesktop && keyboardOpen;
     // 투표 중엔 확정 상태/버튼을 반드시 볼 수 있어야 하므로, 접힘·키보드에 의한 숨김을
     // 무시하고 항상 펼쳐 보여준다(접혀 있으면 확정했는지조차 확인할 방법이 없었다).
